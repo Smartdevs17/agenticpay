@@ -96,6 +96,37 @@ soroban contract deploy --wasm target/wasm32-unknown-unknown/release/agenticpay.
 | `OPENAI_API_KEY` | OpenAI API key for AI verification |
 | `STELLAR_SECRET_KEY` | Server-side Stellar signing key |
 
+## Contract Verification
+
+The AgenticPay smart contract source code is published for on-chain verification. To verify the deployed contract matches the source:
+
+### Build the contract from source
+
+```bash
+cd contracts
+cargo build --target wasm32-unknown-unknown --release
+```
+
+### Verify the WASM hash matches the deployed contract
+
+```bash
+# Get the on-chain WASM hash
+soroban contract inspect --id $NEXT_PUBLIC_CONTRACT_ID --network testnet
+
+# Compute the local WASM hash
+sha256sum target/wasm32-unknown-unknown/release/agenticpay.wasm
+```
+
+The SHA-256 hash of the locally compiled WASM should match the on-chain contract hash, confirming the deployed bytecode was produced from this source.
+
+### Verification status
+
+| Network | Contract ID | Status |
+|---------|-------------|--------|
+| Testnet | See `NEXT_PUBLIC_CONTRACT_ID` in `.env` | Source published |
+
+> **Note:** Deterministic builds require the same Rust toolchain version. See `contracts/Cargo.toml` for the SDK version and use `rust-toolchain.toml` if present.
+
 ## Network
 
 Currently configured for **Stellar Testnet**.
