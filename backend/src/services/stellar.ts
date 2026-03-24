@@ -8,6 +8,22 @@ const HORIZON_URL =
 
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
 
+export function isValidStellarAddress(address: string) {
+  if (!address?.trim()) {
+    return false;
+  }
+
+  return StellarSdk.StrKey.isValidEd25519PublicKey(address);
+}
+
+export function isValidTransactionHash(hash: string) {
+  if (!hash?.trim()) {
+    return false;
+  }
+
+  return /^[A-Fa-f0-9]{64}$/.test(hash);
+}
+
 export async function getAccountInfo(address: string) {
   const account = await server.loadAccount(address);
   return {

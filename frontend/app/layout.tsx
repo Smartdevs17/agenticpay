@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import PWAWrapper from "@/components/PWAWrapper";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,6 +17,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "AgenticPay - Get Paid Instantly for Your Work",
   description: "Secure, fast, and transparent payments for freelancers powered by blockchain technology.",
+  // manifest: "/manifest.webmanifest",
   keywords: ["freelancer", "payments", "blockchain", "crypto", "web3", "escrow", "milestones"],
   authors: [{ name: "AgenticPay" }],
   openGraph: {
@@ -40,7 +42,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <PWAWrapper />
+        </Providers>
       </body>
     </html>
   );

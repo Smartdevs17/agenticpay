@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { generateInvoice } from '../services/invoice.js';
+import { idempotency } from '../middleware/idempotency.js';
 
 export const invoiceRouter = Router();
 
 // AI-powered invoice generation
-invoiceRouter.post('/generate', async (req, res) => {
+invoiceRouter.post('/generate', idempotency(), async (req, res) => {
   try {
     const { projectId, workDescription, hoursWorked, hourlyRate } = req.body;
 
