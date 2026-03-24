@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,11 +16,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ArrowLeft, Plus, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
+import { RichTextEditor } from '@/components/editor/rich-text-editor';
 
 const projectSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -43,9 +44,9 @@ export default function CreateProjectPage() {
 
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors },
-    watch,
     setValue,
   } = useForm<ProjectFormData>({
     resolver: zodResolver(projectSchema),
@@ -55,7 +56,10 @@ export default function CreateProjectPage() {
     },
   });
 
-  const currency = watch('currency');
+  const currency = useWatch({
+  control,
+  name: 'currency',
+});
 
   useEffect(() => {
     if (isConfirmed) {
@@ -67,7 +71,14 @@ export default function CreateProjectPage() {
   useEffect(() => {
     if (error) {
       console.error(error);
-      toast.error('Transaction failed: ' + (error as any).shortMessage || error.message);
+      const errorMessage =
+  typeof error === 'object' && error !== null && 'shortMessage' in error
+    ? String((error as { shortMessage?: string }).shortMessage ?? 'Transaction failed')
+    : error instanceof Error
+      ? error.message
+      : 'Transaction failed';
+
+toast.error(`Transaction failed: ${errorMessage}`);
     }
   }, [error]);
 
@@ -137,13 +148,18 @@ export default function CreateProjectPage() {
                 )}
               </div>
 
-              <div>
+              <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
-                <Input
-                  id="description"
-                  {...register('description')}
-                  placeholder="Brief description of work"
+                <Controller
+                  control={control}
+                  name="description"
+                  render={({ field }) => (
+                    <RichTextEditor value={field.value || ''} onChange={field.onChange} />
+                  )}
                 />
+                {errors.description && (
+                  <p className="text-sm text-red-600 mt-1">{errors.description.message}</p>
+                )}
               </div>
 
               <div>
@@ -174,7 +190,10 @@ export default function CreateProjectPage() {
                 </div>
                 <div>
                   <Label htmlFor="currency">Currency</Label>
-                  <Select onValueChange={(val) => setValue('currency', val)} defaultValue="ETH">
+                  <Select
+  onValueChange={(val) => setValue('currency', val, { shouldValidate: true })}
+  defaultValue="ETH"
+>
                     <SelectTrigger>
                       <SelectValue placeholder="Select Currency" />
                     </SelectTrigger>
