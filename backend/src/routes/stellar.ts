@@ -2,15 +2,18 @@ import { Router } from 'express';
 import {
   getAccountInfo,
   getTransactionStatus,
-  validateStellarAddress,
-  validateTransactionHash,
-  ValidationError,
+  isValidStellarAddress,
+  isValidTransactionHash,
 } from '../services/stellar.js';
 
 export const stellarRouter = Router();
 
 // Get Stellar account info
 stellarRouter.get('/account/:address', async (req, res) => {
+  if (!isValidStellarAddress(req.params.address)) {
+    return res.status(400).json({ message: 'Invalid Stellar address' });
+  }
+
   try {
     validateStellarAddress(req.params.address);
     const account = await getAccountInfo(req.params.address);
@@ -27,6 +30,10 @@ stellarRouter.get('/account/:address', async (req, res) => {
 
 // Get transaction status
 stellarRouter.get('/tx/:hash', async (req, res) => {
+  if (!isValidTransactionHash(req.params.hash)) {
+    return res.status(400).json({ message: 'Invalid transaction hash' });
+  }
+
   try {
     validateTransactionHash(req.params.hash);
     const tx = await getTransactionStatus(req.params.hash);

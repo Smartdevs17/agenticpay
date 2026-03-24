@@ -137,19 +137,9 @@
   background-size: 40px 40px;
 }
 
-/* Smooth dark/light mode transition */
-html {
-  transition:
-    background-color 700ms ease,
-    color 700ms ease;
-}
-
-*,
-*::before,
-*::after {
-  transition-property: background-color, border-color, color, box-shadow;
-  transition-duration: 700ms;
-  transition-timing-function: ease;
+.print-break-inside-avoid {
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 /* Reduce motion for accessibility */
@@ -160,5 +150,31 @@ html {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+    size: auto;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .invoice-print-page {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .invoice-print-card {
+    border: none !important;
+    box-shadow: none !important;
   }
 }
