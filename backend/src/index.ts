@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
+import { httpLogger, logger } from './middleware/logger.js';
 import { verificationRouter } from './routes/verification.js';
 import { invoiceRouter } from './routes/invoice.js';
 import { stellarRouter } from './routes/stellar.js';
@@ -39,6 +41,11 @@ console.error = (...args) => originalConsole.error(...formatMessage(args));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// ---------------------------------------------------------------------------
+// Logging – must be first so every request (incl. rejections) is captured
+// ---------------------------------------------------------------------------
+app.use(httpLogger);
+
 app.use(cors());
 app.use(express.json());
 
@@ -63,6 +70,12 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', service: 'agenticpay-backend' });
 });
 
+// Apply general limiter to all API routes
+app.use('/api/', generalLimiter);
+
+// Apply stricter limiter specifically to invoice routes
+app.use('/api/v1/invoice', invoiceLimiter);
+
 // API routes
 app.use('/api/v1/verification', verificationRouter);
 app.use('/api/v1/invoice', invoiceRouter);
@@ -76,7 +89,7 @@ if (jobsEnabled) {
 }
 
 app.listen(PORT, () => {
-  console.log(`AgenticPay backend running on port ${PORT}`);
+  logger.info({ port: PORT }, 'AgenticPay backend running');
 });
 
 export default app;
