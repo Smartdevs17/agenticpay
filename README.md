@@ -39,8 +39,15 @@ Rust-based smart contracts deployed on **Stellar Testnet** via Soroban. Features
 Express.js API server providing:
 
 - **AI Work Verification** — Validates freelancer deliverables against project requirements using AI
+- **Bulk Verification Operations** — Batch verify, update, and delete verification records
 - **AI Invoice Generation** — Automated invoice creation for completed work
 - **Stellar Horizon Integration** — On-chain payment status and transaction lookups
+
+### Bulk Verification Endpoints
+
+- `POST /api/v1/verification/verify/batch`
+- `PATCH /api/v1/verification/batch`
+- `DELETE /api/v1/verification/batch`
 
 ## Features
 
