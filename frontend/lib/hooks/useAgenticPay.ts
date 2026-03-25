@@ -62,18 +62,6 @@ export const useAgenticPay = () => {
         });
     };
 
-    const releasePayment = async (projectId: string) => {
-        // releasePayment seems to be internal or managed by `approveWork` in some flows, 
-        // check ABI. ABI has `approveWork` and `PaymentReleased` event.
-        // `approveWork` releases payment.
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'approveWork',
-            args: [BigInt(projectId)],
-        });
-    }
-
     // -- Data Fetching Hooks --
 
     const useUserProjects = () => {
@@ -110,12 +98,12 @@ export const useAgenticPay = () => {
         });
 
         const formattedProjects: Project[] = projectsData
-            ? projectsData.map((result: any) => {
+            ? projectsData.map((result: { status: string; result: unknown }) => {
                 if (result.status === 'success' && result.result) {
-                    return formatProjectData(result.result);
+                    return formatProjectData(result.result as RawProjectData);
                 }
                 return null;
-            }).filter((p: any) => p !== null) as Project[]
+            }).filter((p): p is Project => p !== null)
             : [];
 
         return { projects: formattedProjects, loading: loadingClient || loadingFreelancer || loadingDetails };
@@ -150,7 +138,22 @@ export const useAgenticPay = () => {
     };
 };
 
-const formatProjectData = (data: any): Project => {
+interface RawProjectData {
+    projectId: bigint;
+    client: string;
+    freelancer: string;
+    amount: bigint;
+    depositedAmount: bigint;
+    paymentType: bigint;
+    status: bigint;
+    githubRepo: string;
+    workDescription: string;
+    deadline: bigint;
+    createdAt: bigint;
+    invoiceUri: string;
+}
+
+const formatProjectData = (data: RawProjectData): Project => {
     // data is the struct from contract
     // struct Project { projectId, client, freelancer, amount, depositedAmount, paymentType, tokenAddress, status, githubRepo, workDescription, ... }
 
@@ -161,11 +164,11 @@ const formatProjectData = (data: any): Project => {
         const parsed = JSON.parse(data.workDescription);
         if (parsed.title) title = parsed.title;
         if (parsed.description) description = parsed.description;
-    } catch (e) {
+    } catch {
         // ignore, use raw
     }
 
-    const mapStatus = (statusIdx: number) => {
+    const mapStatus = (statusIdx: number): Project['status'] => {
         // Enum: 0: Created, 1: Funded, 2: Started, 3: Submitted, 4: Completed, 5: Disputed, 6: Cancelled
         // 'active' | 'completed' | 'cancelled'
         if (statusIdx === 7) return 'verified'; // Assumed Verified based on debug info
@@ -199,7 +202,7 @@ const formatProjectData = (data: any): Project => {
         title: title,
         client: { name: 'Client', address: data.client },
         freelancer: { name: 'Freelancer', address: data.freelancer },
-        status: mapStatus(Number(data.status)) as any,
+        status: mapStatus(Number(data.status)),
         totalAmount: formatEther(data.amount),
         rawAmount: data.amount, // Pass raw amount
         currency: Number(data.paymentType) === 0 ? 'ETH' : 'ERC20', // Simplified

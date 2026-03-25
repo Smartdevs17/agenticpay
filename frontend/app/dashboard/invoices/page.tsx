@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useDashboardData, DashboardInvoice } from '@/lib/hooks/useDashboardData';
+import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, Clock, AlertCircle, Filter, FileText } from 'lucide-react';

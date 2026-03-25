@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ArrowLeft, Plus, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
@@ -55,6 +55,7 @@ export default function CreateProjectPage() {
     },
   });
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const currency = watch('currency');
 
   useEffect(() => {
@@ -67,7 +68,7 @@ export default function CreateProjectPage() {
   useEffect(() => {
     if (error) {
       console.error(error);
-      toast.error('Transaction failed: ' + (error as any).shortMessage || error.message);
+      toast.error('Transaction failed: ' + (error as { shortMessage?: string }).shortMessage || error.message);
     }
   }, [error]);
 

@@ -25,6 +25,7 @@ export function SocialLogin() {
       setLoading(true);
 
       await web3auth.initModal();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const web3authProvider = await web3auth.connectTo(WALLET_ADAPTERS.AUTH as any, {
         loginProvider,
       });

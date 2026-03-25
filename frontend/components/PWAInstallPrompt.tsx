@@ -4,8 +4,13 @@ import { useEffect, useState } from "react";
 
 const STORAGE_KEY = "pwa-install-dismissed";
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 export default function PWAInstallPrompt() {
-  const [promptEvent, setPromptEvent] = useState<any>(null);
+  const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -15,9 +20,10 @@ export default function PWAInstallPrompt() {
     // Don't show if already installed
     if (window.matchMedia("(display-mode: standalone)").matches) return;
 
-    const handler = (e: any) => {
-      e.preventDefault();
-      setPromptEvent(e);
+    const handler = (e: Event) => {
+      const promptE = e as BeforeInstallPromptEvent;
+      promptE.preventDefault();
+      setPromptEvent(promptE);
       setVisible(true);
     };
 
