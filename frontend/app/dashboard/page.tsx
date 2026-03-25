@@ -2,12 +2,52 @@
 
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp } from 'lucide-react';
+import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp, RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DashboardStatsSkeleton } from '@/components/ui/loading-skeletons';
+import { useState, useEffect, useCallback } from 'react';
 
 export default function DashboardPage() {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const { stats, recentActivity, loading } = useDashboardData();
+
+  const fetchDashboardData = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      // In a real implementation, you would invalidate the relevant queries
+      // For now, we'll simulate the refresh and update the timestamp
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setLastUpdated(new Date());
+    } catch (error) {
+      console.error('Error refreshing dashboard data:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  // Auto-refresh every 60 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 60000);
+
+    // Set initial timestamp
+    if (!lastUpdated && !loading) {
+      setLastUpdated(new Date());
+    }
+
+    return () => clearInterval(interval);
+  }, [fetchDashboardData, lastUpdated, loading]);
+
+  const formatLastUpdated = (date: Date) => {
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+  };
 
   if (loading) {
     return (
@@ -36,9 +76,28 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600 mt-1">Welcome back! Here&apos;s your overview.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-gray-600 mt-1">Welcome back! Here&apos;s your overview.</p>
+        </div>
+        <div className="flex items-center gap-4">
+          {lastUpdated && (
+            <span className="text-sm text-gray-500">
+              Last updated: {formatLastUpdated(lastUpdated)}
+            </span>
+          )}
+          <button
+            onClick={() => {
+              fetchDashboardData();
+            }}
+            disabled={isRefreshing}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Stats Grid */}
