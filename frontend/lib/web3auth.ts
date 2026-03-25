@@ -1,4 +1,4 @@
-import { Web3Auth } from "@web3auth/modal";
+import { Web3Auth, type IWeb3AuthModal } from "@web3auth/modal";
 import { CHAIN_NAMESPACES } from "@web3auth/base";
 import { EthereumPrivateKeyProvider } from "@web3auth/ethereum-provider";
 
@@ -26,7 +26,7 @@ if (!clientId) {
 }
 
 // Only initialize Web3Auth if client ID is provided
-export const web3auth = clientId
+export const web3auth: IWeb3AuthModal | null = clientId
   ? new Web3Auth({
       clientId,
       web3AuthNetwork: "testnet",
@@ -42,4 +42,3 @@ export const web3auth = clientId
       },
     })
   : null;
-
