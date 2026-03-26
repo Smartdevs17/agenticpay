@@ -14,9 +14,12 @@ export function WalletConnect() {
   const router = useRouter();
   const setAuth = useAuthStore((state) => state.setAuth);
 
-  // Prevent hydration mismatch errors in Next.js
+ // Prevent hydration mismatch errors in Next.js
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const timer = setTimeout(() => setMounted(true), 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Preserve the original auth & redirect logic!
   useEffect(() => {
