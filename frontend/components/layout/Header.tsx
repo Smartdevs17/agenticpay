@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { useDisconnect } from 'wagmi';
 import { web3auth } from '@/lib/web3auth';
 import { CopyButton } from '@/components/ui/CopyButton';
+import { NotificationSettings } from '@/components/notifications/NotificationSettings';
 
 export function Header() {
   const { name, email, address, logout } = useAuthStore();
@@ -73,7 +74,7 @@ export function Header() {
                 </div>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-64">
               <DropdownMenuLabel>
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium">{name || 'User'}</p>
@@ -93,6 +94,8 @@ export function Header() {
                 <Settings className="mr-2 h-4 w-4" />
                 Settings
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <NotificationSettings />
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} className="text-red-600">
                 <LogOut className="mr-2 h-4 w-4" />
