@@ -1,5 +1,5 @@
 'use client';
-
+import { CopyButton } from '@/components/ui/CopyButton';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent } from '@/components/ui/card';
 import { CheckCircle2, Clock, XCircle, ExternalLink, Wallet } from 'lucide-react';
@@ -87,12 +87,13 @@ export default function PaymentsPage() {
                   </div>
                 </div>
                 {payment.transactionHash && (
-                  <div className="mt-4 pt-4 border-t">
-                    <p className="text-xs text-gray-500 font-mono break-all">
-                      {payment.transactionHash}
-                    </p>
-                  </div>
-                )}
+  <div className="mt-4 pt-4 border-t flex items-center gap-2">
+    <p className="text-xs text-gray-500 font-mono break-all flex-1">
+      {payment.transactionHash}
+    </p>
+    <CopyButton text={payment.transactionHash} />
+  </div>
+)}
               </CardContent>
             </Card>
           </motion.div>

@@ -14,9 +14,9 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Bell, LogOut, User, Settings } from 'lucide-react';
 import { toast } from 'sonner';
-
 import { useDisconnect } from 'wagmi';
 import { web3auth } from '@/lib/web3auth';
+import { CopyButton } from '@/components/ui/CopyButton';
 
 export function Header() {
   const { name, email, address, logout } = useAuthStore();
@@ -78,7 +78,10 @@ export function Header() {
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium">{name || 'User'}</p>
                   <p className="text-xs text-gray-500">{email || 'No email'}</p>
-                  <p className="text-xs text-gray-400 font-mono">{shortAddress}</p>
+                  <div className="flex items-center gap-1">
+                    <p className="text-xs text-gray-400 font-mono">{shortAddress}</p>
+                    {address && <CopyButton text={address} />}
+                  </div>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
@@ -102,4 +105,3 @@ export function Header() {
     </header>
   );
 }
-

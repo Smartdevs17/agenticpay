@@ -15,12 +15,12 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
-      address: null,
-      email: undefined,
-      name: undefined,
-      profileImage: undefined,
-      loginType: null,
-      isAuthenticated: false,
+    address: null,
+email: undefined,
+name: undefined,
+profileImage: undefined,
+loginType: null,
+isAuthenticated: false,
 
       setAuth: (data) =>
         set({
