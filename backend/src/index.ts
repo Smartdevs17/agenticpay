@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import rateLimit from 'express-rate-limit';
 import { verificationRouter } from './routes/verification.js';
 import { invoiceRouter } from './routes/invoice.js';
 import { stellarRouter } from './routes/stellar.js';
@@ -12,6 +11,7 @@ import { jobsRouter } from './routes/jobs.js';
 import { healthRouter } from './routes/health.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { generalLimiter, invoiceLimiter } from './middleware/rateLimit.js';
 
 dotenv.config();
 
@@ -47,20 +47,6 @@ const PORT = process.env.PORT || 3001;
 const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
   : '*';
-
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-const invoiceLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
 
 app.use(
   cors({
