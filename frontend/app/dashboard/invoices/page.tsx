@@ -1,23 +1,63 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Clock, AlertCircle, Filter, FileText, Loader2 } from 'lucide-react';
+import { CheckCircle2, Clock, AlertCircle, Filter, FileText, Loader2, ChevronUp, ChevronDown, ChevronUpDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { InvoiceCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { sortList } from '@/lib/utils/sort';
+
+type InvoiceSortField = 'generatedAt' | 'amount' | 'status';
+type SortOrder = 'asc' | 'desc';
 
 export default function InvoicesPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { invoices, loading } = useDashboardData();
   const [filter, setFilter] = useState<'all' | 'paid' | 'pending' | 'overdue'>('all');
+
+  // Initialize sort state from URL params or defaults
+  const [sortBy, setSortBy] = useState<InvoiceSortField>('generatedAt');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+
+  // Sync URL with sort state
+  const updateSort = (field: InvoiceSortField) => {
+    if (field === sortBy) {
+      // Toggle order if same field
+      const newOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+      setSortOrder(newOrder);
+      updateURL(field, newOrder);
+    } else {
+      // New field, default to desc
+      setSortBy(field);
+      setSortOrder('desc');
+      updateURL(field, 'desc');
+    }
+  };
+
+  const updateURL = (field: InvoiceSortField, order: SortOrder) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('sortBy', field);
+    params.set('sortOrder', order);
+    params.set('filter', filter);
+    router.replace(`${window.location.pathname}?${params.toString()}`);
+  };
 
   const filteredInvoices =
     filter === 'all'
       ? invoices
       : invoices.filter((inv) => inv.status === filter);
+
+  // Sort filtered invoices
+  const sortedInvoices = useMemo(
+    () => sortList(filteredInvoices, sortBy, sortOrder),
+    [filteredInvoices, sortBy, sortOrder]
+  );
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -72,26 +112,78 @@ export default function InvoicesPage() {
         <p className="text-gray-600 mt-1">View and manage your invoices</p>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-2">
-        <Filter className="h-4 w-4 text-gray-500" />
-        <div className="flex gap-2">
-          {(['all', 'paid', 'pending', 'overdue'] as const).map((status) => (
-            <Button
-              key={status}
-              variant={filter === status ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilter(status)}
-              className="capitalize"
-            >
-              {status}
-            </Button>
-          ))}
+      {/* Filters and Sort */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-gray-500" />
+          <div className="flex gap-2">
+            {(['all', 'paid', 'pending', 'overdue'] as const).map((status) => (
+              <Button
+                key={status}
+                variant={filter === status ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilter(status)}
+                className="capitalize"
+              >
+                {status}
+              </Button>
+            ))}
+          </div>
+        </div>
+        
+        {/* Sort Controls */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-500">Sort by:</span>
+          <button
+            onClick={() => updateSort('generatedAt')}
+            className={`flex items-center gap-1 px-3 py-1 text-sm rounded-md transition-colors ${
+              sortBy === 'generatedAt'
+                ? 'bg-blue-100 text-blue-700 font-medium'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            Date
+            {sortBy === 'generatedAt' ? (
+              sortOrder === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronUpDown className="h-4 w-4" />
+            )}
+          </button>
+          <button
+            onClick={() => updateSort('amount')}
+            className={`flex items-center gap-1 px-3 py-1 text-sm rounded-md transition-colors ${
+              sortBy === 'amount'
+                ? 'bg-blue-100 text-blue-700 font-medium'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            Amount
+            {sortBy === 'amount' ? (
+              sortOrder === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronUpDown className="h-4 w-4" />
+            )}
+          </button>
+          <button
+            onClick={() => updateSort('status')}
+            className={`flex items-center gap-1 px-3 py-1 text-sm rounded-md transition-colors ${
+              sortBy === 'status'
+                ? 'bg-blue-100 text-blue-700 font-medium'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            Status
+            {sortBy === 'status' ? (
+              sortOrder === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronUpDown className="h-4 w-4" />
+            )}
+          </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        {filteredInvoices.map((invoice, index) => (
+        {sortedInvoices.map((invoice, index) => (
           <motion.div
             key={invoice.id}
             initial={{ opacity: 0, y: 20 }}
@@ -132,7 +224,7 @@ export default function InvoicesPage() {
         ))}
       </div>
 
-      {filteredInvoices.length === 0 && (
+      {sortedInvoices.length === 0 && (
         <Card>
           <CardContent>
             <EmptyState
