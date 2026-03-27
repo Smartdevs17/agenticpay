@@ -17,8 +17,8 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Bell, LogOut, User, Settings, Sun, Moon, Clock, CloudOff, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
+import { LanguageSwitcher } from '@/components/language/LanguageSwitcher';
 import { useEffect, useState } from 'react';
-// 1. I added useNetwork to the existing wagmi import
 import { useDisconnect, useAccount } from 'wagmi';
 import { web3auth } from '@/lib/web3auth';
 import {
@@ -119,7 +119,6 @@ export function Header() {
     : 'Not connected';
 
   return (
-    <>
       <header className="sticky top-0 z-30 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700/60 transition-colors duration-700">
         <div className="flex h-16 items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-4">
@@ -193,8 +192,7 @@ export function Header() {
               <Clock className="h-5 w-5" />
             </Button>
 
-            {/* User menu */}
-            <DropdownMenu>
+          <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center gap-3 h-auto py-2 px-3">
                   <Avatar className="h-8 w-8">
@@ -233,8 +231,7 @@ export function Header() {
                   Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          </DropdownMenu>
         </div>
       </div>
 
