@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Plus, ExternalLink, Clock, Folder, Loader2 } from 'lucide-react';
+import { Plus, ExternalLink, Clock, Folder } from 'lucide-react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { ProjectCardSkeleton } from '@/components/ui/loading-skeletons';
@@ -44,7 +43,7 @@ export default function ProjectsPage() {
         <h2 className="text-2xl font-bold">Please connect your wallet</h2>
         <p className="text-gray-500">Connect your wallet to view your projects.</p>
       </div>
-    )
+    );
   }
 
   const getStatusColor = (status: string) => {
@@ -75,83 +74,7 @@ export default function ProjectsPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {projects.map((project, index) => {
-          // Since contract uses 1 dummy milestone for status in our helper, we use that.
-          const completedMilestones = project.milestones.filter(
-            (m) => m.status === 'completed'
-          ).length;
-          const totalMilestones = project.milestones.length;
-          const progressPercentage =
-            totalMilestones > 0
-              ? (completedMilestones / totalMilestones) * 100
-              : 0;
-
-          return (
-            <motion.div
-              key={project.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-            >
-              <Card className="hover:shadow-lg transition-all duration-200 border border-gray-200">
-                <CardHeader>
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <CardTitle className="text-xl mb-2">{project.title}</CardTitle>
-                      <p className="text-sm text-gray-600">Client: {project.client.address.slice(0, 6)}...{project.client.address.slice(-4)}</p>
-                    </div>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(
-                        project.status
-                      )}`}
-                    >
-                      {project.status}
-                    </span>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Total Value</span>
-                      <span className="font-semibold text-gray-900">
-                        {project.totalAmount} {project.currency}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs text-gray-500">
-                        <span>Status</span>
-                        <span>{project.milestones[0]?.status.replace('_', ' ')}</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div
-                          className="bg-gradient-to-r from-blue-600 to-purple-600 h-2 rounded-full transition-all"
-                          style={{ width: `${progressPercentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <Clock className="h-3 w-3" />
-                    <span>Created {new Date(project.createdAt).toLocaleDateString()}</span>
-                  </div>
-
-                  <Link href={`/dashboard/projects/${project.id}`}>
-                    <Button variant="outline" className="w-full">
-                      View Details
-                      <ExternalLink className="h-4 w-4 ml-2" />
-                    </Button>
-                  </Link>
-                </CardContent>
-              </Card>
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {projects.length === 0 && (
+      {projects.length === 0 ? (
         <Card>
           <CardContent>
             <EmptyState
@@ -165,8 +88,85 @@ export default function ProjectsPage() {
             />
           </CardContent>
         </Card>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {projects.map((project, index) => {
+            const completedMilestones = project.milestones.filter(
+              (m) => m.status === 'completed'
+            ).length;
+            const totalMilestones = project.milestones.length;
+            const progressPercentage =
+              totalMilestones > 0
+                ? (completedMilestones / totalMilestones) * 100
+                : 0;
+
+            return (
+              <motion.div
+                key={project.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+              >
+                <Card className="hover:shadow-lg transition-all duration-200 border border-gray-200">
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <CardTitle className="text-xl mb-2">{project.title}</CardTitle>
+                        <p className="text-sm text-gray-600">
+                          Client: {project.client.address.slice(0, 6)}...
+                          {project.client.address.slice(-4)}
+                        </p>
+                      </div>
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(
+                          project.status
+                        )}`}
+                      >
+                        {project.status}
+                      </span>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Total Value</span>
+                        <span className="font-semibold text-gray-900">
+                          {project.totalAmount} {project.currency}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>Status</span>
+                          <span>{project.milestones[0]?.status.replace('_', ' ')}</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className="bg-gradient-to-r from-blue-600 to-purple-600 h-2 rounded-full transition-all"
+                            style={{ width: `${progressPercentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <Clock className="h-3 w-3" />
+                      <span>Created {new Date(project.createdAt).toLocaleDateString()}</span>
+                    </div>
+
+                    <Link href={`/dashboard/projects/${project.id}`}>
+                      <Button variant="outline" className="w-full">
+                        View Details
+                        <ExternalLink className="h-4 w-4 ml-2" />
+                      </Button>
+                    </Link>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
 }
-
