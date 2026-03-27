@@ -14,12 +14,15 @@ import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { PageBreadcrumb } from '@/components/layout/PageBreadcrumb';
+import { OfflineActionQueuedError } from '@/lib/offline';
+import { formatDateInTimeZone } from '@/lib/utils';
+import { useAuthStore } from '@/store/useAuthStore';
 
 export default function ProjectDetailPage() {
   const params = useParams();
   const projectId = params.id as string;
   const { address } = useAccount();
+  const timezone = useAuthStore((state) => state.timezone);
 
   const { useProjectDetail, fundProject, submitWork, approveWork, isPending, isConfirming, isConfirmed, error, arbitrator } = useAgenticPay();
   const { project, loading, refetch } = useProjectDetail(projectId);
@@ -141,7 +144,7 @@ export default function ProjectDetailPage() {
             <div>
               <p className="text-sm text-gray-600">Created</p>
               <p className="text-lg font-medium">
-                {new Date(project.createdAt).toLocaleDateString()}
+                {formatDateInTimeZone(project.createdAt, timezone)}
               </p>
             </div>
           </div>
@@ -213,13 +216,21 @@ export default function ProjectDetailPage() {
                           toast.success("Invoice Generated");
                           refetch();
                         } catch (invError) {
-                          toast.error("Invoice error: " + (invError as Error).message);
+                          if (invError instanceof OfflineActionQueuedError) {
+                            toast.info(invError.message);
+                          } else {
+                            toast.error("Invoice error: " + (invError as Error).message);
+                          }
                         }
                       } else {
                         toast.error("Verification failed: " + verification.summary);
                       }
                     } catch (e) {
-                      toast.error((e as Error).message);
+                      if (e instanceof OfflineActionQueuedError) {
+                        toast.info(e.message);
+                      } else {
+                        toast.error((e as Error).message);
+                      }
                     }
                   }}>
                     Request AI Verification
@@ -240,6 +251,9 @@ export default function ProjectDetailPage() {
               <div className="flex gap-2">
                 <Button onClick={async () => {
                   try {
+                    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+                      throw new Error('You are offline. Reconnect before submitting an on-chain transaction.');
+                    }
                     if (!repoLink) throw new Error("No repo link");
                     toast.info('Submitting work to blockchain...');
                     await submitWork(project.id, repoLink);
@@ -290,7 +304,7 @@ export default function ProjectDetailPage() {
                     </p>
                     {milestone.dueDate && (
                       <p className="text-xs text-gray-500">
-                        Due: {new Date(milestone.dueDate).toLocaleDateString()}
+                        Due: {formatDateInTimeZone(milestone.dueDate, timezone)}
                       </p>
                     )}
                   </div>
