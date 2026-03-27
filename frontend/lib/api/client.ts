@@ -1,5 +1,12 @@
 // frontend/lib/api/client.ts
 
+import {
+  OfflineActionQueuedError,
+  isLikelyOfflineError,
+  queueOfflineAction,
+  shouldQueueRequest,
+} from '@/lib/offline';
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_BACKEND_URL ||
@@ -46,11 +53,13 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Type guard for detecting ApiError in UI
- */
+/** Type guard for UI handling */
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
+}
+
+export function resolveApiUrl(endpoint: string) {
+  return `${API_BASE_URL}${endpoint}`;
 }
 
 /* =====================================================
@@ -58,7 +67,6 @@ export function isApiError(error: unknown): error is ApiError {
 ===================================================== */
 
 function shouldRetryStatus(status: number): boolean {
-  // Retry server errors + rate limiting
   return status >= 500 || status === 429;
 }
 
@@ -67,7 +75,6 @@ function shouldRetryError(error: unknown): boolean {
     return shouldRetryStatus(error.status);
   }
 
-  // Abort should NOT retry
   if (
     (error instanceof Error && error.name === 'AbortError') ||
     (typeof error === 'object' &&
@@ -78,7 +85,6 @@ function shouldRetryError(error: unknown): boolean {
     return false;
   }
 
-  // Network errors → retry
   return true;
 }
 
@@ -86,14 +92,11 @@ function calculateDelay(attempt: number, config: RetryConfig): number {
   const exponentialDelay = config.baseDelay * Math.pow(2, attempt);
   const delay = Math.min(exponentialDelay, config.maxDelay);
 
-  return config.jitter
-    ? delay * (0.5 + Math.random())
-    : delay;
+  return config.jitter ? delay * (0.5 + Math.random()) : delay;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const delay = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 /* =====================================================
    Error Normalization
@@ -131,9 +134,7 @@ function normalizeError(error: unknown): Error {
 async function parseResponseBody(response: Response): Promise<unknown> {
   const contentType = response.headers.get('content-type') || '';
 
-  if (response.status === 204) {
-    return null;
-  }
+  if (response.status === 204) return null;
 
   if (contentType.includes('application/json')) {
     return response.json();
@@ -152,7 +153,6 @@ function getErrorMessage(
   statusText: string,
   data: unknown
 ): string {
-  // Backend-provided message
   if (
     data &&
     typeof data === 'object' &&
@@ -162,7 +162,6 @@ function getErrorMessage(
     return (data as any).message;
   }
 
-  // Friendly fallbacks
   switch (status) {
     case 400:
       return 'Invalid request. Please check your input.';
@@ -182,7 +181,7 @@ function getErrorMessage(
 }
 
 /* =====================================================
-   Main API Call Function
+   Main API Call
 ===================================================== */
 
 export async function apiCall<T = unknown>(
@@ -193,9 +192,26 @@ export async function apiCall<T = unknown>(
   const config = { ...DEFAULT_RETRY_CONFIG, ...retryConfig };
   let lastError: Error | undefined;
 
+  const shouldQueue = shouldQueueRequest(options);
+
+  // Queue immediately if offline
+  if (
+    shouldQueue &&
+    typeof navigator !== 'undefined' &&
+    navigator.onLine === false
+  ) {
+    const action = queueOfflineAction(endpoint, options);
+
+    throw new OfflineActionQueuedError(
+      'You are offline. Action queued for later sync.',
+      endpoint,
+      action.id
+    );
+  }
+
   for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
     try {
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      const response = await fetch(resolveApiUrl(endpoint), {
         ...options,
         headers: {
           'Content-Type': 'application/json',
@@ -209,7 +225,6 @@ export async function apiCall<T = unknown>(
         return data as T;
       }
 
-      // Throw structured API error
       throw new ApiError(
         getErrorMessage(response.status, response.statusText, data),
         response.status,
@@ -219,22 +234,27 @@ export async function apiCall<T = unknown>(
     } catch (error) {
       lastError = normalizeError(error);
 
-      // Debug logging (Acceptance Criteria)
       console.error('[API ERROR]', {
         endpoint,
         attempt,
         error: lastError,
       });
 
-      // Stop retrying if needed
-      if (
-        attempt === config.maxRetries ||
-        !shouldRetryError(error)
-      ) {
+      // Offline fallback queue
+      if (shouldQueue && isLikelyOfflineError(lastError)) {
+        const action = queueOfflineAction(endpoint, options);
+
+        throw new OfflineActionQueuedError(
+          'Network unavailable. Request queued.',
+          endpoint,
+          action.id
+        );
+      }
+
+      if (attempt === config.maxRetries || !shouldRetryError(error)) {
         throw lastError;
       }
 
-      // Wait before retry
       await delay(calculateDelay(attempt, config));
     }
   }
