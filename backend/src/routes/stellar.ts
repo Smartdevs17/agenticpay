@@ -5,8 +5,6 @@ import {
   InvalidStellarInputError,
 } from '../services/stellar.js';
 
-
-
 export const stellarRouter = Router();
 
 // Get Stellar account info

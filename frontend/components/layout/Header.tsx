@@ -34,15 +34,11 @@ import { ThemeSettingsModal } from '@/components/theme/ThemeSettingsModal';
 import { TimezoneSettingsModal } from '@/components/settings/TimezoneSettingsModal';
 import { getBrowserTimeZone, isValidTimeZone } from '@/lib/utils';
 
-// 2. I built the isolated NetworkIndicator component right here
 const NetworkIndicator = () => {
-  // We use useAccount() in Wagmi v2 instead of useNetwork()
   const { chain, isConnected } = useAccount();
 
-  // Hide it if the wallet isn't connected yet
   if (!isConnected) return null;
 
-  // In v2, if connected but 'chain' is undefined, it means they are on an unsupported network
   if (!chain) {
     return (
       <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-100 text-red-700 text-sm font-medium border border-red-200">
@@ -52,43 +48,9 @@ const NetworkIndicator = () => {
     );
   }
 
-  // Handle Mainnet (Green) vs Testnet (Yellow) states
   const isTestnet = chain.testnet === true;
-  const bgColor = isTestnet 
-    ? 'bg-yellow-100 text-yellow-800 border-yellow-200' 
-    : 'bg-green-100 text-green-800 border-green-200';
-  const dotColor = isTestnet ? 'bg-yellow-500' : 'bg-green-500';
-
-  return (
-    <div className={`flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-medium ${bgColor}`}>
-      <span className={`w-2 h-2 rounded-full ${dotColor}`}></span>
-      {chain.name}
-    </div>
-  );
-};
-
-// 2. I built the isolated NetworkIndicator component right here
-const NetworkIndicator = () => {
-  // We use useAccount() in Wagmi v2 instead of useNetwork()
-  const { chain, isConnected } = useAccount();
-
-  // Hide it if the wallet isn't connected yet
-  if (!isConnected) return null;
-
-  // In v2, if connected but 'chain' is undefined, it means they are on an unsupported network
-  if (!chain) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-100 text-red-700 text-sm font-medium border border-red-200">
-        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-        Wrong Network
-      </div>
-    );
-  }
-
-  // Handle Mainnet (Green) vs Testnet (Yellow) states
-  const isTestnet = chain.testnet === true;
-  const bgColor = isTestnet 
-    ? 'bg-yellow-100 text-yellow-800 border-yellow-200' 
+  const bgColor = isTestnet
+    ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
     : 'bg-green-100 text-green-800 border-green-200';
   const dotColor = isTestnet ? 'bg-yellow-500' : 'bg-green-500';
 
@@ -139,7 +101,6 @@ export function Header() {
   const handleManualToggle = () => {
     const next = !isDark;
     setIsDark(next);
-    // Apply to DOM immediately (ThemeProvider's effect will also fire)
     document.documentElement.classList.toggle('dark', next);
   };
 
@@ -165,43 +126,8 @@ export function Header() {
             </h1>
           </div>
 
-<div className="flex items-center gap-4">
-          
-          {/* 3. I dropped the new component right here! */}
-          <NetworkIndicator />
-
-          <div className="flex items-center gap-2">
-            {/* Notifications */}
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
-            </Button>
-
-            {/* Dark mode toggle — only interactive label when manual */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={mode === 'manual' ? handleManualToggle : undefined}
-              title={
-                mode === 'manual'
-                  ? isDark
-                    ? 'Switch to light mode'
-                    : 'Switch to dark mode'
-                  : `Auto: ${mode} mode`
-              }
-              className="relative"
-            >
-              {isDark ? (
-                <Moon className="h-5 w-5 transition-transform duration-300" />
-              ) : (
-                <Sun className="h-5 w-5 transition-transform duration-300" />
-              )}
-              {mode !== 'manual' && (
-                <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-primary flex items-center justify-center">
-                  <Clock className="h-2 w-2 text-primary-foreground" />
-                </span>
-              )}
-            </Button>
+          <div className="flex items-center gap-4">
+            <NetworkIndicator />
 
             {/* Theme schedule settings */}
             <Button
@@ -278,7 +204,6 @@ export function Header() {
         </div>
       )}
       </header>
-
       <ThemeSettingsModal open={themeSettingsOpen} onClose={() => setThemeSettingsOpen(false)} />
       <TimezoneSettingsModal
         open={timezoneSettingsOpen}
