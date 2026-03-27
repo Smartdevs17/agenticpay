@@ -7,12 +7,18 @@ import { Button } from '@/components/ui/button';
 import { ArrowLeft, Download } from 'lucide-react';
 import Link from 'next/link';
 import { Skeleton } from '@/components/ui/skeleton';
-import { PageBreadcrumb } from '@/components/layout/PageBreadcrumb';
+import {
+  formatDateInTimeZone,
+  formatDateTimeInTimeZone,
+  formatTimeInTimeZone,
+} from '@/lib/utils';
+import { useAuthStore } from '@/store/useAuthStore';
 
 export default function InvoiceDetailPage() {
   const params = useParams();
   const rawId = params.id as string;
   const projectId = rawId.startsWith('INV-') ? rawId.replace('INV-', '') : rawId;
+  const timezone = useAuthStore((state) => state.timezone);
 
   const { useProjectDetail } = useAgenticPay();
   const { project, loading } = useProjectDetail(projectId);
@@ -95,9 +101,9 @@ export default function InvoiceDetailPage() {
                 Generated
               </p>
               <p className="mt-2 font-medium text-slate-900">
-                {generatedAt.toLocaleDateString()}
+                {formatDateInTimeZone(generatedAt, timezone)}
               </p>
-              <p className="text-xs text-slate-500">{generatedAt.toLocaleTimeString()}</p>
+              <p className="text-xs text-slate-500">{formatTimeInTimeZone(generatedAt, timezone)}</p>
             </div>
             <div className="print-break-inside-avoid rounded-xl border border-slate-200 bg-white p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -166,7 +172,7 @@ export default function InvoiceDetailPage() {
               <div className="flex items-center justify-between gap-4 px-5 py-4 text-sm">
                 <span className="text-slate-600">Generated</span>
                 <span className="text-right font-medium text-slate-900">
-                  {generatedAt.toLocaleString()}
+                  {formatDateTimeInTimeZone(generatedAt, timezone)}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-4 px-5 py-4 text-sm">

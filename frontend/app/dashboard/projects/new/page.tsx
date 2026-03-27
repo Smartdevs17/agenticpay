@@ -78,6 +78,11 @@ export default function CreateProjectPage() {
       return;
     }
 
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      toast.error('You are offline. Reconnect before creating an on-chain project.');
+      return;
+    }
+
     try {
       const paymentType = data.currency === 'ETH' ? 0 : 1;
       const tokenAddr = data.currency === 'ETH' ? '0x0000000000000000000000000000000000000000' : data.tokenAddress!;

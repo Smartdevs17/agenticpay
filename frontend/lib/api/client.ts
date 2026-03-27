@@ -1,3 +1,10 @@
+import {
+  OfflineActionQueuedError,
+  isLikelyOfflineError,
+  queueOfflineAction,
+  shouldQueueRequest,
+} from '@/lib/offline';
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001/api/v1';
 
@@ -27,6 +34,10 @@ export class ApiError extends Error {
     this.response = response;
     this.data = data;
   }
+}
+
+export function resolveApiUrl(endpoint: string) {
+  return `${API_BASE_URL}${endpoint}`;
 }
 
 function shouldRetryStatus(status: number): boolean {
@@ -122,10 +133,20 @@ export async function apiCall<T = unknown>(
 ): Promise<T> {
   const config = { ...DEFAULT_RETRY_CONFIG, ...retryConfig };
   let lastError: Error | undefined;
+  const shouldQueue = shouldQueueRequest(options);
+
+  if (shouldQueue && typeof navigator !== 'undefined' && navigator.onLine === false) {
+    const action = queueOfflineAction(endpoint, options);
+    throw new OfflineActionQueuedError(
+      'You are offline. This action has been queued and will sync when the connection returns.',
+      endpoint,
+      action.id
+    );
+  }
 
   for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
     try {
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      const response = await fetch(resolveApiUrl(endpoint), {
         ...options,
         headers: {
           'Content-Type': 'application/json',
@@ -147,6 +168,15 @@ export async function apiCall<T = unknown>(
       );
     } catch (error) {
       lastError = normalizeError(error);
+
+      if (shouldQueue && isLikelyOfflineError(lastError)) {
+        const action = queueOfflineAction(endpoint, options);
+        throw new OfflineActionQueuedError(
+          'The request was queued because the network is unavailable.',
+          endpoint,
+          action.id
+        );
+      }
 
       if (attempt === config.maxRetries || !shouldRetryError(error)) {
         throw lastError;

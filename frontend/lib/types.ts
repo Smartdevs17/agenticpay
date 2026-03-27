@@ -3,6 +3,7 @@ export interface User {
   address: string;
   email?: string;
   profileImage?: string;
+  timezone?: string;
 }
 
 export interface Milestone {

@@ -11,12 +11,15 @@ import { EmptyState } from '@/components/empty/EmptyState';
 import { useRouter } from 'next/navigation';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
+import { formatDateInTimeZone } from '@/lib/utils';
+import { useAuthStore } from '@/store/useAuthStore';
 
 export default function ProjectsPage() {
   const router = useRouter();
   const { isConnected } = useAccount();
   const { useUserProjects } = useAgenticPay();
   const { projects, loading } = useUserProjects();
+  const timezone = useAuthStore((state) => state.timezone);
 
   if (loading) {
     return (
@@ -138,7 +141,7 @@ export default function ProjectsPage() {
 
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     <Clock className="h-3 w-3" />
-                    <span>Created {new Date(project.createdAt).toLocaleDateString()}</span>
+                    <span>Created {formatDateInTimeZone(project.createdAt, timezone)}</span>
                   </div>
 
                   <Link href={`/dashboard/projects/${project.id}`}>
