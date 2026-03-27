@@ -1,14 +1,21 @@
 'use client';
+
+import { useState } from 'react';
 import { CopyButton } from '@/components/ui/CopyButton';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
+import { useAuthStore } from '@/store/useAuthStore';
 import { Card, CardContent } from '@/components/ui/card';
-import { CheckCircle2, Clock, XCircle, ExternalLink, Wallet } from 'lucide-react';
+import { CheckCircle2, Clock, XCircle, ExternalLink, Wallet, QrCode, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { PaymentCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
+import { Button } from '@/components/ui/button';
+import { PaymentQRModal } from '@/components/payment/QRCode';
 
 export default function PaymentsPage() {
   const { payments, loading } = useDashboardData();
+  const { address } = useAuthStore();
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -29,6 +36,10 @@ export default function PaymentsPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
           <p className="text-gray-600 mt-1">View all your payment transactions</p>
+          <div className="mt-2 inline-flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading payments...
+          </div>
         </div>
         <div className="space-y-4">
           {[1, 2, 3, 4].map((i) => (
@@ -41,9 +52,18 @@ export default function PaymentsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
-        <p className="text-gray-600 mt-1">View all your payment transactions</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
+          <p className="text-gray-600 mt-1">View all your payment transactions</p>
+        </div>
+
+        {address && (
+          <Button onClick={() => setIsQrModalOpen(true)} className="flex items-center gap-2">
+            <QrCode className="h-4 w-4" />
+            Receive Payment
+          </Button>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -75,7 +95,7 @@ export default function PaymentsPage() {
                     </p>
                     {payment.transactionHash && (
                       <a
-                        href={`https://testnet.cronoscan.com/tx/${payment.transactionHash}`}
+                        href={'https://testnet.cronoscan.com/tx/' + payment.transactionHash}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2 justify-end"
@@ -87,13 +107,13 @@ export default function PaymentsPage() {
                   </div>
                 </div>
                 {payment.transactionHash && (
-  <div className="mt-4 pt-4 border-t flex items-center gap-2">
-    <p className="text-xs text-gray-500 font-mono break-all flex-1">
-      {payment.transactionHash}
-    </p>
-    <CopyButton text={payment.transactionHash} />
-  </div>
-)}
+                  <div className="mt-4 pt-4 border-t flex items-center gap-2">
+                    <p className="text-xs text-gray-500 font-mono break-all flex-1">
+                      {payment.transactionHash}
+                    </p>
+                    <CopyButton text={payment.transactionHash} />
+                  </div>
+                )}
               </CardContent>
             </Card>
           </motion.div>
@@ -111,7 +131,14 @@ export default function PaymentsPage() {
           </CardContent>
         </Card>
       )}
+
+      {address && (
+        <PaymentQRModal
+          address={address}
+          isOpen={isQrModalOpen}
+          onClose={() => setIsQrModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
-

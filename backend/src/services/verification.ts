@@ -1,6 +1,21 @@
 import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
+
+const getOpenAIClient = () => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      'The OPENAI_API_KEY environment variable is missing or empty; provide it to run verification.'
+    );
+  }
+
+  if (!openaiClient) {
+    openaiClient = new OpenAI({ apiKey });
+  }
+
+  return openaiClient;
+};
 
 interface VerificationRequest {
   repositoryUrl: string;
@@ -18,6 +33,14 @@ interface VerificationResult {
   verifiedAt: string;
 }
 
+export type VerificationUpdate = {
+  id: string;
+  status?: 'passed' | 'failed' | 'pending';
+  score?: number;
+  summary?: string;
+  details?: string[];
+};
+
 // In-memory store (replace with DB in production)
 const verifications = new Map<string, VerificationResult>();
 
@@ -27,7 +50,7 @@ export async function verifyWork(request: VerificationRequest): Promise<Verifica
   // TODO: Fetch actual repo contents via GitHub API
   // For now, use AI to generate a verification assessment
 
-  const completion = await openai.chat.completions.create({
+  const completion = await getOpenAIClient().chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
       {
@@ -55,10 +78,37 @@ export async function verifyWork(request: VerificationRequest): Promise<Verifica
     verifiedAt: new Date().toISOString(),
   };
 
-  verifications.set(id, result);
+  storeVerification(result);
   return result;
+}
+
+export function storeVerification(result: VerificationResult): void {
+  verifications.set(result.id, result);
 }
 
 export async function getVerification(id: string): Promise<VerificationResult | undefined> {
   return verifications.get(id);
+}
+
+export function updateVerification(update: VerificationUpdate): VerificationResult | undefined {
+  const current = verifications.get(update.id);
+  if (!current) {
+    return undefined;
+  }
+
+  const updated: VerificationResult = {
+    ...current,
+    status: update.status ?? current.status,
+    score: update.score ?? current.score,
+    summary: update.summary ?? current.summary,
+    details: update.details ?? current.details,
+    verifiedAt: new Date().toISOString(),
+  };
+
+  verifications.set(update.id, updated);
+  return updated;
+}
+
+export function deleteVerification(id: string): boolean {
+  return verifications.delete(id);
 }

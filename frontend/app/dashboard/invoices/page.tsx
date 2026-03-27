@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useDashboardData, DashboardInvoice } from '@/lib/hooks/useDashboardData';
+import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Clock, AlertCircle, Filter, FileText } from 'lucide-react';
+import { CheckCircle2, Clock, AlertCircle, Filter, FileText, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { InvoiceCardSkeleton } from '@/components/ui/loading-skeletons';
@@ -51,6 +51,10 @@ export default function InvoicesPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Invoices</h1>
           <p className="text-gray-600 mt-1">View and manage your invoices</p>
+          <div className="mt-2 inline-flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading invoices...
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-4">
           {[1, 2, 3, 4].map((i) => (

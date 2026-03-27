@@ -1,5 +1,10 @@
 import { Router } from 'express';
-import { getAccountInfo, getTransactionStatus } from '../services/stellar.js';
+import {
+  getAccountInfo,
+  getTransactionStatus,
+  InvalidStellarInputError,
+} from '../services/stellar.js';
+import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 
 export const stellarRouter = Router();
 
@@ -7,10 +12,14 @@ export const stellarRouter = Router();
 stellarRouter.get('/account/:address', async (req, res) => {
   try {
     const account = await getAccountInfo(req.params.address);
-    res.json(account);
+    return res.json(account);
   } catch (error) {
+    if (error instanceof InvalidStellarInputError) {
+      return res.status(400).json({ message: error.message });
+    }
+
     console.error('Stellar account error:', error);
-    res.status(500).json({ message: 'Failed to fetch account info' });
+    return res.status(500).json({ message: 'Failed to fetch account info' });
   }
 });
 
@@ -18,9 +27,13 @@ stellarRouter.get('/account/:address', async (req, res) => {
 stellarRouter.get('/tx/:hash', async (req, res) => {
   try {
     const tx = await getTransactionStatus(req.params.hash);
-    res.json(tx);
+    return res.json(tx);
   } catch (error) {
+    if (error instanceof InvalidStellarInputError) {
+      return res.status(400).json({ message: error.message });
+    }
+
     console.error('Stellar tx error:', error);
-    res.status(500).json({ message: 'Failed to fetch transaction' });
+    return res.status(500).json({ message: 'Failed to fetch transaction' });
   }
 });

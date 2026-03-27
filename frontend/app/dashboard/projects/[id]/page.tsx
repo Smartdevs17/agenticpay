@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,6 @@ import { api } from '@/lib/api';
 export default function ProjectDetailPage() {
   const params = useParams();
   const projectId = params.id as string;
-  const router = useRouter();
   const { address } = useAccount();
 
   const { useProjectDetail, fundProject, submitWork, approveWork, isPending, isConfirming, isConfirmed, error, arbitrator } = useAgenticPay();
@@ -38,7 +37,7 @@ export default function ProjectDetailPage() {
 
   useEffect(() => {
     if (error) {
-      toast.error('Transaction failed: ' + (error as any).shortMessage || error.message);
+      toast.error('Transaction failed: ' + (error as { shortMessage?: string }).shortMessage || error.message);
     }
   }, [error]);
 
@@ -65,19 +64,6 @@ export default function ProjectDetailPage() {
       const paymentType = project.currency === 'ETH' ? 0 : 1;
       await fundProject(project.id, project.totalAmount, paymentType);
       toast.info('Funding transaction submitted...');
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleSubmitWork = async () => {
-    if (!repoLink) {
-      toast.error('Please enter a GitHub repository link');
-      return;
-    }
-    try {
-      await submitWork(project.id, repoLink);
-      toast.info('Submission transaction submitted...');
     } catch (e) {
       console.error(e);
     }
@@ -205,7 +191,7 @@ export default function ProjectDetailPage() {
                         milestoneDescription: project.milestones[0]?.description || project.title,
                         projectId: project.id
                       });
-                      if (verification.verified) {
+                      if (verification.status === 'passed') {
                         toast.success("Work Verified by AI!");
                         try {
                           // Trigger invoice gen
@@ -217,14 +203,14 @@ export default function ProjectDetailPage() {
                           });
                           toast.success("Invoice Generated");
                           refetch();
-                        } catch (invError: any) {
-                          toast.error("Invoice error: " + invError.message);
+                        } catch (invError) {
+                          toast.error("Invoice error: " + (invError as Error).message);
                         }
                       } else {
-                        toast.error("Verification failed: " + verification.reason);
+                        toast.error("Verification failed: " + verification.summary);
                       }
-                    } catch (e: any) {
-                      toast.error(e.message);
+                    } catch (e) {
+                      toast.error((e as Error).message);
                     }
                   }}>
                     Request AI Verification
@@ -250,8 +236,8 @@ export default function ProjectDetailPage() {
                     await submitWork(project.id, repoLink);
                     toast.info('Transaction submitted. Once confirmed, request verification.');
                     setShowSubmitInput(false);
-                  } catch (e: any) {
-                    toast.error('Submission failed: ' + e.message);
+                  } catch (e) {
+                    toast.error('Submission failed: ' + (e as Error).message);
                   }
                 }}>
                   Submit Work
@@ -349,7 +335,7 @@ export default function ProjectDetailPage() {
           <div className="mt-4 pt-4 border-t border-yellow-200">
             <p className="text-xs text-yellow-800 font-semibold mb-1">Warning</p>
             <p className="text-xs text-yellow-700">
-              Status 7 (Verified) may be blocked by the 'approveWork' function in the deployed contract.
+              Status 7 (Verified) may be blocked by the &apos;approveWork&apos; function in the deployed contract.
               If you are the arbitrator/owner, you may need to resolve this via dispute or admin action.
             </p>
             <div className="mt-2 text-xs font-mono">
