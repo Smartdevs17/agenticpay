@@ -15,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Bell, LogOut, User, Settings, Sun, Moon, Clock } from 'lucide-react';
+import { Bell, LogOut, User, Settings, Sun, Moon, Clock, CloudOff, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useState } from 'react';
 // 1. I added useNetwork to the existing wagmi import
@@ -66,6 +66,7 @@ export function Header() {
   const { name, email, address, timezone, logout, setTimezone } = useAuthStore();
   const { isDark, mode, setIsDark } = useThemeStore();
   const { disconnect } = useDisconnect();
+  const { isOnline, queueLength, isSyncing } = useOfflineStatus();
   const router = useRouter();
   const pathname = usePathname();
   const [breadcrumbs, setBreadcrumbs] = useState<any[]>([]);
@@ -126,8 +127,60 @@ export function Header() {
             </h1>
           </div>
 
-          <div className="flex items-center gap-4">
-            <NetworkIndicator />
+<div className="flex items-center gap-4">
+          
+          {/* 3. I dropped the new component right here! */}
+          <NetworkIndicator />
+
+          <div className="flex items-center gap-2">
+            {(!isOnline || queueLength > 0 || isSyncing) && (
+              <div className="hidden sm:flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900">
+                {isSyncing ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <CloudOff className="h-3.5 w-3.5" />
+                )}
+                <span>
+                  {isSyncing
+                    ? `Syncing ${queueLength}`
+                    : !isOnline
+                      ? `Offline${queueLength > 0 ? ` - ${queueLength} queued` : ''}`
+                      : `${queueLength} queued`}
+                </span>
+              </div>
+            )}
+
+            {/* Notifications */}
+            <Button variant="ghost" size="icon" className="relative">
+              <Bell className="h-5 w-5" />
+              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+            </Button>
+
+            {/* Dark mode toggle — only interactive label when manual */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={mode === 'manual' ? handleManualToggle : undefined}
+              title={
+                mode === 'manual'
+                  ? isDark
+                    ? 'Switch to light mode'
+                    : 'Switch to dark mode'
+                  : `Auto: ${mode} mode`
+              }
+              className="relative"
+            >
+              {isDark ? (
+                <Moon className="h-5 w-5 transition-transform duration-300" />
+              ) : (
+                <Sun className="h-5 w-5 transition-transform duration-300" />
+              )}
+              {mode !== 'manual' && (
+                <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-primary flex items-center justify-center">
+                  <Clock className="h-2 w-2 text-primary-foreground" />
+                </span>
+              )}
+            </Button>
 
             {/* Theme schedule settings */}
             <Button

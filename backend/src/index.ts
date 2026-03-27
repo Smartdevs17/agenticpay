@@ -10,8 +10,10 @@ import { stellarRouter } from './routes/stellar.js';
 import { catalogRouter } from './routes/catalog.js';
 import { jobsRouter } from './routes/jobs.js';
 import { healthRouter } from './routes/health.js';
+import { slaRouter } from './routes/sla.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
+import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 
 dotenv.config();
 
@@ -48,12 +50,84 @@ const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
   : '*';
 
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+type UserTier = 'free' | 'pro' | 'enterprise';
+
+type TierRateState = {
+  count: number;
+  resetAtMs: number;
+};
+
+const tierLimits: Record<UserTier, number> = {
+  free: Number(process.env.RATE_LIMIT_FREE ?? 100),
+  pro: Number(process.env.RATE_LIMIT_PRO ?? 300),
+  enterprise: Number(process.env.RATE_LIMIT_ENTERPRISE ?? 1000),
+};
+
+const tierWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000);
+const tierRateStore = new Map<string, TierRateState>();
+
+function resolveUserTier(req: Request): UserTier {
+  const headerTier = req.headers['x-user-tier'];
+  const normalized = (Array.isArray(headerTier) ? headerTier[0] : headerTier)?.toLowerCase();
+
+  if (normalized === 'pro' || normalized === 'enterprise') {
+    return normalized;
+  }
+
+  return 'free';
+}
+
+function resolveClientIdentifier(req: Request): string {
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    return authHeader;
+  }
+
+  const apiKey = req.headers['x-api-key'];
+  if (typeof apiKey === 'string' && apiKey.trim() !== '') {
+    return apiKey;
+  }
+
+  return req.ip || 'unknown-client';
+}
+
+function tieredRateLimit(req: Request, res: Response, next: NextFunction): void {
+  const tier = resolveUserTier(req);
+  const limit = tierLimits[tier];
+  const identifier = resolveClientIdentifier(req);
+  const storeKey = `${tier}:${identifier}`;
+  const nowMs = Date.now();
+  const existingState = tierRateStore.get(storeKey);
+
+  const state =
+    !existingState || existingState.resetAtMs <= nowMs
+      ? { count: 0, resetAtMs: nowMs + tierWindowMs }
+      : existingState;
+
+  state.count += 1;
+  tierRateStore.set(storeKey, state);
+
+  const remaining = Math.max(0, limit - state.count);
+  const resetInSeconds = Math.ceil((state.resetAtMs - nowMs) / 1000);
+
+  res.setHeader('X-RateLimit-Tier', tier);
+  res.setHeader('X-RateLimit-Limit', String(limit));
+  res.setHeader('X-RateLimit-Remaining', String(remaining));
+  res.setHeader('X-RateLimit-Reset', String(resetInSeconds));
+
+  if (state.count > limit) {
+    res.status(429).json({
+      error: {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: `Rate limit exceeded for tier '${tier}'`,
+        status: 429,
+      },
+    });
+    return;
+  }
+
+  next();
+}
 
 const invoiceLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -88,13 +162,16 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   });
 });
 
+// SLA Tracking middleware
+app.use(slaTrackingMiddleware);
+
 // Health & Readiness checks
 app.use(healthRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 
-// Apply general limiter to all API routes
-app.use('/api/', generalLimiter);
+// Apply tiered limiter to all API routes
+app.use('/api/', tieredRateLimit);
 
 // Versioning middleware
 app.use('/api/', versionMiddleware);
@@ -106,6 +183,7 @@ apiV1Router.use('/invoice', invoiceLimiter, invoiceRouter);
 apiV1Router.use('/stellar', stellarRouter);
 apiV1Router.use('/catalog', catalogRouter);
 apiV1Router.use('/jobs', jobsRouter);
+apiV1Router.use('/sla', slaRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);

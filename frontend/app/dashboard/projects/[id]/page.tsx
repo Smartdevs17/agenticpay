@@ -215,13 +215,21 @@ export default function ProjectDetailPage() {
                           toast.success("Invoice Generated");
                           refetch();
                         } catch (invError) {
-                          toast.error("Invoice error: " + (invError as Error).message);
+                          if (invError instanceof OfflineActionQueuedError) {
+                            toast.info(invError.message);
+                          } else {
+                            toast.error("Invoice error: " + (invError as Error).message);
+                          }
                         }
                       } else {
                         toast.error("Verification failed: " + verification.summary);
                       }
                     } catch (e) {
-                      toast.error((e as Error).message);
+                      if (e instanceof OfflineActionQueuedError) {
+                        toast.info(e.message);
+                      } else {
+                        toast.error((e as Error).message);
+                      }
                     }
                   }}>
                     Request AI Verification
@@ -242,6 +250,9 @@ export default function ProjectDetailPage() {
               <div className="flex gap-2">
                 <Button onClick={async () => {
                   try {
+                    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+                      throw new Error('You are offline. Reconnect before submitting an on-chain transaction.');
+                    }
                     if (!repoLink) throw new Error("No repo link");
                     toast.info('Submitting work to blockchain...');
                     await submitWork(project.id, repoLink);

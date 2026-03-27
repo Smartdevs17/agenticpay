@@ -22,16 +22,64 @@ import { toast } from 'sonner';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
 
+const walletAddressSchema = z
+  .string()
+  .trim()
+  .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid wallet address');
+
+const tokenAddressSchema = z
+  .string()
+  .trim()
+  .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid token address');
+
+const isFutureDate = (value: string) => {
+  const selectedDate = new Date(`${value}T00:00:00`);
+
+  if (Number.isNaN(selectedDate.getTime())) {
+    return false;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return selectedDate > today;
+};
+
+const getMinDeadlineDate = () => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  return tomorrow.toISOString().split('T')[0];
+};
+
 const projectSchema = z.object({
-  title: z.string().min(1, 'Title is required'),
-  clientAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid wallet address').optional(), // Optional if user is client
-  freelancerAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid wallet address'),
-  totalAmount: z.string().min(1, 'Amount is required'),
+  title: z.string().trim().min(1, 'Title is required'),
+  clientAddress: walletAddressSchema.optional(), // Optional if user is client
+  freelancerAddress: walletAddressSchema,
+  totalAmount: z
+    .string()
+    .trim()
+    .min(1, 'Amount is required')
+    .refine((value) => {
+      const amount = Number(value);
+      return Number.isFinite(amount) && amount > 0;
+    }, 'Amount must be a positive number'),
   currency: z.string().min(1, 'Currency is required'),
-  tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid token address').optional(),
-  deadline: z.string().min(1, 'Deadline is required'),
+  tokenAddress: z.union([tokenAddressSchema, z.literal('')]).optional(),
+  deadline: z
+    .string()
+    .min(1, 'Deadline is required')
+    .refine(isFutureDate, 'Deadline must be a future date'),
   githubRepo: z.string().url('Invalid URL').optional().or(z.literal('')),
   description: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.currency === 'ERC20' && !data.tokenAddress?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['tokenAddress'],
+      message: 'Token address is required for ERC20 payments',
+    });
+  }
 });
 
 type ProjectFormData = z.infer<typeof projectSchema>;
@@ -75,6 +123,11 @@ export default function CreateProjectPage() {
   const onSubmit = async (data: ProjectFormData) => {
     if (!address) {
       toast.error('Please connect your wallet first');
+      return;
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      toast.error('You are offline. Reconnect before creating an on-chain project.');
       return;
     }
 
@@ -175,7 +228,15 @@ export default function CreateProjectPage() {
                 </div>
                 <div>
                   <Label htmlFor="currency">Currency</Label>
-                  <Select onValueChange={(val) => setValue('currency', val)} defaultValue="ETH">
+                  <Select
+                    onValueChange={(val) =>
+                      setValue('currency', val, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                    }
+                    defaultValue="ETH"
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select Currency" />
                     </SelectTrigger>
@@ -209,6 +270,7 @@ export default function CreateProjectPage() {
                 <Input
                   id="deadline"
                   type="date"
+                  min={getMinDeadlineDate()}
                   {...register('deadline')}
                 />
                 {errors.deadline && (
