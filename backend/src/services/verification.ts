@@ -1,14 +1,10 @@
 import OpenAI from 'openai';
+import { config } from '../config/env.js';
 
 let openaiClient: OpenAI | null = null;
 
 const getOpenAIClient = () => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      'The OPENAI_API_KEY environment variable is missing or empty; provide it to run verification.'
-    );
-  }
+  const apiKey = config().OPENAI_API_KEY;
 
   if (!openaiClient) {
     openaiClient = new OpenAI({ apiKey });

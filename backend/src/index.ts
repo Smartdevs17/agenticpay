@@ -2,7 +2,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import { verificationRouter } from './routes/verification.js';
 import { invoiceRouter } from './routes/invoice.js';
@@ -17,8 +16,11 @@ import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandl
 import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
 import { slaTrackingMiddleware } from './middleware/slaTracking.js';
+import { validateEnv, config } from './config/env.js';
 
-dotenv.config();
+// Validate environment variables at startup
+validateEnv();
+const env = config();
 
 const traceStorage = new AsyncLocalStorage<string>();
 

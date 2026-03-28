@@ -1,12 +1,14 @@
 import * as StellarSdk from '@stellar/stellar-sdk';
+import { config } from '../config/env.js';
 
-const NETWORK = process.env.STELLAR_NETWORK || 'testnet';
+const NETWORK = config().STELLAR_NETWORK;
 const HORIZON_URL =
   NETWORK === 'public'
     ? 'https://horizon.stellar.org'
     : 'https://horizon-testnet.stellar.org';
 
 export const server = new StellarSdk.Horizon.Server(HORIZON_URL);
+
 
 export class ValidationError extends Error {
   statusCode: number;
