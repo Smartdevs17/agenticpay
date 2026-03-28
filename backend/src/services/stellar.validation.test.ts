@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { Keypair } from '@stellar/stellar-sdk';
 import {
-  validateStellarAddress,
-  validateTransactionHash,
-  ValidationError,
+  isValidStellarAddress,
+  isValidTransactionHash,
 } from './stellar.js';
 
 // Generate a valid Stellar public key at runtime for testing.
@@ -12,99 +11,69 @@ const VALID_ADDRESS = Keypair.random().publicKey();
 // Simple, obviously non-secret hex string built at runtime.
 const VALID_TX_HASH = 'ab'.repeat(32); // 64 hex chars
 
-// ─── validateStellarAddress ─────────────────────────────────────────────────
+// ─── isValidStellarAddress ─────────────────────────────────────────────────
 
-describe('validateStellarAddress', () => {
+describe('isValidStellarAddress', () => {
   it('accepts a valid Stellar public key', () => {
-    expect(() => validateStellarAddress(VALID_ADDRESS)).not.toThrow();
+    expect(isValidStellarAddress(VALID_ADDRESS)).toBe(true);
   });
 
-  it('throws ValidationError for an empty string', () => {
-    expect(() => validateStellarAddress('')).toThrow(ValidationError);
-    expect(() => validateStellarAddress('')).toThrow(/must not be empty/i);
+  it('rejects an empty string', () => {
+    expect(isValidStellarAddress('')).toBe(false);
   });
 
-  it('throws ValidationError for a whitespace-only string', () => {
-    expect(() => validateStellarAddress('   ')).toThrow(ValidationError);
+  it('rejects a whitespace-only string', () => {
+    expect(isValidStellarAddress('   ')).toBe(false);
   });
 
-  it('throws ValidationError for an address with a wrong prefix (S… secret key)', () => {
-    // Looks like a secret key prefix but is clearly not real
+  it('rejects an address with a wrong prefix (S… secret key)', () => {
     const secretKey = 'S-INVALID-NOT-A-SECRET-KEY';
-    expect(() => validateStellarAddress(secretKey)).toThrow(ValidationError);
-    expect(() => validateStellarAddress(secretKey)).toThrow(/invalid stellar address/i);
+    expect(isValidStellarAddress(secretKey)).toBe(false);
   });
 
-  it('throws ValidationError for a string that starts with G but is too short', () => {
-    expect(() => validateStellarAddress('GABC')).toThrow(ValidationError);
+  it('rejects a string that starts with G but is too short', () => {
+    expect(isValidStellarAddress('GABC')).toBe(false);
   });
 
-  it('throws ValidationError for a string that starts with G but is too long', () => {
-    expect(() => validateStellarAddress(VALID_ADDRESS + 'EXTRA')).toThrow(ValidationError);
+  it('rejects a string that starts with G but is too long', () => {
+    expect(isValidStellarAddress(VALID_ADDRESS + 'EXTRA')).toBe(false);
   });
 
-  it('throws ValidationError for a string with an invalid base32 character', () => {
-    // Replace last char with '1' which is not in the Stellar/base32 alphabet
+  it('rejects a string with an invalid base32 character', () => {
     const bad = VALID_ADDRESS.slice(0, -1) + '1';
-    expect(() => validateStellarAddress(bad)).toThrow(ValidationError);
-  });
-
-  it('throws a ValidationError (statusCode 400) — not a generic Error', () => {
-    const err = (() => {
-      try {
-        validateStellarAddress('bad');
-      } catch (e) {
-        return e;
-      }
-    })();
-    expect(err).toBeInstanceOf(ValidationError);
-    expect((err as ValidationError).statusCode).toBe(400);
+    expect(isValidStellarAddress(bad)).toBe(false);
   });
 });
 
-// ─── validateTransactionHash ────────────────────────────────────────────────
+// ─── isValidTransactionHash ────────────────────────────────────────────────
 
-describe('validateTransactionHash', () => {
+describe('isValidTransactionHash', () => {
   it('accepts a valid 64-char lowercase hex hash', () => {
-    expect(() => validateTransactionHash(VALID_TX_HASH)).not.toThrow();
+    expect(isValidTransactionHash(VALID_TX_HASH)).toBe(true);
   });
 
   it('accepts a valid 64-char uppercase hex hash (case-insensitive)', () => {
-    expect(() => validateTransactionHash(VALID_TX_HASH.toUpperCase())).not.toThrow();
+    expect(isValidTransactionHash(VALID_TX_HASH.toUpperCase())).toBe(true);
   });
 
-  it('throws ValidationError for an empty string', () => {
-    expect(() => validateTransactionHash('')).toThrow(ValidationError);
-    expect(() => validateTransactionHash('')).toThrow(/must not be empty/i);
+  it('rejects an empty string', () => {
+    expect(isValidTransactionHash('')).toBe(false);
   });
 
-  it('throws ValidationError for a whitespace-only string', () => {
-    expect(() => validateTransactionHash('   ')).toThrow(ValidationError);
+  it('rejects a whitespace-only string', () => {
+    expect(isValidTransactionHash('   ')).toBe(false);
   });
 
-  it('throws ValidationError when hash is shorter than 64 chars', () => {
-    expect(() => validateTransactionHash(VALID_TX_HASH.slice(0, 32))).toThrow(ValidationError);
+  it('rejects when hash is shorter than 64 chars', () => {
+    expect(isValidTransactionHash(VALID_TX_HASH.slice(0, 32))).toBe(false);
   });
 
-  it('throws ValidationError when hash is longer than 64 chars', () => {
-    expect(() => validateTransactionHash(VALID_TX_HASH + 'ab')).toThrow(ValidationError);
+  it('rejects when hash is longer than 64 chars', () => {
+    expect(isValidTransactionHash(VALID_TX_HASH + 'ab')).toBe(false);
   });
 
-  it('throws ValidationError for non-hex characters', () => {
+  it('rejects for non-hex characters', () => {
     const bad = VALID_TX_HASH.slice(0, -2) + 'zz';
-    expect(() => validateTransactionHash(bad)).toThrow(ValidationError);
-    expect(() => validateTransactionHash(bad)).toThrow(/invalid transaction hash/i);
-  });
-
-  it('throws a ValidationError (statusCode 400)', () => {
-    const err = (() => {
-      try {
-        validateTransactionHash('not-a-hash');
-      } catch (e) {
-        return e;
-      }
-    })();
-    expect(err).toBeInstanceOf(ValidationError);
-    expect((err as ValidationError).statusCode).toBe(400);
+    expect(isValidTransactionHash(bad)).toBe(false);
   });
 });

@@ -6,18 +6,44 @@ on:
   pull_request:
     branches: [main, dev]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+            contracts:
+              - 'contracts/**'
+
   backend:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
     name: Backend (Node.js ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         node-version: [20, 22]
+    defaults:
+      run:
+        working-directory: backend
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
@@ -25,66 +51,76 @@ jobs:
           cache-dependency-path: backend/package-lock.json
 
       - name: Install dependencies
-        run: npm install
-        working-directory: backend
+        run: npm ci
 
-      - name: Run ESLint
-        run: npm run lint
-        working-directory: backend
-
-      - name: Run tests
-        run: npm run test
-        working-directory: backend
+      - name: Lint & Test
+        run: |
+          npm run lint
+          npm run test
 
       - name: Build
         run: npm run build
-        working-directory: backend
 
   frontend:
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
     name: Frontend (Node.js ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         node-version: [20, 22]
+    defaults:
+      run:
+        working-directory: frontend
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/frontend/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('frontend/package-lock.json') }}-${{ hashFiles('frontend/src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('frontend/package-lock.json') }}-
+
       - name: Install dependencies
-        run: npm install
-        working-directory: frontend
+        run: npm ci
 
-      - name: Run ESLint
-        run: npm run lint
-        working-directory: frontend
-
-      - name: Run tests
-        run: npm run test
-        working-directory: frontend
+      - name: Lint & Test
+        run: |
+          npm run lint
+          npm run test
 
       - name: Build
         run: npm run build
-        working-directory: frontend
 
   contracts:
+    needs: changes
+    if: ${{ needs.changes.outputs.contracts == 'true' }}
     name: Smart Contracts (Rust)
     runs-on: ubuntu-latest
-    container: rust:1.88
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Build contracts
-        run: cargo build --release
-        working-directory: contracts
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
-      - name: Check contracts
-        run: cargo check
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "contracts -> target"
+
+      - name: Build & Check
         working-directory: contracts
+        run: |
+          cargo build --target wasm32-unknown-unknown --release
+          cargo check

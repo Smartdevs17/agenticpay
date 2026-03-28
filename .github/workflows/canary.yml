@@ -1,0 +1,49 @@
+name: Canary Deployment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, dev]
+
+jobs:
+  canary-10:
+    name: Canary Phase 1 (10%)
+    runs-on: ubuntu-latest
+    environment: canary-10 # Links to the environment
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy 10%
+        run: bash scripts/deploy_canary.sh ${{ github.sha }} 10
+      - name: Automated Health Check
+        run: bash scripts/canary_monitor.sh
+
+  canary-50:
+    name: Canary Phase 2 (50%)
+    needs: canary-10
+    runs-on: ubuntu-latest
+    environment: canary-50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy 50%
+        run: bash scripts/deploy_canary.sh ${{ github.sha }} 50
+      - name: Automated Health Check
+        run: bash scripts/canary_monitor.sh
+
+  production-rollout:
+    name: Full Production Rollout (100%)
+    needs: canary-50
+    runs-on: ubuntu-latest
+    # This environment has "Required Reviewers" set in GitHub UI
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy 100%
+        run: bash scripts/deploy_canary.sh ${{ github.sha }} 100
+
+  rollback:
+    name: Auto-Rollback
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Revert to Stable
+        run: bash scripts/deploy_canary.sh "stable-version" 100
