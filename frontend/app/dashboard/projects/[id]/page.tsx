@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,12 +14,14 @@ import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { formatDateInTimeZone } from '@/lib/utils';
+import { useAuthStore } from '@/store/useAuthStore';
 
 export default function ProjectDetailPage() {
   const params = useParams();
   const projectId = params.id as string;
-  const router = useRouter();
   const { address } = useAccount();
+  const timezone = useAuthStore((state) => state.timezone);
 
   const { useProjectDetail, fundProject, submitWork, approveWork, isPending, isConfirming, isConfirmed, error, arbitrator } = useAgenticPay();
   const { project, loading, refetch } = useProjectDetail(projectId);
@@ -38,7 +40,7 @@ export default function ProjectDetailPage() {
 
   useEffect(() => {
     if (error) {
-      toast.error('Transaction failed: ' + (error as any).shortMessage || error.message);
+      toast.error('Transaction failed: ' + (error as { shortMessage?: string }).shortMessage || error.message);
     }
   }, [error]);
 
@@ -70,19 +72,6 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const handleSubmitWork = async () => {
-    if (!repoLink) {
-      toast.error('Please enter a GitHub repository link');
-      return;
-    }
-    try {
-      await submitWork(project.id, repoLink);
-      toast.info('Submission transaction submitted...');
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   const handleApprove = async () => {
     try {
       await approveWork(project.id);
@@ -105,6 +94,14 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="space-y-6">
+      <PageBreadcrumb
+        items={[
+          { label: 'Dashboard', href: '/dashboard' },
+          { label: 'Projects', href: '/dashboard/projects' },
+        ]}
+        currentPage={project.title}
+      />
+
       <Link href="/dashboard/projects">
         <Button variant="ghost" className="mb-4">
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -146,7 +143,7 @@ export default function ProjectDetailPage() {
             <div>
               <p className="text-sm text-gray-600">Created</p>
               <p className="text-lg font-medium">
-                {new Date(project.createdAt).toLocaleDateString()}
+                {formatDateInTimeZone(project.createdAt, timezone)}
               </p>
             </div>
           </div>
@@ -205,7 +202,7 @@ export default function ProjectDetailPage() {
                         milestoneDescription: project.milestones[0]?.description || project.title,
                         projectId: project.id
                       });
-                      if (verification.verified) {
+                      if (verification.status === 'passed') {
                         toast.success("Work Verified by AI!");
                         try {
                           // Trigger invoice gen
@@ -217,14 +214,22 @@ export default function ProjectDetailPage() {
                           });
                           toast.success("Invoice Generated");
                           refetch();
-                        } catch (invError: any) {
-                          toast.error("Invoice error: " + invError.message);
+                        } catch (invError) {
+                          if (invError instanceof OfflineActionQueuedError) {
+                            toast.info(invError.message);
+                          } else {
+                            toast.error("Invoice error: " + (invError as Error).message);
+                          }
                         }
                       } else {
-                        toast.error("Verification failed: " + verification.reason);
+                        toast.error("Verification failed: " + verification.summary);
                       }
-                    } catch (e: any) {
-                      toast.error(e.message);
+                    } catch (e) {
+                      if (e instanceof OfflineActionQueuedError) {
+                        toast.info(e.message);
+                      } else {
+                        toast.error((e as Error).message);
+                      }
                     }
                   }}>
                     Request AI Verification
@@ -245,13 +250,16 @@ export default function ProjectDetailPage() {
               <div className="flex gap-2">
                 <Button onClick={async () => {
                   try {
+                    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+                      throw new Error('You are offline. Reconnect before submitting an on-chain transaction.');
+                    }
                     if (!repoLink) throw new Error("No repo link");
                     toast.info('Submitting work to blockchain...');
                     await submitWork(project.id, repoLink);
                     toast.info('Transaction submitted. Once confirmed, request verification.');
                     setShowSubmitInput(false);
-                  } catch (e: any) {
-                    toast.error('Submission failed: ' + e.message);
+                  } catch (e) {
+                    toast.error('Submission failed: ' + (e as Error).message);
                   }
                 }}>
                   Submit Work
@@ -295,7 +303,7 @@ export default function ProjectDetailPage() {
                     </p>
                     {milestone.dueDate && (
                       <p className="text-xs text-gray-500">
-                        Due: {new Date(milestone.dueDate).toLocaleDateString()}
+                        Due: {formatDateInTimeZone(milestone.dueDate, timezone)}
                       </p>
                     )}
                   </div>
@@ -349,7 +357,7 @@ export default function ProjectDetailPage() {
           <div className="mt-4 pt-4 border-t border-yellow-200">
             <p className="text-xs text-yellow-800 font-semibold mb-1">Warning</p>
             <p className="text-xs text-yellow-700">
-              Status 7 (Verified) may be blocked by the 'approveWork' function in the deployed contract.
+              Status 7 (Verified) may be blocked by the &apos;approveWork&apos; function in the deployed contract.
               If you are the arbitrator/owner, you may need to resolve this via dispute or admin action.
             </p>
             <div className="mt-2 text-xs font-mono">

@@ -1,6 +1,5 @@
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
-import { formatEther } from 'viem';
 
 // Define return types for the dashboard data
 export interface DashboardStats {
@@ -34,11 +33,12 @@ export interface DashboardPayment {
 }
 
 export function useDashboardData() {
-    const { address } = useAccount();
+    const { address, isConnected, isConnecting, isReconnecting } = useAccount();
     const { useUserProjects } = useAgenticPay();
     const { projects, loading } = useUserProjects();
+    const isLoading = isConnecting || isReconnecting || (isConnected && loading);
 
-    if (loading || !projects) {
+    if (isLoading || !projects) {
         return {
             stats: { totalEarnings: '0', pendingPayments: '0', activeProjects: 0, completedProjects: 0 },
             invoices: [],
@@ -49,25 +49,19 @@ export function useDashboardData() {
     }
 
     // Calculate Stats
-    let totalEarnings = 0n;
-    let pendingPayments = 0n;
     let activeProjects = 0;
     let completedProjects = 0;
 
     const invoices: DashboardInvoice[] = [];
     const payments: DashboardPayment[] = [];
-    const recentActivity: any[] = []; // Unified activity feed
+    const recentActivity: { type: string; title: string; description: string; time: string; amount: string }[] = []; // Unified activity feed
 
     projects.forEach((project) => {
         const isFreelancer = address && project.freelancer.address.toLowerCase() === address.toLowerCase();
-        const isClient = address && project.client.address.toLowerCase() === address.toLowerCase();
 
         // Stats Logic
         if (project.status === 'completed') {
             completedProjects++;
-            if (isFreelancer) {
-                totalEarnings += BigInt(project.rawAmount || 0);
-            }
         } else if (project.status === 'cancelled') {
             // do nothing
         } else {

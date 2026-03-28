@@ -6,9 +6,11 @@ interface AuthState {
   email?: string;
   name?: string;
   profileImage?: string;
+  timezone?: string;
   loginType: 'social' | 'wallet' | null;
   isAuthenticated: boolean;
   setAuth: (data: Partial<AuthState>) => void;
+  setTimezone: (timezone: string) => void;
   logout: () => void;
 }
 
@@ -28,12 +30,18 @@ isAuthenticated: false,
           isAuthenticated: true,
         }),
 
+      setTimezone: (timezone) =>
+        set({
+          timezone,
+        }),
+
       logout: () =>
         set({
           address: null,
           email: undefined,
           name: undefined,
           profileImage: undefined,
+          timezone: undefined,
           loginType: null,
           isAuthenticated: false,
         }),

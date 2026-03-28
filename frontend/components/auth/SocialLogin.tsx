@@ -25,7 +25,7 @@ export function SocialLogin() {
       setLoading(true);
 
       await web3auth.initModal();
-      const web3authProvider = await web3auth.connectTo(WALLET_ADAPTERS.AUTH as any, {
+      const web3authProvider = await web3auth.connectTo(WALLET_ADAPTERS.AUTH, {
         loginProvider,
       });
 
@@ -89,4 +89,3 @@ export function SocialLogin() {
     </div>
   );
 }
-
