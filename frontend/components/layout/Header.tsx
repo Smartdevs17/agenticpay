@@ -17,50 +17,9 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Bell, LogOut, User, Settings, Sun, Moon, Clock, CloudOff, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-import { LanguageSwitcher } from '@/components/language/LanguageSwitcher';
-import { useEffect, useState } from 'react';
-import { useDisconnect, useAccount } from 'wagmi';
+import { useDisconnect } from 'wagmi';
 import { web3auth } from '@/lib/web3auth';
-import {
-  Breadcrumb,
-  BreadcrumbList,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
-import { getDashboardBreadcrumbs } from '@/lib/breadcrumbs';
-import { ThemeSettingsModal } from '@/components/theme/ThemeSettingsModal';
-import { TimezoneSettingsModal } from '@/components/settings/TimezoneSettingsModal';
-import { getBrowserTimeZone, isValidTimeZone } from '@/lib/utils';
-
-const NetworkIndicator = () => {
-  const { chain, isConnected } = useAccount();
-
-  if (!isConnected) return null;
-
-  if (!chain) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-100 text-red-700 text-sm font-medium border border-red-200">
-        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-        Wrong Network
-      </div>
-    );
-  }
-
-  const isTestnet = chain.testnet === true;
-  const bgColor = isTestnet
-    ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
-    : 'bg-green-100 text-green-800 border-green-200';
-  const dotColor = isTestnet ? 'bg-yellow-500' : 'bg-green-500';
-
-  return (
-    <div className={`flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-medium ${bgColor}`}>
-      <span className={`w-2 h-2 rounded-full ${dotColor}`}></span>
-      {chain.name}
-    </div>
-  );
-};
+import { CopyButton } from '@/components/ui/CopyButton';
 
 export function Header() {
   const { name, email, address, timezone, logout, setTimezone } = useAuthStore();
@@ -192,44 +151,45 @@ export function Header() {
             </Button>
 
           <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex items-center gap-3 h-auto py-2 px-3">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-500 text-white">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="hidden sm:block text-left">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {name || 'User'}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{shortAddress}</p>
-                  </div>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>
-                  <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium">{name || 'User'}</p>
-                    <p className="text-xs text-gray-500">{email || 'No email'}</p>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="flex items-center gap-3 h-auto py-2 px-3">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-500 text-white">
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="hidden sm:block text-left">
+                  <p className="text-sm font-medium text-gray-900">{name || 'User'}</p>
+                  <p className="text-xs text-gray-500">{shortAddress}</p>
+                </div>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium">{name || 'User'}</p>
+                  <p className="text-xs text-gray-500">{email || 'No email'}</p>
+                  <div className="flex items-center gap-1">
                     <p className="text-xs text-gray-400 font-mono">{shortAddress}</p>
+                    {address && <CopyButton text={address} />}
                   </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <User className="mr-2 h-4 w-4" />
-                  Profile
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setTimezoneSettingsOpen(true)}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Timezone Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="text-red-600">
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem>
+                <User className="mr-2 h-4 w-4" />
+                Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </DropdownMenuItem>
+            </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
