@@ -390,76 +390,13 @@ GET /api/v1/stellar/transaction/:transactionHash
 
 ## Troubleshooting
 
-### Backend Issues
+For common issues and solutions, please refer to our [Troubleshooting Guide](docs/troubleshooting.md).
 
-**Port Already in Use**
+### Quick Fixes
 
-```bash
-# Kill process on port 3001
-lsof -ti:3001 | xargs kill -9
-
-# Or specify a different port
-PORT=3002 npm run dev
-```
-
-**OpenAI API Errors**
-
-- Verify your `OPENAI_API_KEY` is correct
-- Check API key has sufficient quota at [platform.openai.com](https://platform.openai.com/account/usage/overview)
-- Ensure rate limits are not exceeded
-
-**CORS Errors**
-
-- Update `CORS_ALLOWED_ORIGINS` in `.env` to include your frontend URL
-- For development: `CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001`
-
-### Frontend Issues
-
-**API Connection Failed**
-
-- Verify backend is running on the correct port
-- Check `NEXT_PUBLIC_API_URL` matches backend URL
-- Clear browser cache: `cmd/ctrl + shift + delete`
-
-**Web3Auth Connection Issues**
-
-- Verify `NEXT_PUBLIC_WEB3AUTH_CLIENT_ID` is correct
-- Check Web3Auth dashboard for app configuration
-- Ensure redirect URLs are properly configured
-
-**Contract Address Not Found**
-
-- Verify `NEXT_PUBLIC_CONTRACT_ADDRESS` is deployed
-- Check contract deployment on Stellar Testnet
-- Use `soroban contract info --id <address> --network testnet`
-
-### General Issues
-
-**Port Already in Use**
-
-```bash
-# macOS/Linux
-lsof -ti:3000 | xargs kill -9   # Frontend
-lsof -ti:3001 | xargs kill -9   # Backend
-
-# Windows
-netstat -ano | findstr :3000
-taskkill /PID <PID> /F
-```
-
-**Node Modules Issues**
-
-```bash
-# Clear cache and reinstall
-rm -rf node_modules package-lock.json
-npm install
-```
-
-**Environment Variables Not Loaded**
-
-- Restart the development server
-- Verify `.env` file is in the correct directory
-- Check for typos in variable names
+- **Port Already in Use**: `lsof -ti:3000,3001 | xargs kill -9`
+- **Environment Variables**: Ensure `.env` files exist in both `backend/` and `frontend/` directories.
+- **Node Modules**: `rm -rf node_modules && npm install`
 
 ---
 
