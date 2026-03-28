@@ -13,12 +13,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
-        <OfflineProvider>
-          {children}
-          <Toaster />
-        </OfflineProvider>
+        {children}
+        <Toaster
+          position="top-right"
+          richColors
+          closeButton
+          duration={4000}
+        />
       </QueryClientProvider>
     </WagmiProvider>
   );
 }
-

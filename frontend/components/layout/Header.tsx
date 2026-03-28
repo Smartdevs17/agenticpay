@@ -17,8 +17,16 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Bell, LogOut, User, Settings, Sun, Moon, Clock, CloudOff, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDisconnect } from 'wagmi';
+import { web3auth } from '@/lib/web3auth';
+import { CopyButton } from '@/components/ui/CopyButton';
+import { NotificationSettings } from '@/components/notifications/NotificationSettings';
+
+// 1. I added useNetwork to the existing wagmi import
+
 import { LanguageSwitcher } from '@/components/language/LanguageSwitcher';
 import { useEffect, useState } from 'react';
+
 import { useDisconnect, useAccount } from 'wagmi';
 import { web3auth } from '@/lib/web3auth';
 import {
@@ -61,6 +69,7 @@ const NetworkIndicator = () => {
     </div>
   );
 };
+
 
 export function Header() {
   const { name, email, address, timezone, logout, setTimezone } = useAuthStore();
@@ -181,6 +190,66 @@ export function Header() {
               )}
             </Button>
 
+        <div className="flex items-center gap-4">
+          
+          {/* 3. I dropped the new component right here! */}
+          <NetworkIndicator />
+
+          {/* Notifications */}
+          <Button variant="ghost" size="icon" className="relative">
+            <Bell className="h-5 w-5" />
+            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+          </Button>
+
+          {/* User menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="flex items-center gap-3 h-auto py-2 px-3">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-500 text-white">
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="hidden sm:block text-left">
+                  <p className="text-sm font-medium text-gray-900">{name || 'User'}</p>
+                  <p className="text-xs text-gray-500">{shortAddress}</p>
+                </div>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel>
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium">{name || 'User'}</p>
+                  <p className="text-xs text-gray-500">{email || 'No email'}</p>
+                  <div className="flex items-center gap-1">
+                    <p className="text-xs text-gray-400 font-mono">{shortAddress}</p>
+                    {address && <CopyButton text={address} />}
+                  </div>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem>
+                <User className="mr-2 h-4 w-4" />
+                Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <NotificationSettings />
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    </header>
+  );
+}
             {/* Theme schedule settings */}
             <Button
               variant="ghost"

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { CopyButton } from '@/components/ui/CopyButton';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Card, CardContent } from '@/components/ui/card';
@@ -22,7 +23,8 @@ import { useAuthStore } from '@/store/useAuthStore';
 export default function PaymentsPage() {
   const router = useRouter();
   const { payments, loading } = useDashboardData();
-  const timezone = useAuthStore((state) => state.timezone);
+  const { address } = useAuthStore();
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -73,7 +75,6 @@ export default function PaymentsPage() {
         )}
       </div>
 
-      {/* --- PAYMENT LIST --- */}
       <div className="space-y-4">
         {payments.map((payment, index) => (
           <motion.div
@@ -103,7 +104,7 @@ export default function PaymentsPage() {
                     </p>
                     {payment.transactionHash && (
                       <a
-                        href={`https://testnet.cronoscan.com/tx/${payment.transactionHash}`}
+                        href={'https://testnet.cronoscan.com/tx/' + payment.transactionHash}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2 justify-end"
@@ -115,10 +116,11 @@ export default function PaymentsPage() {
                   </div>
                 </div>
                 {payment.transactionHash && (
-                  <div className="mt-4 pt-4 border-t">
-                    <p className="text-xs text-gray-500 font-mono break-all">
+                  <div className="mt-4 pt-4 border-t flex items-center gap-2">
+                    <p className="text-xs text-gray-500 font-mono break-all flex-1">
                       {payment.transactionHash}
                     </p>
+                    <CopyButton text={payment.transactionHash} />
                   </div>
                 )}
               </CardContent>
