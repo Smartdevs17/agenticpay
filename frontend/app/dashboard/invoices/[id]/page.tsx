@@ -4,24 +4,56 @@ import { useParams } from 'next/navigation';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Download } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { ArrowLeft, Download, Pencil, X, Check, History, PenLine } from 'lucide-react';
 import Link from 'next/link';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  formatDateInTimeZone,
-  formatDateTimeInTimeZone,
-  formatTimeInTimeZone,
-} from '@/lib/utils';
-import { useAuthStore } from '@/store/useAuthStore';
+import { useState, useEffect } from 'react';
+
+interface InvoiceVersion {
+  timestamp: string;
+  workDescription: string;
+  hoursWorked: number;
+  hourlyRate: number;
+  calculatedAmount: number;
+  signedAt: string;
+}
 
 export default function InvoiceDetailPage() {
   const params = useParams();
   const rawId = params.id as string;
   const projectId = rawId.startsWith('INV-') ? rawId.replace('INV-', '') : rawId;
-  const timezone = useAuthStore((state) => state.timezone);
 
   const { useProjectDetail } = useAgenticPay();
   const { project, loading } = useProjectDetail(projectId);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [requiresSignature, setRequiresSignature] = useState(false);
+  const [isSigned, setIsSigned] = useState(false);
+  const [versionHistory, setVersionHistory] = useState<InvoiceVersion[]>([]);
+
+  const [editedValues, setEditedValues] = useState({
+    workDescription: 'Verified work',
+    hoursWorked: 0,
+    hourlyRate: 0,
+  });
+
+  const calculatedAmount =
+    editedValues.hoursWorked > 0 && editedValues.hourlyRate > 0
+      ? editedValues.hoursWorked * editedValues.hourlyRate
+      : null;
+
+  useEffect(() => {
+    if (!rawId) return;
+    try {
+      const stored = localStorage.getItem(`invoice-history-${rawId}`);
+      if (stored) setVersionHistory(JSON.parse(stored));
+    } catch {
+      // ignore
+    }
+  }, [rawId]);
 
   if (loading) {
     return (
@@ -53,26 +85,172 @@ export default function InvoiceDetailPage() {
   const status = project.status === 'completed' ? 'paid' : 'pending';
   const generatedAt = new Date(project.createdAt);
 
-  const handlePrint = () => {
-    window.print();
+  const handlePrint = () => window.print();
+
+  const handleSaveEdits = () => {
+    setIsEditing(false);
+    setRequiresSignature(true);
+    setIsSigned(false);
   };
 
-  return (
-    <div className="space-y-6 invoice-print-page">
-      <PageBreadcrumb
-        items={[
-          { label: 'Dashboard', href: '/dashboard' },
-          { label: 'Invoices', href: '/dashboard/invoices' },
-        ]}
-        currentPage={`Invoice ${rawId}`}
-      />
+  const handleSign = () => {
+    const newVersion: InvoiceVersion = {
+      timestamp: new Date().toISOString(),
+      workDescription: editedValues.workDescription,
+      hoursWorked: editedValues.hoursWorked,
+      hourlyRate: editedValues.hourlyRate,
+      calculatedAmount: calculatedAmount ?? Number(project.totalAmount),
+      signedAt: new Date().toLocaleString(),
+    };
 
-      <Link href="/dashboard/invoices" className="no-print inline-flex">
-        <Button variant="ghost" className="mb-4">
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Invoices
-        </Button>
-      </Link>
+    const updated = [newVersion, ...versionHistory];
+    setVersionHistory(updated);
+    localStorage.setItem(`invoice-history-${rawId}`, JSON.stringify(updated));
+    setRequiresSignature(false);
+    setIsSigned(true);
+  };
+
+  const displayAmount = isSigned && calculatedAmount
+    ? calculatedAmount
+    : project.totalAmount;
+
+  return (
+    <div className="invoice-print-page space-y-6">
+      <div className="no-print flex items-center justify-between">
+        <Link href="/dashboard/invoices" className="inline-flex">
+          <Button variant="ghost" className="mb-4">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Invoices
+          </Button>
+        </Link>
+        <div className="flex gap-2 mb-4">
+          <Button variant="outline" onClick={() => setShowHistory(!showHistory)}>
+            <History className="mr-2 h-4 w-4" />
+            Version History ({versionHistory.length})
+          </Button>
+          {!isEditing && !requiresSignature && (
+            <Button onClick={() => setIsEditing(true)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit Invoice
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {showHistory && (
+        <Card className="border-blue-200 bg-blue-50">
+          <CardHeader>
+            <CardTitle className="text-base text-blue-800">Version History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {versionHistory.length === 0 ? (
+              <p className="text-sm text-blue-600">No previous versions yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {versionHistory.map((version, index) => (
+                  <div key={index} className="rounded-lg border border-blue-200 bg-white p-4 text-sm">
+                    <div className="flex justify-between">
+                      <span className="font-semibold text-slate-700">
+                        Version {versionHistory.length - index}
+                      </span>
+                      <span className="text-slate-500">{version.signedAt}</span>
+                    </div>
+                    <p className="mt-1 text-slate-600">Description: {version.workDescription}</p>
+                    <p className="text-slate-600">
+                      Hours: {version.hoursWorked} x Rate: {version.hourlyRate} ={' '}
+                      <strong>{version.calculatedAmount}</strong>
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {requiresSignature && (
+        <Card className="border-yellow-300 bg-yellow-50">
+          <CardContent className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-3">
+              <PenLine className="h-5 w-5 text-yellow-700" />
+              <div>
+                <p className="font-semibold text-yellow-800">Re-signature Required</p>
+                <p className="text-sm text-yellow-700">
+                  Invoice was edited. Please confirm and sign to apply changes.
+                </p>
+              </div>
+            </div>
+            <Button onClick={handleSign} className="bg-yellow-600 hover:bg-yellow-700">
+              <Check className="mr-2 h-4 w-4" />
+              Confirm and Sign
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {isEditing && (
+        <Card className="border-slate-300">
+          <CardHeader>
+            <CardTitle className="text-base">Edit Invoice Details</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label>Work Description</Label>
+              <Input
+                className="mt-1"
+                value={editedValues.workDescription}
+                onChange={(e) =>
+                  setEditedValues({ ...editedValues, workDescription: e.target.value })
+                }
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Hours Worked</Label>
+                <Input
+                  className="mt-1"
+                  type="number"
+                  min="0"
+                  value={editedValues.hoursWorked}
+                  onChange={(e) =>
+                    setEditedValues({ ...editedValues, hoursWorked: Number(e.target.value) })
+                  }
+                />
+              </div>
+              <div>
+                <Label>Hourly Rate ({project.currency})</Label>
+                <Input
+                  className="mt-1"
+                  type="number"
+                  min="0"
+                  value={editedValues.hourlyRate}
+                  onChange={(e) =>
+                    setEditedValues({ ...editedValues, hourlyRate: Number(e.target.value) })
+                  }
+                />
+              </div>
+            </div>
+            {calculatedAmount !== null && (
+              <div className="rounded-lg bg-slate-50 p-4">
+                <p className="text-sm text-slate-600">Recalculated Amount</p>
+                <p className="text-2xl font-bold text-slate-900">
+                  {calculatedAmount} {project.currency}
+                </p>
+              </div>
+            )}
+            <div className="flex gap-2 pt-2">
+              <Button onClick={handleSaveEdits}>
+                <Check className="mr-2 h-4 w-4" />
+                Save Changes
+              </Button>
+              <Button variant="ghost" onClick={() => setIsEditing(false)}>
+                <X className="mr-2 h-4 w-4" />
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="invoice-print-card overflow-hidden border border-slate-200 shadow-sm">
         <CardHeader className="space-y-6 border-b border-slate-200 bg-slate-50/60">
@@ -101,9 +279,9 @@ export default function InvoiceDetailPage() {
                 Generated
               </p>
               <p className="mt-2 font-medium text-slate-900">
-                {formatDateInTimeZone(generatedAt, timezone)}
+                {generatedAt.toLocaleDateString()}
               </p>
-              <p className="text-xs text-slate-500">{formatTimeInTimeZone(generatedAt, timezone)}</p>
+              <p className="text-xs text-slate-500">{generatedAt.toLocaleTimeString()}</p>
             </div>
             <div className="print-break-inside-avoid rounded-xl border border-slate-200 bg-white p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -125,10 +303,12 @@ export default function InvoiceDetailPage() {
             <div className="print-break-inside-avoid rounded-2xl border border-slate-200 bg-slate-50 p-5 sm:col-span-2">
               <p className="mb-1 text-sm text-gray-600">Amount Due</p>
               <p className="text-3xl font-bold tracking-tight text-slate-900">
-                {project.totalAmount} {project.currency}
+                {displayAmount} {project.currency}
               </p>
               <p className="mt-2 text-sm text-slate-500">
-                Payment for the completed work recorded in AgenticPay.
+                {isSigned && calculatedAmount
+                  ? editedValues.workDescription
+                  : 'Payment for the completed work recorded in AgenticPay.'}
               </p>
             </div>
             <div className="print-break-inside-avoid rounded-2xl border border-slate-200 p-5">
@@ -172,17 +352,37 @@ export default function InvoiceDetailPage() {
               <div className="flex items-center justify-between gap-4 px-5 py-4 text-sm">
                 <span className="text-slate-600">Generated</span>
                 <span className="text-right font-medium text-slate-900">
-                  {formatDateTimeInTimeZone(generatedAt, timezone)}
+                  {generatedAt.toLocaleString()}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-4 px-5 py-4 text-sm">
                 <span className="text-slate-600">Work Scope</span>
-                <span className="text-right font-medium text-slate-900">Full Project</span>
+                <span className="text-right font-medium text-slate-900">
+                  {isSigned && editedValues.workDescription
+                    ? editedValues.workDescription
+                    : 'Full Project'}
+                </span>
               </div>
+              {isSigned && editedValues.hoursWorked > 0 && (
+                <>
+                  <div className="flex items-center justify-between gap-4 px-5 py-4 text-sm">
+                    <span className="text-slate-600">Hours Worked</span>
+                    <span className="text-right font-medium text-slate-900">
+                      {editedValues.hoursWorked}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 px-5 py-4 text-sm">
+                    <span className="text-slate-600">Hourly Rate</span>
+                    <span className="text-right font-medium text-slate-900">
+                      {editedValues.hourlyRate} {project.currency}
+                    </span>
+                  </div>
+                </>
+              )}
               <div className="flex items-center justify-between gap-4 px-5 py-4 text-base">
                 <span className="font-semibold text-slate-900">Total Due</span>
                 <span className="text-right text-xl font-semibold text-slate-900">
-                  {project.totalAmount} {project.currency}
+                  {displayAmount} {project.currency}
                 </span>
               </div>
             </div>
