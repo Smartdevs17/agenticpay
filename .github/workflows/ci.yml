@@ -6,16 +6,28 @@ on:
   pull_request:
     branches: [main, dev]
 
+# ── Auto-scaling: cancel redundant runs on the same branch/PR ────────────────
+# This is the primary cost-saving mechanism for CI: only the most recent
+# push on a branch consumes runner minutes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# ── Resource tags emitted on every run ───────────────────────────────────────
+# Downstream tooling (cost-monitor, dashboards) can filter by these values.
+env:
+  SERVICE: agenticpay
+  ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+  COMMIT_SHORT: ${{ github.sha }}
+
 jobs:
+  # ── Detect changed paths (avoids running unaffected jobs) ─────────────────
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
+      backend:   ${{ steps.filter.outputs.backend }}
+      frontend:  ${{ steps.filter.outputs.frontend }}
       contracts: ${{ steps.filter.outputs.contracts }}
     steps:
       - uses: actions/checkout@v4
@@ -30,28 +42,48 @@ jobs:
             contracts:
               - 'contracts/**'
 
+  # ── Backend ───────────────────────────────────────────────────────────────
   backend:
     needs: changes
     if: ${{ needs.changes.outputs.backend == 'true' }}
     name: Backend (Node.js ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    # Auto-scaling: cap concurrent backend matrix jobs to avoid runner exhaustion.
+    # With a 2-version matrix, max 2 jobs run simultaneously per branch.
+    timeout-minutes: 15
     strategy:
       matrix:
         node-version: [20, 22]
+      # Don't cancel the entire matrix on a single failure — let all versions report
+      fail-fast: false
+      # Auto-scale: limit simultaneous matrix jobs.
+      # Raise to 2 (or remove) if faster turnaround is preferred over cost savings.
+      max-parallel: 2
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
+
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: backend/package-lock.json
 
+      # Cache the installed node_modules between runs with the same lock file.
+      # This shaves ~30s off each run after the first on a given branch.
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-backend-modules-node${{ matrix.node-version }}-${{ hashFiles('backend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-backend-modules-node${{ matrix.node-version }}-
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Lint & Test
         run: |
@@ -61,37 +93,60 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Emit build size as a workflow annotation (picked up by cost-monitor)
+      - name: Report build size
+        if: always()
+        run: |
+          if [ -d dist ]; then
+            SIZE=$(du -sh dist | cut -f1)
+            echo "::notice title=Backend Build Size (Node ${{ matrix.node-version }})::${SIZE}"
+          fi
+
+  # ── Frontend ──────────────────────────────────────────────────────────────
   frontend:
     needs: changes
     if: ${{ needs.changes.outputs.frontend == 'true' }}
     name: Frontend (Node.js ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         node-version: [20, 22]
+      fail-fast: false
+      max-parallel: 2
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-frontend-modules-node${{ matrix.node-version }}-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-frontend-modules-node${{ matrix.node-version }}-
+
+      # Next.js build cache (incremental compilation)
       - name: Cache Next.js build
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/frontend/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('frontend/package-lock.json') }}-${{ hashFiles('frontend/src/**') }}
+          key: ${{ runner.os }}-nextjs-node${{ matrix.node-version }}-${{ hashFiles('frontend/package-lock.json') }}-${{ hashFiles('frontend/src/**') }}
           restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('frontend/package-lock.json') }}-
+            ${{ runner.os }}-nextjs-node${{ matrix.node-version }}-${{ hashFiles('frontend/package-lock.json') }}-
+            ${{ runner.os }}-nextjs-node${{ matrix.node-version }}-
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Lint & Test
         run: |
@@ -101,11 +156,21 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Report build size
+        if: always()
+        run: |
+          if [ -d .next ]; then
+            SIZE=$(du -sh --exclude=cache .next 2>/dev/null || du -sh .next | cut -f1)
+            echo "::notice title=Frontend Build Size (Node ${{ matrix.node-version }})::${SIZE}"
+          fi
+
+  # ── Smart Contracts ───────────────────────────────────────────────────────
   contracts:
     needs: changes
     if: ${{ needs.changes.outputs.contracts == 'true' }}
     name: Smart Contracts (Rust)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
