@@ -64,11 +64,14 @@ function shouldRetryStatus(status: number): boolean {
   return status >= 500 || status === 429;
 }
 
+// FIX: Robust check for AbortError to prevent test timeouts
 function shouldRetryError(error: unknown): boolean {
   if (error instanceof ApiError) return shouldRetryStatus(error.status);
 
-  // Abort should NOT retry
-  if (error instanceof Error && error.name === 'AbortError') return false;
+  const err = normalizeError(error);
+  if (err.name === 'AbortError' || err.message.includes('aborted')) {
+    return false;
+  }
 
   // Network errors → retry
   return true;

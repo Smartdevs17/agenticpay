@@ -116,7 +116,7 @@ export default function InvoicesPage() {
       {/* Content */}
       {filteredInvoices.length === 0 ? (
         <Card>
-          <CardContent>
+          <CardContent className="p-0">
             <EmptyState
               icon={FileText}
               title={
@@ -192,7 +192,7 @@ export default function InvoicesPage() {
                             invoice.status
                           )}`}
                         >
-                          {invoice.status}
+                          {invoice.status.toUpperCase()}
                         </span>
                       </div>
                     </div>

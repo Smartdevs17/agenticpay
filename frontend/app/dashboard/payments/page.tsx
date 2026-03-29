@@ -1,30 +1,31 @@
 'use client';
 
-import { useState } from 'react';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Card, CardContent } from '@/components/ui/card';
+import { useState } from 'react';
 import {
   CheckCircle2,
   Clock,
   XCircle,
   ExternalLink,
   Wallet,
-  QrCode,
   Loader2,
+  QrCode
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useRouter } from 'next/navigation';
 import { PaymentCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
 import { formatDateTimeInTimeZone } from '@/lib/utils';
-import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { PaymentQRModal } from '@/components/payment/QRCode';
 
 export default function PaymentsPage() {
   const router = useRouter();
   const { payments, loading } = useDashboardData();
-  const timezone = useAuthStore((state) => state.timezone);
+  // FIXED: Removed 'address' from destructuring as it was unused
+  const { timezone } = useAuthStore();
 
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const address = useAuthStore((state) => state.address);
@@ -127,9 +128,7 @@ export default function PaymentsPage() {
                         </h3>
 
                         <p className="text-sm text-gray-600">
-                          {payment.type === 'milestone_payment'
-                            ? 'Milestone Payment'
-                            : 'Full Payment'}
+                          {payment.type === 'milestone_payment' ? 'Milestone Payment' : 'Full Payment'}
                         </p>
 
                         <p className="text-xs text-gray-500 mt-1">

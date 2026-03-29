@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { PageBreadcrumb } from '@/components/layout/PageBreadcrumb';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +17,6 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { formatDateInTimeZone } from '@/lib/utils';
 import { useAuthStore } from '@/store/useAuthStore';
-import { PageBreadcrumb } from '@/components/layout/PageBreadcrumb';
 import { OfflineActionQueuedError } from '@/lib/offline';
 
 export default function ProjectDetailPage() {
@@ -217,20 +217,22 @@ export default function ProjectDetailPage() {
                           toast.success("Invoice Generated");
                           refetch();
                         } catch (invError) {
-                          if (invError instanceof OfflineActionQueuedError) {
-                            toast.info(invError.message);
+                          const err = invError as Error;
+                          if (err.name === 'OfflineActionQueuedError' || err.message.includes('queued')) {
+                            toast.info(err.message);
                           } else {
-                            toast.error("Invoice error: " + (invError as Error).message);
+                            toast.error("Invoice error: " + err.message);
                           }
                         }
                       } else {
                         toast.error("Verification failed: " + verification.summary);
                       }
                     } catch (e) {
-                      if (e instanceof OfflineActionQueuedError) {
-                        toast.info(e.message);
+                      const err = e as Error;
+                      if (err.name === 'OfflineActionQueuedError' || err.message.includes('queued')) {
+                        toast.info(err.message);
                       } else {
-                        toast.error((e as Error).message);
+                        toast.error(err.message);
                       }
                     }
                   }}>

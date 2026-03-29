@@ -33,7 +33,6 @@ function getSupportedTimeZones() {
   if (typeof Intl.supportedValuesOf !== 'function') {
     return [];
   }
-
   return Intl.supportedValuesOf('timeZone');
 }
 

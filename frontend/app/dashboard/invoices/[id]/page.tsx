@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { PageBreadcrumb } from '@/components/layout/PageBreadcrumb';
 import { ArrowLeft, Download } from 'lucide-react';
 import Link from 'next/link';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,7 +14,6 @@ import {
   formatTimeInTimeZone,
 } from '@/lib/utils';
 import { useAuthStore } from '@/store/useAuthStore';
-import { PageBreadcrumb } from '@/components/layout/PageBreadcrumb';
 
 export default function InvoiceDetailPage() {
   const params = useParams();
