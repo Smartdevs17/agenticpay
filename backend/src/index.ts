@@ -19,6 +19,11 @@ import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
 import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
+import { validateEnv, config } from './config/env.js';
+
+// Validate environment variables at startup
+validateEnv();
+const env = config();
 
 const traceStorage = new AsyncLocalStorage<string>();
 
