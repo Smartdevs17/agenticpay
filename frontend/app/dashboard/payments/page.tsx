@@ -10,13 +10,13 @@ import {
   ExternalLink,
   Wallet,
   Loader2,
+  QrCode
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { PaymentCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
 import { formatDateTimeInTimeZone } from '@/lib/utils';
-import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { PaymentQRModal } from '@/components/payment/QRCode';
 
