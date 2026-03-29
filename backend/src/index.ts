@@ -168,6 +168,18 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // SLA Tracking middleware
 app.use(slaTrackingMiddleware);
 
+// Cache defaults:
+//   - GET/HEAD: individual routes apply cacheControl() with per-route TTLs.
+//   - All other methods: always no-store (mutations must never be cached).
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('Cache-Control', 'no-store');
+  }
+  // Vary on Accept-Encoding so compressed/uncompressed responses are cached separately
+  res.setHeader('Vary', 'Accept-Encoding');
+  next();
+});
+
 // Health & Readiness checks
 app.use(healthRouter);
 

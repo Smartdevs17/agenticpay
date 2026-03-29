@@ -14,6 +14,7 @@ import {
   bulkUpdateSchema,
   bulkDeleteSchema,
 } from '../schemas/index.js';
+import { cacheControl, CacheTTL } from '../middleware/cache.js';
 
 export const verificationRouter = Router();
 
@@ -151,9 +152,10 @@ verificationRouter.delete(
   })
 );
 
-// Get verification result by ID
+// Get verification result by ID — cache for 30 s (result may still be updated)
 verificationRouter.get(
   '/:id',
+  cacheControl({ maxAge: CacheTTL.SHORT }),
   asyncHandler(async (req, res) => {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const result = await getVerification(id);

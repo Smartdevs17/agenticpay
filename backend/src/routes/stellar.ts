@@ -4,11 +4,12 @@ import {
   getTransactionStatus,
   InvalidStellarInputError,
 } from '../services/stellar.js';
+import { cacheControl, CacheTTL } from '../middleware/cache.js';
 
 export const stellarRouter = Router();
 
-// Get Stellar account info
-stellarRouter.get('/account/:address', async (req, res) => {
+// Get Stellar account info — balances change frequently; cache for 30 s
+stellarRouter.get('/account/:address', cacheControl({ maxAge: CacheTTL.SHORT }), async (req, res) => {
   try {
     const account = await getAccountInfo(req.params.address);
     return res.json(account);
@@ -22,8 +23,8 @@ stellarRouter.get('/account/:address', async (req, res) => {
   }
 });
 
-// Get transaction status
-stellarRouter.get('/tx/:hash', async (req, res) => {
+// Get transaction status — confirmed txs are immutable; cache for 10 min
+stellarRouter.get('/tx/:hash', cacheControl({ maxAge: CacheTTL.IMMUTABLE }), async (req, res) => {
   try {
     const tx = await getTransactionStatus(req.params.hash);
     return res.json(tx);
