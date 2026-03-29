@@ -1,0 +1,7 @@
+C:\Users\USER\desktop\king\clones\agenticpay\frontend\components\layout
+├── Header.tsx
+├── PageBreadcrumb.tsx
+└── Sidebar.tsx
+
+file: 3
+

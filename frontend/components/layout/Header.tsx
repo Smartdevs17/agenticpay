@@ -36,6 +36,7 @@ import { getDashboardBreadcrumbs } from '@/lib/breadcrumbs';
 import { ThemeSettingsModal } from '@/components/theme/ThemeSettingsModal';
 import { TimezoneSettingsModal } from '@/components/settings/TimezoneSettingsModal';
 import { getBrowserTimeZone, isValidTimeZone } from '@/lib/utils';
+import {Menu} from "lucide-react"
 
 /* ---------------- TYPES ---------------- */
 type BreadcrumbItemType = {
@@ -79,7 +80,11 @@ const NetworkIndicator = () => {
 };
 
 /* ---------------- HEADER ---------------- */
-export function Header() {
+export function Header({
+    onMenuClick,
+  }: {
+    onMenuClick: () => void;
+  }) {
   const { name, email, address, timezone, logout, setTimezone } =
     useAuthStore();
   const { isDark, mode, setIsDark } = useThemeStore();
@@ -145,9 +150,20 @@ export function Header() {
       <header className="sticky top-0 z-30 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700/60">
         <div className="flex h-16 items-center justify-between px-4 sm:px-6">
           {/* LEFT */}
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
-            Dashboard
-          </h1>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden"
+              onClick={onMenuClick}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
+              Dashboard
+            </h1>
+          </div>
 
           {/* RIGHT */}
           <div className="flex items-center gap-4">
