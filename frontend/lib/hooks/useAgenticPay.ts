@@ -1,11 +1,21 @@
-import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useReadContracts, useAccount } from 'wagmi';
+import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useReadContracts, useAccount, usePublicClient } from 'wagmi';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../contracts';
 import { parseEther, formatEther } from 'viem';
 import { Project, Milestone } from '../types';
 
+type TransactionPreview = {
+    contractAddress: `0x${string}`;
+    functionName: string;
+    args: unknown[];
+    value?: bigint;
+    gasEstimate?: bigint;
+    submit: () => void;
+};
+
 export const useAgenticPay = () => {
     const { writeContract, data: hash, isPending, error } = useWriteContract();
     const { address, isConnecting, isReconnecting } = useAccount();
+    const publicClient = usePublicClient();
 
     const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
         hash,
@@ -17,6 +27,45 @@ export const useAgenticPay = () => {
         functionName: 'disputeArbitrator',
     });
 
+    const prepareTransaction = async (
+        functionName: string,
+        args: unknown[] = [],
+        value?: bigint
+    ): Promise<TransactionPreview> => {
+        let gasEstimate: bigint | undefined;
+
+        if (publicClient && address) {
+            try {
+                gasEstimate = await publicClient.estimateContractGas({
+                    address: CONTRACT_ADDRESS,
+                    abi: CONTRACT_ABI,
+                    functionName: functionName as never,
+                    args: args as never,
+                    account: address,
+                    value,
+                });
+            } catch {
+                // Gas estimation can fail for some wallets/networks. Modal still allows explicit confirmation.
+            }
+        }
+
+        return {
+            contractAddress: CONTRACT_ADDRESS,
+            functionName,
+            args,
+            value,
+            gasEstimate,
+            submit: () =>
+                writeContract({
+                    address: CONTRACT_ADDRESS,
+                    abi: CONTRACT_ABI,
+                    functionName: functionName as never,
+                    args: args as never,
+                    value,
+                }),
+        };
+    };
+
     const createProject = async (
         freelancer: string,
         amount: string,
@@ -25,41 +74,29 @@ export const useAgenticPay = () => {
         workDescription: string,
         deadline: number // timestamp
     ) => {
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'createProject',
-            args: [freelancer, parseEther(amount), paymentType, tokenAddress, workDescription, BigInt(deadline)],
-        });
+        const args = [freelancer, parseEther(amount), paymentType, tokenAddress, workDescription, BigInt(deadline)];
+        const prepared = await prepareTransaction('createProject', args);
+        prepared.submit();
+        return prepared;
     };
 
     const fundProject = async (projectId: string, amount: string, paymentType: number) => {
-        // If paymentType is 0 (Native ETH), send value.
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'fundProject',
-            args: [BigInt(projectId)],
-            value: paymentType === 0 ? parseEther(amount) : 0n,
-        });
+        const value = paymentType === 0 ? parseEther(amount) : 0n;
+        const prepared = await prepareTransaction('fundProject', [BigInt(projectId)], value);
+        prepared.submit();
+        return prepared;
     };
 
     const submitWork = async (projectId: string, githubRepo: string) => {
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'submitWork',
-            args: [BigInt(projectId), githubRepo],
-        });
+        const prepared = await prepareTransaction('submitWork', [BigInt(projectId), githubRepo]);
+        prepared.submit();
+        return prepared;
     };
 
     const approveWork = async (projectId: string) => {
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'approveWork',
-            args: [BigInt(projectId)],
-        });
+        const prepared = await prepareTransaction('approveWork', [BigInt(projectId)]);
+        prepared.submit();
+        return prepared;
     };
 
     // -- Data Fetching Hooks --
@@ -141,6 +178,7 @@ export const useAgenticPay = () => {
         approveWork,
         useUserProjects,
         useProjectDetail,
+        prepareTransaction,
         hash,
         isPending,
         isConfirming,

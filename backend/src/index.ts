@@ -14,6 +14,8 @@ import { healthRouter } from './routes/health.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
+import { splitsRouter } from './routes/splits.js';
+import { refundsRouter } from './routes/refunds.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
@@ -214,6 +216,8 @@ apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
 apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/legacy', legacyRouter);
+apiV1Router.use('/splits', splitsRouter);
+apiV1Router.use('/refunds', refundsRouter);
 // Feature flag admin — inspect & override flags at runtime
 apiV1Router.use('/flags', flagsRouter);
 
