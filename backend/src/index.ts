@@ -27,10 +27,19 @@ import { flagsRouter } from './routes/flags.js';
 import { emailRouter } from './routes/email.js';
 import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
+import { ipAllowlistRouter } from './routes/ip-allowlist.js';
+import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 
 // Validate environment variables at startup
 validateEnv();
 const env = getConfig();
+
+// Initialize IP allowlist from environment
+if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
+  const allowedIps = env.IP_ALLOWLIST ? env.IP_ALLOWLIST.split(',').map(ip => ip.trim()).filter(Boolean) : [];
+  initIpAllowlist(allowedIps, env.IP_ALLOWLIST_ENABLED);
+  console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
+}
 
 const traceStorage = new AsyncLocalStorage<string>();
 
@@ -227,8 +236,10 @@ apiV1Router.use('/emails', emailRouter);
 apiV1Router.use('/portfolio', portfolioRouter);
 // Backup system
 apiV1Router.use('/backup', backupRouter);
+// IP allowlist management
+apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 
-app.use('/api/v1', apiV1Router);
+app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
