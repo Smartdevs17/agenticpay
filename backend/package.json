@@ -21,6 +21,7 @@
     "express-rate-limit": "^7.4.1",
     "node-cron": "^3.0.3",
     "openai": "^4.67.0",
+    "web-push": "^3.6.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

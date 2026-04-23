@@ -27,6 +27,7 @@ import { flagsRouter } from './routes/flags.js';
 import { emailRouter } from './routes/email.js';
 import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
+import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 
@@ -238,6 +239,8 @@ apiV1Router.use('/portfolio', portfolioRouter);
 apiV1Router.use('/backup', backupRouter);
 // IP allowlist management
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
+// Push notifications
+apiV1Router.use('/push', pushRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 

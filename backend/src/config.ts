@@ -15,6 +15,8 @@ const envSchema = z.object({
   RATE_LIMIT_ENTERPRISE: z.string().default('1000'),
   RATE_LIMIT_WINDOW_MS: z.string().default(String(15 * 60 * 1000)),
   COMPRESSION_THRESHOLD: z.string().default('1024'),
+  VAPID_PUBLIC_KEY: z.string().default(''),
+  VAPID_PRIVATE_KEY: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -55,6 +57,9 @@ export const config = {
   compression: {
     threshold: Number(env.COMPRESSION_THRESHOLD),
   },
+  vapidKeys: env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY
+    ? { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY }
+    : null,
 } as const;
 
 export type Config = typeof config;

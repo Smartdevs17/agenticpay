@@ -21,6 +21,8 @@ const envSchema = z.object({
   IP_ALLOWLIST_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
   IP_ALLOWLIST_BYPASS_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
   IP_ALLOWLIST_BYPASS_EXPIRY_MS: z.coerce.number().default(30 * 60 * 1000),
+  VAPID_PUBLIC_KEY: z.string().default(''),
+  VAPID_PRIVATE_KEY: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
