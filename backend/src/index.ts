@@ -15,6 +15,8 @@ import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
 import { onboardingRouter } from './routes/onboarding.js';
+import { splitsRouter } from './routes/splits.js';
+import { refundsRouter } from './routes/refunds.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
@@ -23,6 +25,9 @@ import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
+import { emailRouter } from './routes/email.js';
+import { portfolioRouter } from './routes/portfolio.js';
+import { backupRouter } from './routes/backup.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -216,8 +221,14 @@ apiV1Router.use('/queue', queueRouter);
 apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
-// Feature flag admin — inspect & override flags at runtime
-apiV1Router.use('/flags', flagsRouter);
+apiV1Router.use('/splits', splitsRouter);
+apiV1Router.use('/refunds', refundsRouter);
+// Email delivery system
+apiV1Router.use('/emails', emailRouter);
+// Portfolio/wallet aggregation
+apiV1Router.use('/portfolio', portfolioRouter);
+// Backup system
+apiV1Router.use('/backup', backupRouter);
 
 app.use('/api/v1', apiV1Router);
 
