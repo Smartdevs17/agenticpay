@@ -14,6 +14,8 @@ import { healthRouter } from './routes/health.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
+import { splitsRouter } from './routes/splits.js';
+import { refundsRouter } from './routes/refunds.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
@@ -22,10 +24,25 @@ import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
+import { emailRouter } from './routes/email.js';
+import { portfolioRouter } from './routes/portfolio.js';
+import { backupRouter } from './routes/backup.js';
+import { ipAllowlistRouter } from './routes/ip-allowlist.js';
+import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
+import { allowancesRouter } from './routes/allowances.js';
+import { retryRouter } from './routes/retry.js';
+import { secretsRouter } from './routes/secrets.js';
 
 // Validate environment variables at startup
 validateEnv();
 const env = getConfig();
+
+// Initialize IP allowlist from environment
+if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
+  const allowedIps = env.IP_ALLOWLIST ? env.IP_ALLOWLIST.split(',').map(ip => ip.trim()).filter(Boolean) : [];
+  initIpAllowlist(allowedIps, env.IP_ALLOWLIST_ENABLED);
+  console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
+}
 
 const traceStorage = new AsyncLocalStorage<string>();
 
@@ -214,10 +231,24 @@ apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
 apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/legacy', legacyRouter);
-// Feature flag admin — inspect & override flags at runtime
-apiV1Router.use('/flags', flagsRouter);
+apiV1Router.use('/splits', splitsRouter);
+apiV1Router.use('/refunds', refundsRouter);
+// Email delivery system
+apiV1Router.use('/emails', emailRouter);
+// Portfolio/wallet aggregation
+apiV1Router.use('/portfolio', portfolioRouter);
+// Backup system
+apiV1Router.use('/backup', backupRouter);
+// IP allowlist management
+apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
+// Token allowances management
+apiV1Router.use('/allowances', allowancesRouter);
+// Payment retry system
+apiV1Router.use('/retry', retryRouter);
+// Secrets management (HashiCorp Vault)
+apiV1Router.use('/secrets', secretsRouter);
 
-app.use('/api/v1', apiV1Router);
+app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
