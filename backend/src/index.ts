@@ -31,6 +31,8 @@ import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { categoriesRouter } from './routes/categories.js';
+import { sessionsRouter } from './routes/sessions.js';
+import { sessionMiddleware } from './middleware/session.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -204,6 +206,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 app.use(slaTrackingMiddleware);
+app.use(sessionMiddleware);
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -244,6 +247,8 @@ apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
 // Payment categorization
 apiV1Router.use('/categories', categoriesRouter);
+// Session management
+apiV1Router.use('/sessions', sessionsRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
