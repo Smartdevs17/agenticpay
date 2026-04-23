@@ -185,6 +185,9 @@ app.use(healthRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 
+import { portfolioRouter } from './routes/portfolio.js';
+import { emailRouter } from './routes/email.js';
+
 // Apply tiered limiter to all API routes
 app.use('/api/', tieredRateLimit);
 
@@ -200,6 +203,8 @@ apiV1Router.use('/catalog', catalogRouter);
 apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
 apiV1Router.use('/sla', slaRouter);
+apiV1Router.use('/portfolio', portfolioRouter);
+apiV1Router.use('/emails', emailRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);
