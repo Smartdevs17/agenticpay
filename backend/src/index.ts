@@ -30,6 +30,7 @@ import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
 import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
+import { nfcRouter } from './routes/nfc.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
@@ -245,6 +246,8 @@ apiV1Router.use('/backup', backupRouter);
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 // Push notifications
 apiV1Router.use('/push', pushRouter);
+// NFC / QR payment requests
+apiV1Router.use('/nfc', nfcRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
