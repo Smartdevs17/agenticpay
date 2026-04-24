@@ -33,6 +33,8 @@ import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { notificationsRouter } from './routes/notifications.js';
+import { auditRouter } from './routes/audit.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -247,6 +249,12 @@ apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
+
+// Notification system routes
+app.use('/api/v1/notifications', notificationsRouter);
+
+// Audit logging routes
+app.use('/api/v1/audit', auditRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
