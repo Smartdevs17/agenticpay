@@ -26,6 +26,7 @@
     "openai": "^4.67.0",
     "sanitize-html": "^2.11.0",
     "sqlstring": "^2.3.3",
+    "stripe": "^17.5.0",
     "validator": "^13.11.0",
     "web-push": "^3.6.0",
     "xss": "^1.0.14",
