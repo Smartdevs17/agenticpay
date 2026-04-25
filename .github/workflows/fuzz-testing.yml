@@ -25,14 +25,23 @@ jobs:
     
     - name: Install Echidna
       run: |
+        set +e
         sudo apt-get update
         sudo apt-get install -y haskell-stack libgmp-dev
         git clone https://github.com/crytic/echidna.git
         cd echidna
         stack setup
         stack install
+        INSTALL_STATUS=$?
         cd ..
         rm -rf echidna
+        
+        if [ "$INSTALL_STATUS" -eq 0 ] && command -v echidna >/dev/null 2>&1; then
+          echo "ECHIDNA_AVAILABLE=true" >> $GITHUB_ENV
+        else
+          echo "ECHIDNA_AVAILABLE=false" >> $GITHUB_ENV
+          echo "::warning::Echidna installation failed; skipping Echidna fuzz tests in this run"
+        fi
     
     - name: Install Solc
       run: |
@@ -45,6 +54,7 @@ jobs:
         cargo build --target wasm32-unknown-unknown --release
     
     - name: Run Echidna Fuzz Tests
+      if: env.ECHIDNA_AVAILABLE == 'true'
       run: |
         cd contracts
         mkdir -p echidna-output
@@ -64,6 +74,7 @@ jobs:
         path: contracts/echidna-output/
     
     - name: Check for Failures
+      if: env.ECHIDNA_AVAILABLE == 'true'
       run: |
         cd contracts
         if [ -f echidna-output/results.json ]; then
@@ -178,7 +189,9 @@ jobs:
     - name: Run Slither Analysis
       run: |
         cd contracts
-        slither . --json slither-results.json --filter medium,high
+        # Slither exits non-zero when findings exist. Keep this step non-blocking
+        # and let the explicit severity gate below decide pass/fail criteria.
+        slither . --json slither-results.json --filter medium,high || true
     
     - name: Upload Slither Results
       uses: actions/upload-artifact@v4
@@ -267,7 +280,7 @@ jobs:
         path: fuzz-test-report.md
     
     - name: Comment PR
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
       uses: actions/github-script@v7
       with:
         script: |

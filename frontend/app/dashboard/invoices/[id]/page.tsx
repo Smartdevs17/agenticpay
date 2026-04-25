@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,8 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Download, Pencil, X, Check, History, PenLine } from 'lucide-react';
-import { PageBreadcrumb } from '@/components/layout/PageBreadcrumb';
-import { ArrowLeft, Download } from 'lucide-react';
 import Link from 'next/link';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -17,6 +16,15 @@ import {
   formatTimeInTimeZone,
 } from '@/lib/utils';
 import { useAuthStore } from '@/store/useAuthStore';
+
+interface InvoiceVersion {
+  timestamp: string;
+  workDescription: string;
+  hoursWorked: number;
+  hourlyRate: number;
+  calculatedAmount: number;
+  signedAt: string;
+}
 
 export default function InvoiceDetailPage() {
   const params = useParams();
