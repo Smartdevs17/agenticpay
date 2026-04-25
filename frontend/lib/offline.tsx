@@ -237,11 +237,11 @@ export async function requestBackgroundSync(tag: string): Promise<boolean> {
 }
 
 export function useOfflineIndicator() {
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
 
   useEffect(() => {
-    setIsOnline(navigator.onLine);
-
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
@@ -259,12 +259,9 @@ export function useOfflineIndicator() {
 
 export function OfflinePaymentIndicator() {
   const isOnline = useOfflineIndicator();
-  const [pendingCount, setPendingCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(readQueue().length);
 
   useEffect(() => {
-    const queue = readQueue();
-    setPendingCount(queue.length);
-
     const listener = () => {
       setPendingCount(readQueue().length);
     };
