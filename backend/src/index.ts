@@ -25,6 +25,8 @@ import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
+import { kybRouter } from './routes/kyb.js';
+import { batchRouter } from './routes/batch.js';
 import { emailRouter } from './routes/email.js';
 import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
@@ -171,6 +173,7 @@ app.use(
   })
 );
 app.use(express.json());
+app.use(express.text({ type: ['text/csv', 'text/plain'] }));
 
 app.use(
   compression({
@@ -235,6 +238,10 @@ apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
 apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/legacy', legacyRouter);
+// Feature flag admin — inspect & override flags at runtime
+apiV1Router.use('/flags', flagsRouter);
+apiV1Router.use('/kyb', kybRouter);
+apiV1Router.use('/batch', batchRouter);
 apiV1Router.use('/splits', splitsRouter);
 apiV1Router.use('/refunds', refundsRouter);
 apiV1Router.use('/allowances', allowancesRouter);
