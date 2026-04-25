@@ -2,9 +2,19 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+type InputProps<T extends React.ElementType = "input"> = {
+  as?: T
+} & React.ComponentProps<"input">
+
+function Input<T extends React.ElementType = "input">({
+  as,
+  className,
+  type,
+  ...props
+}: InputProps<T>) {
+  const Component = as || "input"
   return (
-    <input
+    <Component
       type={type}
       data-slot="input"
       className={cn(
@@ -18,4 +28,4 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   )
 }
 
-export { Input }
+export { Input, type InputProps }
