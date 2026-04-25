@@ -22,7 +22,10 @@ jobs:
         toolchain: stable
         override: true
         components: rustfmt, clippy
-    
+
+    - name: Install wasm32 target
+      run: rustup target add wasm32-unknown-unknown
+
     - name: Install Echidna
       run: |
         set +e
@@ -95,9 +98,12 @@ jobs:
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: nightly
+        toolchain: stable
         override: true
         components: rustfmt, clippy
+
+    - name: Install wasm32 target
+      run: rustup target add wasm32-unknown-unknown
     
     - name: Install cargo-fuzz
       run: cargo install cargo-fuzz --locked
