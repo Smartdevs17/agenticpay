@@ -17,6 +17,15 @@ const envSchema = z.object({
   RATE_LIMIT_PRO: z.coerce.number().default(300),
   RATE_LIMIT_ENTERPRISE: z.coerce.number().default(1000),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(15 * 60 * 1000),
+  IP_ALLOWLIST: z.string().default(''),
+  IP_ALLOWLIST_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
+  IP_ALLOWLIST_BYPASS_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
+  IP_ALLOWLIST_BYPASS_EXPIRY_MS: z.coerce.number().default(30 * 60 * 1000),
+  VAPID_PUBLIC_KEY: z.string().default(''),
+  VAPID_PRIVATE_KEY: z.string().default(''),
+  STRIPE_SECRET_KEY: z.string().default(''),
+  STRIPE_WEBHOOK_SECRET: z.string().default(''),
+  STRIPE_PUBLISHABLE_KEY: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;

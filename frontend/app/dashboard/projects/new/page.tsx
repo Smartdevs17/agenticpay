@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -21,6 +21,17 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
+import { ConfirmModal } from '@/components/transaction/ConfirmModal';
+import { parseEther } from 'viem';
+
+type PendingTransaction = {
+  functionName: string;
+  contractAddress: string;
+  args: unknown[];
+  gasEstimate?: bigint;
+  value?: bigint;
+  submit: () => void;
+};
 
 const walletAddressSchema = z
   .string()
@@ -87,7 +98,8 @@ type ProjectFormData = z.infer<typeof projectSchema>;
 export default function CreateProjectPage() {
   const router = useRouter();
   const { address } = useAccount();
-  const { createProject, isPending, isConfirming, isConfirmed, error } = useAgenticPay();
+  const { prepareTransaction, isPending, isConfirming, isConfirmed, error } = useAgenticPay();
+  const [pendingTransaction, setPendingTransaction] = useState<PendingTransaction | null>(null);
 
   const {
     register,
@@ -146,16 +158,16 @@ export default function CreateProjectPage() {
         repo: data.githubRepo
       });
 
-      await createProject(
+      const prepared = await prepareTransaction('createProject', [
         data.freelancerAddress,
-        data.totalAmount,
+        parseEther(data.totalAmount),
         paymentType,
         tokenAddr,
         workDesc,
-        deadlineTimestamp
-      );
+        BigInt(deadlineTimestamp),
+      ]);
 
-      toast.info('Transaction submitted. Waiting for confirmation...');
+      setPendingTransaction(prepared);
 
     } catch (e) {
       console.error('Failed to prepare transaction:', e);
@@ -305,6 +317,24 @@ export default function CreateProjectPage() {
           </form>
         </CardContent>
       </Card>
+
+      {pendingTransaction && (
+        <ConfirmModal
+          open={!!pendingTransaction}
+          functionName={pendingTransaction.functionName}
+          contractAddress={pendingTransaction.contractAddress}
+          args={pendingTransaction.args}
+          gasEstimate={pendingTransaction.gasEstimate}
+          value={pendingTransaction.value}
+          isSubmitting={isPending || isConfirming}
+          onCancel={() => setPendingTransaction(null)}
+          onConfirm={() => {
+            pendingTransaction.submit();
+            setPendingTransaction(null);
+            toast.info('Transaction submitted. Waiting for confirmation...');
+          }}
+        />
+      )}
     </div>
   );
 }
