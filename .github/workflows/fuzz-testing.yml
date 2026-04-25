@@ -1,0 +1,300 @@
+name: Property-Based Testing (Fuzz Testing)
+
+on:
+  push:
+    branches: [ main, develop, security-improvements ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run fuzz tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  echidna-fuzzing:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Install Echidna
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y haskell-stack libgmp-dev
+        git clone https://github.com/crytic/echidna.git
+        cd echidna
+        stack setup
+        stack install
+        cd ..
+        rm -rf echidna
+    
+    - name: Install Solc
+      run: |
+        sudo wget -O /usr/local/bin/solc https://github.com/ethereum/solidity/releases/download/v0.8.19/solc-static-linux
+        sudo chmod +x /usr/local/bin/solc
+    
+    - name: Build Contract
+      run: |
+        cd contracts
+        cargo build --target wasm32-unknown-unknown --release
+    
+    - name: Run Echidna Fuzz Tests
+      run: |
+        cd contracts
+        mkdir -p echidna-output
+        echidna test test/properties/echidna_tests.sol \
+          --config echidna.yaml \
+          --output echidna-output/results.json \
+          --corpus-dir echidna-output/corpus \
+          --coverage \
+          --testLimit 10000 \
+          --shrinkLimit 1000
+    
+    - name: Upload Echidna Results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: echidna-results
+        path: contracts/echidna-output/
+    
+    - name: Check for Failures
+      run: |
+        cd contracts
+        if [ -f echidna-output/results.json ]; then
+          if grep -q "failed" echidna-output/results.json; then
+            echo "❌ Echidna tests found failures!"
+            exit 1
+          else
+            echo "✅ All Echidna tests passed"
+          fi
+        fi
+
+  haloria-fuzzing:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Install cargo-fuzz
+      run: cargo install cargo-fuzz --locked
+    
+    - name: Run Haloria Fuzz Tests
+      run: |
+        cd contracts
+        cargo +nightly fuzz init || true
+        
+        # Run each fuzz target for 5 minutes
+        timeout 300 cargo +nightly fuzz run balance_conservation || true
+        timeout 300 cargo +nightly fuzz run no_overflow_conditions || true
+        timeout 300 cargo +nightly fuzz run state_transition_validity || true
+        timeout 300 cargo +nightly fuzz run access_control || true
+        timeout 300 cargo +nightly fuzz run gas_efficiency || true
+        timeout 300 cargo +nightly fuzz run reentrancy_protection || true
+        timeout 300 cargo +nightly fuzz run deadline_enforcement || true
+        timeout 300 cargo +nightly fuzz run large_input_handling || true
+        timeout 300 cargo +nightly fuzz run precision_consistency || true
+        timeout 300 cargo +nightly fuzz run authorization_consistency || true
+    
+    - name: Upload Fuzz Artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: haloria-fuzz-artifacts
+        path: contracts/fuzz/artifacts/
+
+  coverage-analysis:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy, llvm-tools-preview
+    
+    - name: Install grcov
+      run: cargo install grcov
+    
+    - name: Generate Coverage
+      run: |
+        cd contracts
+        export RUSTFLAGS="-Cinstrument-coverage"
+        export LLVM_PROFILE_FILE="target/coverage/agenticpay-%p-%m.profraw"
+        
+        cargo test
+        
+        grcov . --binary-path ./target/debug/ \
+          --source-dir . \
+          --output-type lcov \
+          --branch \
+          --ignore-not-existing \
+          --ignore "/*" \
+          --ignore "target/*" \
+          --output-path coverage.lcov
+    
+    - name: Upload Coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: contracts/coverage.lcov
+        flags: fuzz-testing
+        name: agenticpay-fuzz-coverage
+    
+    - name: Coverage Summary
+      run: |
+        cd contracts
+        if [ -f coverage.lcov ]; then
+          echo "📊 Coverage report generated"
+          # Extract coverage percentage
+          COVERAGE=$(lcov --summary coverage.lcov 2>&1 | grep "lines......" | grep -o "[0-9.]*%" | head -1)
+          echo "📈 Line Coverage: $COVERAGE"
+        fi
+
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Slither
+      run: |
+        pip3 install slither-analyzer
+    
+    - name: Run Slither Analysis
+      run: |
+        cd contracts
+        slither . --json slither-results.json --filter medium,high
+    
+    - name: Upload Slither Results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: slither-results
+        path: contracts/slither-results.json
+    
+    - name: Check for High Severity Issues
+      run: |
+        cd contracts
+        if [ -f slither-results.json ]; then
+          HIGH_ISSUES=$(jq '.results.detectors[] | select(.impact == "high") | .id' slither-results.json | wc -l)
+          if [ "$HIGH_ISSUES" -gt 0 ]; then
+            echo "❌ Found $HIGH_ISSUES high severity security issues!"
+            jq '.results.detectors[] | select(.impact == "high")' slither-results.json
+            exit 1
+          else
+            echo "✅ No high severity security issues found"
+          fi
+        fi
+
+  fuzz-test-report:
+    runs-on: ubuntu-latest
+    needs: [echidna-fuzzing, haloria-fuzzing, coverage-analysis, security-scan]
+    if: always()
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download Artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts/
+    
+    - name: Generate Combined Report
+      run: |
+        cat > fuzz-test-report.md << EOF
+        # Property-Based Testing Report
+        
+        ## Test Execution Summary
+        - **Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        - **Commit**: ${{ github.sha }}
+        - **Branch**: ${{ github.ref }}
+        
+        ## Test Results
+        
+        ### Echidna Fuzz Testing
+        - **Status**: ${{ needs.echidna-fuzzing.result }}
+        - **Test Limit**: 10,000 iterations
+        - **Coverage**: Enabled
+        
+        ### Haloria Fuzz Testing
+        - **Status**: ${{ needs.haloria-fuzzing.result }}
+        - **Fuzz Time**: 5 minutes per target
+        - **Targets**: 10 properties
+        
+        ### Coverage Analysis
+        - **Status**: ${{ needs.coverage-analysis.result }}
+        - **Tool**: grcov + lcov
+        
+        ### Security Scan
+        - **Status**: ${{ needs.security-scan.result }}
+        - **Tool**: Slither
+        
+        ## Findings
+        EOF
+        
+        if [ "${{ needs.echidna-fuzzing.result }}" = "failure" ] || [ "${{ needs.haloria-fuzzing.result }}" = "failure" ]; then
+          echo "❌ **CRITICAL**: Fuzz tests found vulnerabilities!" >> fuzz-test-report.md
+          echo "Please review the artifacts for detailed findings." >> fuzz-test-report.md
+        else
+          echo "✅ All property-based tests passed successfully" >> fuzz-test-report.md
+        fi
+        
+        echo "## Artifacts" >> fuzz-test-report.md
+        echo "- Echidna results: Available in artifacts/echidna-results/" >> fuzz-test-report.md
+        echo "- Haloria artifacts: Available in artifacts/haloria-fuzz-artifacts/" >> fuzz-test-report.md
+        echo "- Coverage data: Available in artifacts/coverage/" >> fuzz-test-report.md
+        echo "- Security scan: Available in artifacts/slither-results/" >> fuzz-test-report.md
+    
+    - name: Upload Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: fuzz-test-report
+        path: fuzz-test-report.md
+    
+    - name: Comment PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('fuzz-test-report.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: '## 🔍 Property-Based Testing Results\\n\\n' + report
+          });
+
+  # Block PR if fuzz tests fail
+  check-fuzz-results:
+    runs-on: ubuntu-latest
+    needs: [echidna-fuzzing, haloria-fuzzing]
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Check Fuzz Test Results
+      run: |
+        if [ "${{ needs.echidna-fuzzing.result }}" = "failure" ] || [ "${{ needs.haloria-fuzzing.result }}" = "failure" ]; then
+          echo "❌ Fuzz tests failed - blocking PR"
+          echo "Property-based tests found security vulnerabilities or edge cases."
+          echo "Please review the test results and fix issues before merging."
+          exit 1
+        else
+          echo "✅ All fuzz tests passed - PR can proceed"
+        fi

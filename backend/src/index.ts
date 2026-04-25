@@ -14,6 +14,9 @@ import { healthRouter } from './routes/health.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
+import { splitsRouter } from './routes/splits.js';
+import { refundsRouter } from './routes/refunds.js';
+import { allowancesRouter } from './routes/allowances.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
@@ -24,10 +27,28 @@ import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
 import { kybRouter } from './routes/kyb.js';
 import { batchRouter } from './routes/batch.js';
+import { emailRouter } from './routes/email.js';
+import { portfolioRouter } from './routes/portfolio.js';
+import { backupRouter } from './routes/backup.js';
+import { pushRouter } from './routes/push.js';
+import { ipAllowlistRouter } from './routes/ip-allowlist.js';
+import { stripeRouter } from './routes/stripe.js';
+import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
+import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
+import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { notificationsRouter } from './routes/notifications.js';
+import { auditRouter } from './routes/audit.js';
 
 // Validate environment variables at startup
 validateEnv();
 const env = getConfig();
+
+// Initialize IP allowlist from environment
+if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
+  const allowedIps = env.IP_ALLOWLIST ? env.IP_ALLOWLIST.split(',').map(ip => ip.trim()).filter(Boolean) : [];
+  initIpAllowlist(allowedIps, env.IP_ALLOWLIST_ENABLED);
+  console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
+}
 
 const traceStorage = new AsyncLocalStorage<string>();
 
@@ -221,8 +242,29 @@ apiV1Router.use('/legacy', legacyRouter);
 apiV1Router.use('/flags', flagsRouter);
 apiV1Router.use('/kyb', kybRouter);
 apiV1Router.use('/batch', batchRouter);
+apiV1Router.use('/splits', splitsRouter);
+apiV1Router.use('/refunds', refundsRouter);
+apiV1Router.use('/allowances', allowancesRouter);
+// Email delivery system
+apiV1Router.use('/emails', emailRouter);
+// Portfolio/wallet aggregation
+apiV1Router.use('/portfolio', portfolioRouter);
+// Backup system
+apiV1Router.use('/backup', backupRouter);
+// IP allowlist management
+apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
+// Push notifications
+apiV1Router.use('/push', pushRouter);
+// Stripe card payments
+apiV1Router.use('/stripe', stripeRouter);
 
-app.use('/api/v1', apiV1Router);
+app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
+
+// Notification system routes
+app.use('/api/v1/notifications', notificationsRouter);
+
+// Audit logging routes
+app.use('/api/v1/audit', auditRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {

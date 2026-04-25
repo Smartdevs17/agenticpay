@@ -46,3 +46,48 @@ export const bulkUpdateSchema = z.object({
 export const bulkDeleteSchema = z.object({
   ids: z.array(z.string().min(1)).min(1, 'Missing ids for bulk delete'),
 });
+
+const splitRecipientSchema = z.object({
+  recipientId: z.string().min(1, 'Recipient id is required'),
+  walletAddress: z.string().min(1, 'Wallet address is required'),
+  percentage: z.number().positive().max(100),
+  minimumThreshold: z.number().nonnegative().default(0),
+});
+
+export const splitConfigSchema = z.object({
+  merchantId: z.string().min(1, 'Merchant id is required'),
+  platformFeePercentage: z.number().min(0).max(100).default(0),
+  recipients: z.array(splitRecipientSchema).min(1, 'At least one split recipient is required'),
+});
+
+export const splitExecutionSchema = z.object({
+  paymentId: z.string().min(1, 'Payment id is required'),
+  totalAmount: z.number().positive(),
+  currency: z.string().min(1).default('USD'),
+});
+
+export const splitUpdateSchema = z.object({
+  recipients: z.array(splitRecipientSchema).min(1).optional(),
+  platformFeePercentage: z.number().min(0).max(100).optional(),
+});
+
+export const refundPolicySchema = z.object({
+  merchantId: z.string().min(1, 'Merchant id is required'),
+  fullRefundWindowDays: z.number().int().min(0).default(30),
+  autoApprovalThreshold: z.number().nonnegative().default(100),
+  alwaysRefundUnderAmount: z.number().nonnegative().default(0),
+  maxPartialRefundPercentage: z.number().min(0).max(100).default(100),
+  requireReason: z.boolean().default(true),
+});
+
+export const refundEvaluationSchema = z.object({
+  merchantId: z.string().min(1, 'Merchant id is required'),
+  paymentId: z.string().min(1, 'Payment id is required'),
+  paymentType: z.enum(['card', 'crypto', 'bank_transfer']),
+  amountPaid: z.number().positive(),
+  requestedAmount: z.number().positive(),
+  daysSincePayment: z.number().int().min(0),
+  reason: z.string().optional(),
+  hasChargeback: z.boolean().default(false),
+  hasDispute: z.boolean().default(false),
+});

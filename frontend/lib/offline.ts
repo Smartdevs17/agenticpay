@@ -1,6 +1,8 @@
 const OFFLINE_QUEUE_STORAGE_KEY = 'agenticpay-offline-queue';
 const OFFLINE_QUEUE_EVENT = 'agenticpay:offline-queue-updated';
 
+import { useState, useEffect } from 'react';
+
 export interface QueuedAction {
   id: string;
   endpoint: string;
@@ -8,6 +10,25 @@ export interface QueuedAction {
   headers: Record<string, string>;
   body?: string;
   createdAt: string;
+}
+
+export interface OfflinePayment {
+  id: string;
+  to: string;
+  amount: string;
+  asset: string;
+  memo?: string;
+  createdAt: number;
+  status: 'pending' | 'syncing' | 'synced' | 'failed';
+  retryCount: number;
+  error?: string;
+}
+
+export interface SyncStatus {
+  isOnline: boolean;
+  lastSyncAt?: number;
+  pendingCount: number;
+  failedCount: number;
 }
 
 export class OfflineActionQueuedError extends Error {
@@ -181,4 +202,92 @@ export async function flushOfflineQueue(resolveApiUrl: (endpoint: string) => str
     failed,
     remaining: getQueuedActionCount(),
   };
+}
+
+export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) {
+    return null;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register('/service-worker.js');
+    console.log('Service Worker registered:', registration.scope);
+    return registration;
+  } catch (error) {
+    console.error('Service Worker registration failed:', error);
+    return null;
+  }
+}
+
+export async function requestBackgroundSync(tag: string): Promise<boolean> {
+  if (!('serviceWorker' in navigator)) {
+    return false;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    if ('sync' in registration) {
+      await (registration as any).sync.register(tag);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export function useOfflineIndicator() {
+  const [isOnline, setIsOnline] = useState(true);
+
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  return isOnline;
+}
+
+export function OfflinePaymentIndicator() {
+  const isOnline = useOfflineIndicator();
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    const queue = readQueue();
+    setPendingCount(queue.length);
+
+    const listener = () => {
+      setPendingCount(readQueue().length);
+    };
+
+    window.addEventListener(OFFLINE_QUEUE_EVENT, listener);
+    window.addEventListener('storage', listener);
+
+    return () => {
+      window.removeEventListener(OFFLINE_QUEUE_EVENT, listener);
+      window.removeEventListener('storage', listener);
+    };
+  }, []);
+
+  if (isOnline && pendingCount === 0) return null;
+
+  return (
+    <div className="fixed bottom-4 left-4 bg-amber-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 z-50">
+      <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+      <span className="text-sm font-medium">
+        {!isOnline
+          ? 'Offline - payments queued'
+          : `${pendingCount} payment${pendingCount > 1 ? 's' : ''} pending sync`}
+      </span>
+    </div>
+  );
 }
