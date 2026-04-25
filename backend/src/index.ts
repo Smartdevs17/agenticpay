@@ -30,9 +30,12 @@ import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
 import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
+import { stripeRouter } from './routes/stripe.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { notificationsRouter } from './routes/notifications.js';
+import { auditRouter } from './routes/audit.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -245,10 +248,16 @@ apiV1Router.use('/backup', backupRouter);
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 // Push notifications
 apiV1Router.use('/push', pushRouter);
-// MPC threshold-signing orchestration
-apiV1Router.use('/mpc', mpcRouter);
+// Stripe card payments
+apiV1Router.use('/stripe', stripeRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
+
+// Notification system routes
+app.use('/api/v1/notifications', notificationsRouter);
+
+// Audit logging routes
+app.use('/api/v1/audit', auditRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
