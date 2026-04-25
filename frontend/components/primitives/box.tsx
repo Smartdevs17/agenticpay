@@ -6,13 +6,13 @@ type BoxProps<T extends React.ElementType = 'div'> = {
   as?: T;
   className?: string;
   children?: React.ReactNode;
-} & React.ComponentPropsWithoutRef<T>;
+} & Omit<React.ComponentPropsWithoutRef<T>, 'as' | 'className' | 'children'>;
 
 // Box component - basic container with styling
 export const Box = React.forwardRef(
   <T extends React.ElementType = 'div'>(
     { as, className, children, ...props }: BoxProps<T>,
-    ref: React.Ref<HTMLElement>
+    ref: React.ForwardedRef<React.ElementRef<T>>
   ) => {
     const Component = as || 'div';
     return (
@@ -25,7 +25,9 @@ export const Box = React.forwardRef(
       </Component>
     );
   }
-);
+) as <T extends React.ElementType = 'div'>(
+  props: BoxProps<T> & { ref?: React.ForwardedRef<React.ElementRef<T>> }
+) => React.ReactElement;
 
 Box.displayName = 'Box';
 

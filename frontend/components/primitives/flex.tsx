@@ -12,7 +12,7 @@ type FlexProps<T extends React.ElementType = 'div'> = {
   items?: 'start' | 'end' | 'center' | 'baseline' | 'stretch';
   gap?: keyof typeof spacingMap;
   flex?: string;
-} & React.ComponentPropsWithoutRef<T>;
+} & Omit<React.ComponentPropsWithoutRef<T>, 'as' | 'className' | 'children' | 'direction' | 'wrap' | 'justify' | 'items' | 'gap'>;
 
 // Spacing map for gap prop
 const spacingMap = {
@@ -87,7 +87,7 @@ export const Flex = React.forwardRef(
       flex,
       ...props
     }: FlexProps<T>,
-    ref: React.Ref<HTMLElement>
+    ref: React.ForwardedRef<React.ElementRef<T>>
   ) => {
     const Component = as || 'div';
     return (
@@ -109,7 +109,9 @@ export const Flex = React.forwardRef(
       </Component>
     );
   }
-);
+) as <T extends React.ElementType = 'div'>(
+  props: FlexProps<T> & { ref?: React.ForwardedRef<React.ElementRef<T>> }
+) => React.ReactElement;
 
 Flex.displayName = 'Flex';
 

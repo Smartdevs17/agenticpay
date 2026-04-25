@@ -11,7 +11,7 @@ type InteractiveProps<T extends React.ElementType = 'button'> = {
   disabled?: boolean;
   variant?: keyof typeof variantMap;
   size?: keyof typeof sizeMap;
-} & React.ComponentPropsWithoutRef<T>;
+} & Omit<React.ComponentPropsWithoutRef<T>, 'as' | 'asChild' | 'className' | 'children' | 'disabled' | 'variant' | 'size'>;
 
 // Variant map for interactive variants
 const variantMap = {
@@ -46,7 +46,7 @@ export const Interactive = React.forwardRef(
       size = 'default',
       ...props
     }: InteractiveProps<T>,
-    ref: React.Ref<HTMLElement>
+    ref: React.ForwardedRef<React.ElementRef<T>>
   ) => {
     const Component = asChild ? Slot : as || 'button';
     return (
@@ -67,7 +67,9 @@ export const Interactive = React.forwardRef(
       </Component>
     );
   }
-);
+) as <T extends React.ElementType = 'button'>(
+  props: InteractiveProps<T> & { ref?: React.ForwardedRef<React.ElementRef<T>> }
+) => React.ReactElement;
 
 Interactive.displayName = 'Interactive';
 

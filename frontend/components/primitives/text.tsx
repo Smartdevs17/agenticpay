@@ -12,7 +12,7 @@ type TextProps<T extends React.ElementType = 'span'> = {
   size?: keyof typeof sizeMap;
   align?: 'left' | 'center' | 'right';
   truncate?: boolean;
-} & React.ComponentPropsWithoutRef<T>;
+} & Omit<React.ComponentPropsWithoutRef<T>, 'as' | 'className' | 'children' | 'variant' | 'color' | 'weight' | 'size' | 'align' | 'truncate'>;
 
 // Variant map for text variants
 const variantMap = {
@@ -77,7 +77,7 @@ export const Text = React.forwardRef(
       truncate = false,
       ...props
     }: TextProps<T>,
-    ref: React.Ref<HTMLElement>
+    ref: React.ForwardedRef<React.ElementRef<T>>
   ) => {
     const Component = as || 'span';
     return (
@@ -99,7 +99,9 @@ export const Text = React.forwardRef(
       </Component>
     );
   }
-);
+) as <T extends React.ElementType = 'span'>(
+  props: TextProps<T> & { ref?: React.ForwardedRef<React.ElementRef<T>> }
+) => React.ReactElement;
 
 Text.displayName = 'Text';
 
