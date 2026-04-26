@@ -42,6 +42,10 @@ import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
 import { hedgingRouter } from './routes/hedging.js';
+import http from 'node:http';
+import { attachWebSocketServer } from './websocket/server.js';
+import { createWebSocketRouter } from './routes/websocket.js';
+import { complianceRouter } from './routes/compliance.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -275,6 +279,9 @@ app.use('/api/v1/audit', auditRouter);
 // Currency hedging routes
 app.use('/api/v1/hedging', hedgingRouter);
 
+// SOC 2 / compliance evidence endpoints
+app.use('/api/v1/compliance', complianceRouter);
+
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
     return next();
@@ -300,8 +307,13 @@ if (config.queue.enabled) {
   paymentQueue.start();
 }
 
-const server = app.listen(config.server.port, () => {
+const server = http.createServer(app);
+const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
+app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
+
+server.listen(config.server.port, () => {
   console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
+  console.log(`WebSocket server listening on path /ws (max ${wsServer.metrics.activeConnections}/${wsServer.metrics.acceptedConnections})`);
 });
 
 const shutdown = (signal: string) => {
@@ -326,6 +338,12 @@ const shutdown = (signal: string) => {
       console.log('Message queue stopped.');
     } catch (err) {
       console.error('Error stopping message queue:', err);
+    }
+
+    try {
+      wsServer.close().then(() => console.log('WebSocket server closed.'));
+    } catch (err) {
+      console.error('Error closing WebSocket server:', err);
     }
 
     console.log('Graceful shutdown complete. Exiting.');
