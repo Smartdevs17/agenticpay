@@ -46,6 +46,11 @@ import http from 'node:http';
 import { attachWebSocketServer } from './websocket/server.js';
 import { createWebSocketRouter } from './routes/websocket.js';
 import { complianceRouter } from './routes/compliance.js';
+import { receiptsRouter } from './routes/receipts.js';
+import { eventsRouter } from './routes/events.js';
+import { threatDetectionRouter } from './routes/threat-detection.js';
+import { serviceMeshRouter } from './routes/service-mesh.js';
+import './events/projections.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -281,6 +286,18 @@ app.use('/api/v1/hedging', hedgingRouter);
 
 // SOC 2 / compliance evidence endpoints
 app.use('/api/v1/compliance', complianceRouter);
+
+// Payment receipt NFTs
+app.use('/api/v1/receipts', receiptsRouter);
+
+// Event-driven architecture — event store, CQRS projections
+app.use('/api/v1/events', eventsRouter);
+
+// Advanced threat detection with behavioral analysis
+app.use('/api/v1/threat-detection', threatDetectionRouter);
+
+// Microservices service mesh — registry, discovery, circuit breakers
+app.use('/api/v1/service-mesh', serviceMeshRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
