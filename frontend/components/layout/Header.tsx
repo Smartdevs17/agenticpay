@@ -331,3 +331,5 @@ export function Header() {
     </>
   );
 }
+  /* Added by bounty-bot */
+}
