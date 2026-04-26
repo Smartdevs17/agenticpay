@@ -77,6 +77,16 @@ const nextConfig: NextConfig = {
   },
   images: {
     formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 60 * 60 * 24 * 7,
+    remotePatterns: process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN
+      ? [
+          {
+            protocol: "https",
+            hostname: process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN,
+            pathname: "/**",
+          },
+        ]
+      : [],
   },
   compress: true,
   poweredByHeader: false,
