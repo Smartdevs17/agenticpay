@@ -16,7 +16,7 @@ import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
 import { splitsRouter } from './routes/splits.js';
 import { refundsRouter } from './routes/refunds.js';
-import { allowancesRouter } from './routes/allowances.js';
+import allowancesRouter from './routes/allowances.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';

@@ -114,7 +114,18 @@ jobs:
           fi
 
       - name: Build
-        run: npm run build
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- backend/src/ | grep '\.ts$' | wc -l)
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- backend/src/ | grep '\.ts$' | wc -l)
+          fi
+          if [ "$CHANGED" -gt 0 ]; then
+            echo "Building — $CHANGED backend source files changed"
+            npm run build
+          else
+            echo "No backend source files changed — skipping build"
+          fi
 
       # Emit build size as a workflow annotation (picked up by cost-monitor)
       - name: Report build size
@@ -200,7 +211,18 @@ jobs:
           fi
 
       - name: Build
-        run: npm run build
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- . | grep -E '\.(ts|tsx)$' | wc -l)
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- . | grep -E '\.(ts|tsx)$' | wc -l)
+          fi
+          if [ "$CHANGED" -gt 0 ]; then
+            echo "Building — $CHANGED frontend source files changed"
+            npm run build
+          else
+            echo "No frontend source files changed — skipping build"
+          fi
 
       - name: Report build size
         if: always()
