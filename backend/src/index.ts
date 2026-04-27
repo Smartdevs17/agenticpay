@@ -1,36 +1,396 @@
-import express from 'express';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import { httpLogger, logger } from './middleware/logger.js';
+import rateLimit from 'express-rate-limit';
+import compression from 'compression';
+import { config } from './config.js';
 import { verificationRouter } from './routes/verification.js';
 import { invoiceRouter } from './routes/invoice.js';
 import { stellarRouter } from './routes/stellar.js';
 import { catalogRouter } from './routes/catalog.js';
+import { jobsRouter } from './routes/jobs.js';
+import { healthRouter } from './routes/health.js';
+import { queueRouter } from './routes/queue.js';
+import { slaRouter } from './routes/sla.js';
+import { legacyRouter } from './routes/legacy.js';
+import { splitsRouter } from './routes/splits.js';
+import { refundsRouter } from './routes/refunds.js';
+import { allowancesRouter } from './routes/allowances.js';
+import { startJobs, getJobScheduler } from './jobs/index.js';
+import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
+import { messageQueue } from './services/queue.js';
+import { registerDefaultProcessors } from './services/queue-producers.js';
+import { slaTrackingMiddleware } from './middleware/slaTracking.js';
+import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
+import { validateEnv, config as getConfig } from './config/env.js';
+import { flagsRouter } from './routes/flags.js';
+import { kybRouter } from './routes/kyb.js';
+import { batchRouter } from './routes/batch.js';
+import { relayerRouter } from './routes/relayer.js';
+import { paymentQueueRouter } from './routes/payment-queue.js';
+import { paymentQueue } from './queue/payment-queue.js';
+import { emailRouter } from './routes/email.js';
+import { portfolioRouter } from './routes/portfolio.js';
+import { backupRouter } from './routes/backup.js';
+import { pushRouter } from './routes/push.js';
+import { ipAllowlistRouter } from './routes/ip-allowlist.js';
+import { stripeRouter } from './routes/stripe.js';
+import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
+import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
+import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { notificationsRouter } from './routes/notifications.js';
+import { auditRouter } from './routes/audit.js';
+import { hedgingRouter } from './routes/hedging.js';
+import http from 'node:http';
+import { attachWebSocketServer } from './websocket/server.js';
+import { createWebSocketRouter } from './routes/websocket.js';
+import { complianceRouter } from './routes/compliance.js';
+import { receiptsRouter } from './routes/receipts.js';
+import { eventsRouter } from './routes/events.js';
+import { threatDetectionRouter } from './routes/threat-detection.js';
+import { serviceMeshRouter } from './routes/service-mesh.js';
+import { fiatPaymentsRouter } from './routes/fiat-payments.js';
+import { paymentLinksRouter } from './routes/payment-links.js';
+import { projectsRouter } from './routes/projects.js';
+import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
+import './events/projections.js';
 
-dotenv.config();
+// Validate environment variables at startup
+validateEnv();
+const env = getConfig();
+
+// Initialize IP allowlist from environment
+if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
+  const allowedIps = env.IP_ALLOWLIST ? env.IP_ALLOWLIST.split(',').map(ip => ip.trim()).filter(Boolean) : [];
+  initIpAllowlist(allowedIps, env.IP_ALLOWLIST_ENABLED);
+  console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
+}
+
+const traceStorage = new AsyncLocalStorage<string>();
+
+const originalConsole = {
+  log: console.log,
+  info: console.info,
+  warn: console.warn,
+  error: console.error,
+};
+
+function formatMessage(args: any[]): any[] {
+  const traceId = traceStorage.getStore();
+  if (traceId) {
+    if (typeof args[0] === 'string') {
+      args[0] = `[TraceID: ${traceId}] ${args[0]}`;
+    } else {
+      args.unshift(`[TraceID: ${traceId}]`);
+    }
+  }
+  return args;
+}
+
+console.log = (...args) => originalConsole.log(...formatMessage(args));
+console.info = (...args) => originalConsole.info(...formatMessage(args));
+console.warn = (...args) => originalConsole.warn(...formatMessage(args));
+console.error = (...args) => originalConsole.error(...formatMessage(args));
 
 const app = express();
-const PORT = process.env.PORT || 3001;
 
-// Must be first so every request is captured before other middleware runs
-app.use(httpLogger);
+type UserTier = 'free' | 'pro' | 'enterprise';
 
-app.use(cors());
+type TierRateState = {
+  count: number;
+  resetAtMs: number;
+};
+
+const tierLimits: Record<UserTier, number> = {
+  free: config.rateLimit.free,
+  pro: config.rateLimit.pro,
+  enterprise: config.rateLimit.enterprise,
+};
+
+const tierWindowMs = config.rateLimit.windowMs;
+const tierRateStore = new Map<string, TierRateState>();
+
+function resolveUserTier(req: Request): UserTier {
+  const headerTier = req.headers['x-user-tier'];
+  const normalized = (Array.isArray(headerTier) ? headerTier[0] : headerTier)?.toLowerCase();
+
+  if (normalized === 'pro' || normalized === 'enterprise') {
+    return normalized;
+  }
+
+  return 'free';
+}
+
+function resolveClientIdentifier(req: Request): string {
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    return authHeader;
+  }
+
+  const apiKey = req.headers['x-api-key'];
+  if (typeof apiKey === 'string' && apiKey.trim() !== '') {
+    return apiKey;
+  }
+
+  return req.ip || 'unknown-client';
+}
+
+function tieredRateLimit(req: Request, res: Response, next: NextFunction): void {
+  const tier = resolveUserTier(req);
+  const limit = tierLimits[tier];
+  const identifier = resolveClientIdentifier(req);
+  const storeKey = `${tier}:${identifier}`;
+  const nowMs = Date.now();
+  const existingState = tierRateStore.get(storeKey);
+
+  const state =
+    !existingState || existingState.resetAtMs <= nowMs
+      ? { count: 0, resetAtMs: nowMs + tierWindowMs }
+      : existingState;
+
+  state.count += 1;
+  tierRateStore.set(storeKey, state);
+
+  const remaining = Math.max(0, limit - state.count);
+  const resetInSeconds = Math.ceil((state.resetAtMs - nowMs) / 1000);
+
+  res.setHeader('X-RateLimit-Tier', tier);
+  res.setHeader('X-RateLimit-Limit', String(limit));
+  res.setHeader('X-RateLimit-Remaining', String(remaining));
+  res.setHeader('X-RateLimit-Reset', String(resetInSeconds));
+
+  if (state.count > limit) {
+    res.status(429).json({
+      error: {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: `Rate limit exceeded for tier '${tier}'`,
+        status: 429,
+      },
+    });
+    return;
+  }
+
+  next();
+}
+
+const invoiceLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use(
+  cors({
+    origin: config.cors.allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id', REQUEST_ID_HEADER],
+  })
+);
 app.use(express.json());
+app.use(express.text({ type: ['text/csv', 'text/plain'] }));
 
-// Health check
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'agenticpay-backend' });
+app.use(
+  compression({
+    threshold: config.compression.threshold,
+    filter: (req, res) => {
+      if (req.headers['x-no-compression']) {
+        return false;
+      }
+      const contentType = res.getHeader('Content-Type');
+      if (typeof contentType === 'string' && contentType.includes('application/json')) {
+        return true;
+      }
+      if (Array.isArray(contentType) && contentType.some((ct) => ct.includes('application/json'))) {
+        return true;
+      }
+      return compression.filter(req, res);
+    },
+  })
+);
+
+app.use(requestIdMiddleware);
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const traceId = (req.headers['x-trace-id'] as string) || randomUUID();
+  res.setHeader('X-Trace-Id', traceId);
+
+  traceStorage.run(traceId, () => {
+    console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Started`);
+
+    res.on('finish', () => {
+      console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Finished with status ${res.statusCode}`);
+    });
+
+    next();
+  });
 });
 
-// API routes
-app.use('/api/v1/verification', verificationRouter);
-app.use('/api/v1/invoice', invoiceRouter);
-app.use('/api/v1/stellar', stellarRouter);
-app.use('/api/v1/catalog', catalogRouter);
+app.use(slaTrackingMiddleware);
 
-app.listen(PORT, () => {
-  logger.info({ port: PORT }, 'AgenticPay backend running');
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('Cache-Control', 'no-store');
+  }
+  res.setHeader('Vary', 'Accept-Encoding');
+  next();
 });
+
+app.use(healthRouter);
+
+import { versionMiddleware } from './middleware/versioning.js';
+
+app.use('/api/', tieredRateLimit);
+
+app.use('/api/', versionMiddleware);
+
+const apiV1Router = express.Router();
+apiV1Router.use('/verification', verificationRouter);
+apiV1Router.use('/invoice', invoiceLimiter, invoiceRouter);
+apiV1Router.use('/stellar', stellarRouter);
+apiV1Router.use('/catalog', catalogRouter);
+apiV1Router.use('/jobs', jobsRouter);
+apiV1Router.use('/queue', queueRouter);
+apiV1Router.use('/sla', slaRouter);
+apiV1Router.use('/legacy', legacyRouter);
+// Feature flag admin — inspect & override flags at runtime
+apiV1Router.use('/flags', flagsRouter);
+apiV1Router.use('/kyb', kybRouter);
+apiV1Router.use('/batch', batchRouter);
+apiV1Router.use('/relayer', relayerRouter);
+apiV1Router.use('/queue/payments', paymentQueueRouter);
+apiV1Router.use('/splits', splitsRouter);
+apiV1Router.use('/refunds', refundsRouter);
+apiV1Router.use('/allowances', allowancesRouter);
+// Email delivery system
+apiV1Router.use('/emails', emailRouter);
+// Portfolio/wallet aggregation
+apiV1Router.use('/portfolio', portfolioRouter);
+// Backup system
+apiV1Router.use('/backup', backupRouter);
+// IP allowlist management
+apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
+// Push notifications
+apiV1Router.use('/push', pushRouter);
+// Stripe card payments
+apiV1Router.use('/stripe', stripeRouter);
+
+app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
+
+// Notification system routes
+app.use('/api/v1/notifications', notificationsRouter);
+
+// Audit logging routes
+app.use('/api/v1/audit', auditRouter);
+
+// Currency hedging routes
+app.use('/api/v1/hedging', hedgingRouter);
+
+// SOC 2 / compliance evidence endpoints
+app.use('/api/v1/compliance', complianceRouter);
+
+// Payment receipt NFTs
+app.use('/api/v1/receipts', receiptsRouter);
+
+// Event-driven architecture — event store, CQRS projections
+app.use('/api/v1/events', eventsRouter);
+
+// Advanced threat detection with behavioral analysis
+app.use('/api/v1/threat-detection', threatDetectionRouter);
+
+// Microservices service mesh — registry, discovery, circuit breakers
+app.use('/api/v1/service-mesh', serviceMeshRouter);
+
+// Fiat ACH/Wire payment approval workflows
+app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
+
+// Merchant dynamic payment links
+app.use('/api/v1/payment-links', paymentLinksRouter);
+
+// Project + milestone delivery approval workflow
+app.use('/api/v1/projects', projectsRouter);
+
+// GraphQL gateway with federation-ready schema and subscriptions stream
+app.use('/graphql', graphQLRouter);
+app.use('/graphql/ws', graphQLWsRouter);
+
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  if (req.path.startsWith('/v1/')) {
+    return next();
+  }
+
+  if (req.apiVersion === 'v1') {
+    return apiV1Router(req, res, next);
+  }
+
+  next(new AppError(404, `API Version ${req.apiVersion} is not supported`, 'UNSUPPORTED_API_VERSION'));
+});
+
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+if (config.jobs.enabled) {
+  startJobs();
+}
+
+registerDefaultProcessors();
+if (config.queue.enabled) {
+  messageQueue.start();
+  paymentQueue.start();
+}
+
+const server = http.createServer(app);
+const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
+app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
+
+server.listen(config.server.port, () => {
+  console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
+  console.log(`WebSocket server listening on path /ws (max ${wsServer.metrics.activeConnections}/${wsServer.metrics.acceptedConnections})`);
+});
+
+const shutdown = (signal: string) => {
+  console.log(`${signal} received. Starting graceful shutdown...`);
+
+  server.close(() => {
+    console.log('HTTP server closed.');
+
+    try {
+      const scheduler = getJobScheduler();
+      if (scheduler) {
+        scheduler.stopAll();
+        console.log('Job scheduler stopped.');
+      }
+    } catch (err) {
+      console.error('Error stopping scheduler:', err);
+    }
+
+    try {
+      messageQueue.stop();
+      paymentQueue.stop();
+      console.log('Message queue stopped.');
+    } catch (err) {
+      console.error('Error stopping message queue:', err);
+    }
+
+    try {
+      wsServer.close().then(() => console.log('WebSocket server closed.'));
+    } catch (err) {
+      console.error('Error closing WebSocket server:', err);
+    }
+
+    console.log('Graceful shutdown complete. Exiting.');
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    console.error('Could not close connections in time, forceful shutdown');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 export default app;

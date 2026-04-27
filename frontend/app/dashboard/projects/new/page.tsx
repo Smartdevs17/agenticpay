@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -16,22 +16,81 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ArrowLeft, Plus, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
+import { ConfirmModal } from '@/components/transaction/ConfirmModal';
+import { parseEther } from 'viem';
+
+type PendingTransaction = {
+  functionName: string;
+  contractAddress: string;
+  args: unknown[];
+  gasEstimate?: bigint;
+  value?: bigint;
+  submit: () => void;
+};
+
+const walletAddressSchema = z
+  .string()
+  .trim()
+  .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid wallet address');
+
+const tokenAddressSchema = z
+  .string()
+  .trim()
+  .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid token address');
+
+const isFutureDate = (value: string) => {
+  const selectedDate = new Date(`${value}T00:00:00`);
+
+  if (Number.isNaN(selectedDate.getTime())) {
+    return false;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return selectedDate > today;
+};
+
+const getMinDeadlineDate = () => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  return tomorrow.toISOString().split('T')[0];
+};
 
 const projectSchema = z.object({
-  title: z.string().min(1, 'Title is required'),
-  clientAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid wallet address').optional(), // Optional if user is client
-  freelancerAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid wallet address'),
-  totalAmount: z.string().min(1, 'Amount is required'),
+  title: z.string().trim().min(1, 'Title is required'),
+  clientAddress: walletAddressSchema.optional(), // Optional if user is client
+  freelancerAddress: walletAddressSchema,
+  totalAmount: z
+    .string()
+    .trim()
+    .min(1, 'Amount is required')
+    .refine((value) => {
+      const amount = Number(value);
+      return Number.isFinite(amount) && amount > 0;
+    }, 'Amount must be a positive number'),
   currency: z.string().min(1, 'Currency is required'),
-  tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid token address').optional(),
-  deadline: z.string().min(1, 'Deadline is required'),
+  tokenAddress: z.union([tokenAddressSchema, z.literal('')]).optional(),
+  deadline: z
+    .string()
+    .min(1, 'Deadline is required')
+    .refine(isFutureDate, 'Deadline must be a future date'),
   githubRepo: z.string().url('Invalid URL').optional().or(z.literal('')),
   description: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.currency === 'ERC20' && !data.tokenAddress?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['tokenAddress'],
+      message: 'Token address is required for ERC20 payments',
+    });
+  }
 });
 
 type ProjectFormData = z.infer<typeof projectSchema>;
@@ -39,7 +98,8 @@ type ProjectFormData = z.infer<typeof projectSchema>;
 export default function CreateProjectPage() {
   const router = useRouter();
   const { address } = useAccount();
-  const { createProject, isPending, isConfirming, isConfirmed, error } = useAgenticPay();
+  const { prepareTransaction, isPending, isConfirming, isConfirmed, error } = useAgenticPay();
+  const [pendingTransaction, setPendingTransaction] = useState<PendingTransaction | null>(null);
 
   const {
     register,
@@ -55,6 +115,7 @@ export default function CreateProjectPage() {
     },
   });
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const currency = watch('currency');
 
   useEffect(() => {
@@ -67,13 +128,18 @@ export default function CreateProjectPage() {
   useEffect(() => {
     if (error) {
       console.error(error);
-      toast.error('Transaction failed: ' + (error as any).shortMessage || error.message);
+      toast.error('Transaction failed: ' + (error as { shortMessage?: string }).shortMessage || error.message);
     }
   }, [error]);
 
   const onSubmit = async (data: ProjectFormData) => {
     if (!address) {
       toast.error('Please connect your wallet first');
+      return;
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      toast.error('You are offline. Reconnect before creating an on-chain project.');
       return;
     }
 
@@ -92,16 +158,16 @@ export default function CreateProjectPage() {
         repo: data.githubRepo
       });
 
-      await createProject(
+      const prepared = await prepareTransaction('createProject', [
         data.freelancerAddress,
-        data.totalAmount,
+        parseEther(data.totalAmount),
         paymentType,
         tokenAddr,
         workDesc,
-        deadlineTimestamp
-      );
+        BigInt(deadlineTimestamp),
+      ]);
 
-      toast.info('Transaction submitted. Waiting for confirmation...');
+      setPendingTransaction(prepared);
 
     } catch (e) {
       console.error('Failed to prepare transaction:', e);
@@ -174,7 +240,15 @@ export default function CreateProjectPage() {
                 </div>
                 <div>
                   <Label htmlFor="currency">Currency</Label>
-                  <Select onValueChange={(val) => setValue('currency', val)} defaultValue="ETH">
+                  <Select
+                    onValueChange={(val) =>
+                      setValue('currency', val, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                    }
+                    defaultValue="ETH"
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select Currency" />
                     </SelectTrigger>
@@ -208,6 +282,7 @@ export default function CreateProjectPage() {
                 <Input
                   id="deadline"
                   type="date"
+                  min={getMinDeadlineDate()}
                   {...register('deadline')}
                 />
                 {errors.deadline && (
@@ -242,6 +317,24 @@ export default function CreateProjectPage() {
           </form>
         </CardContent>
       </Card>
+
+      {pendingTransaction && (
+        <ConfirmModal
+          open={!!pendingTransaction}
+          functionName={pendingTransaction.functionName}
+          contractAddress={pendingTransaction.contractAddress}
+          args={pendingTransaction.args}
+          gasEstimate={pendingTransaction.gasEstimate}
+          value={pendingTransaction.value}
+          isSubmitting={isPending || isConfirming}
+          onCancel={() => setPendingTransaction(null)}
+          onConfirm={() => {
+            pendingTransaction.submit();
+            setPendingTransaction(null);
+            toast.info('Transaction submitted. Waiting for confirmation...');
+          }}
+        />
+      )}
     </div>
   );
 }

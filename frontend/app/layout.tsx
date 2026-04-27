@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import PWAWrapper from "@/components/PWAWrapper";
+import { LanguageProvider } from "@/components/providers/LanguageProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,6 +18,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "AgenticPay - Get Paid Instantly for Your Work",
   description: "Secure, fast, and transparent payments for freelancers powered by blockchain technology.",
+  manifest: "/manifest.webmanifest",
   keywords: ["freelancer", "payments", "blockchain", "crypto", "web3", "escrow", "milestones"],
   authors: [{ name: "AgenticPay" }],
   openGraph: {
@@ -36,11 +39,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="scroll-smooth">
+    <html lang="en" className="scroll-smooth" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Providers>{children}</Providers>
+        <Providers>
+          <LanguageProvider>
+            {children}
+          </LanguageProvider>
+          <PWAWrapper />
+        </Providers>
       </body>
     </html>
   );

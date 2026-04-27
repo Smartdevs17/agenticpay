@@ -1,0 +1,376 @@
+name: Cost Monitor
+
+# ─── Triggers ────────────────────────────────────────────────────────────────
+on:
+  schedule:
+    # Run every Monday at 08:00 UTC — weekly cost snapshot
+    - cron: '0 8 * * 1'
+  # Also run after every CI run on main so bundle-size deltas are always fresh
+  workflow_run:
+    workflows: ['CI']
+    branches: [main]
+    types: [completed]
+  # Manual trigger with configurable alert threshold
+  workflow_dispatch:
+    inputs:
+      alert_threshold_percent:
+        description: 'Alert when this % of monthly limit is consumed (default 80)'
+        required: false
+        default: '80'
+      dry_run:
+        description: 'Print report without creating/updating GitHub Issues'
+        type: boolean
+        required: false
+        default: false
+
+# Only one cost-monitor run at a time
+concurrency:
+  group: cost-monitor
+  cancel-in-progress: false
+
+# ─── Permissions ─────────────────────────────────────────────────────────────
+permissions:
+  contents: read
+  issues: write       # create / update cost-alert issues
+  actions: read       # read workflow run data
+
+# ─── Environment ─────────────────────────────────────────────────────────────
+env:
+  # Percentage of monthly GitHub Actions minutes that triggers an alert
+  ALERT_THRESHOLD_PERCENT: ${{ inputs.alert_threshold_percent || '80' }}
+  # Bundle-size regression threshold (percentage increase that triggers alert)
+  BUNDLE_SIZE_ALERT_PERCENT: '10'
+  # Label used to identify cost-alert issues
+  ALERT_ISSUE_LABEL: 'cost-alert'
+
+jobs:
+  # ── 1. Tag resources ─────────────────────────────────────────────────────────
+  tag-resources:
+    name: Tag Resources
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_tag: ${{ steps.tag.outputs.run_tag }}
+      build_date: ${{ steps.tag.outputs.build_date }}
+      commit_short: ${{ steps.tag.outputs.commit_short }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate resource tags
+        id: tag
+        run: |
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          COMMIT_SHORT="${GITHUB_SHA::8}"
+          RUN_TAG="${{ github.repository_owner }}/agenticpay:${GITHUB_REF_NAME}:${COMMIT_SHORT}:${GITHUB_RUN_NUMBER}"
+
+          echo "run_tag=${RUN_TAG}"        >> "$GITHUB_OUTPUT"
+          echo "build_date=${BUILD_DATE}"  >> "$GITHUB_OUTPUT"
+          echo "commit_short=${COMMIT_SHORT}" >> "$GITHUB_OUTPUT"
+
+          # Emit as workflow-run annotations (visible in Actions UI)
+          echo "::notice title=Resource Tag::Run tag: ${RUN_TAG}"
+          echo "::notice title=Build Date::${BUILD_DATE}"
+
+          # Write a machine-readable tag manifest for downstream consumers
+          cat > resource-tags.json <<EOF
+          {
+            "service":      "agenticpay",
+            "environment":  "${{ github.ref_name == 'main' && 'production' || 'staging' }}",
+            "version":      "${COMMIT_SHORT}",
+            "run_number":   "${{ github.run_number }}",
+            "run_tag":      "${RUN_TAG}",
+            "build_date":   "${BUILD_DATE}",
+            "repository":   "${{ github.repository }}",
+            "triggered_by": "${{ github.actor }}",
+            "workflow":     "${{ github.workflow }}"
+          }
+          EOF
+          cat resource-tags.json
+
+      - name: Upload resource tag manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-tags-${{ github.run_number }}
+          path: resource-tags.json
+          retention-days: 90
+
+  # ── 2. Track GitHub Actions billing ──────────────────────────────────────────
+  track-billing:
+    name: Track CI Costs (GitHub Actions Minutes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: tag-resources
+    outputs:
+      minutes_used: ${{ steps.billing.outputs.minutes_used }}
+      minutes_limit: ${{ steps.billing.outputs.minutes_limit }}
+      usage_percent: ${{ steps.billing.outputs.usage_percent }}
+      threshold_exceeded: ${{ steps.billing.outputs.threshold_exceeded }}
+    steps:
+      - name: Fetch Actions billing
+        id: billing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Determine if this is an org or a user repo
+          OWNER="${{ github.repository_owner }}"
+
+          # Try org billing first; fall back to user billing
+          BILLING=$(gh api "orgs/${OWNER}/settings/billing/actions" 2>/dev/null) || \
+          BILLING=$(gh api "users/${OWNER}/settings/billing/actions" 2>/dev/null) || \
+          BILLING='{"total_minutes_used":0,"included_minutes":2000,"total_paid_minutes_used":0}'
+
+          USED=$(echo "$BILLING"    | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('total_minutes_used',0))")
+          LIMIT=$(echo "$BILLING"   | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('included_minutes',2000))")
+          PAID=$(echo "$BILLING"    | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('total_paid_minutes_used',0))")
+
+          if [ "$LIMIT" -gt 0 ]; then
+            PCT=$(python3 -c "print(round(${USED}/${LIMIT}*100,1))")
+          else
+            PCT=0
+          fi
+
+          EXCEEDED="false"
+          if python3 -c "import sys; sys.exit(0 if ${PCT} >= ${ALERT_THRESHOLD_PERCENT} else 1)"; then
+            EXCEEDED="true"
+          fi
+
+          echo "minutes_used=${USED}"          >> "$GITHUB_OUTPUT"
+          echo "minutes_limit=${LIMIT}"        >> "$GITHUB_OUTPUT"
+          echo "paid_minutes=${PAID}"          >> "$GITHUB_OUTPUT"
+          echo "usage_percent=${PCT}"          >> "$GITHUB_OUTPUT"
+          echo "threshold_exceeded=${EXCEEDED}" >> "$GITHUB_OUTPUT"
+
+          echo "::notice title=Actions Minutes::Used ${USED}/${LIMIT} (${PCT}% of included quota)"
+          if [ "$EXCEEDED" = "true" ]; then
+            echo "::warning title=Cost Alert::Actions minutes at ${PCT}% — threshold ${ALERT_THRESHOLD_PERCENT}% exceeded!"
+          fi
+
+      - name: Fetch recent workflow run durations
+        id: run_durations
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Pull the last 20 CI runs to calculate average duration
+          RUNS=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?per_page=20&status=completed" \
+            --jq '[.workflow_runs[] | {id:.id, name:.name, duration_s: ((.updated_at | fromdateiso8601) - (.created_at | fromdateiso8601)), conclusion:.conclusion}]' \
+            2>/dev/null || echo '[]')
+
+          AVG=$(echo "$RUNS" | python3 -c "
+          import json, sys
+          runs = json.load(sys.stdin)
+          if not runs:
+              print(0)
+          else:
+              durations = [r['duration_s'] for r in runs if r['conclusion'] == 'success']
+              print(round(sum(durations)/len(durations)/60, 1) if durations else 0)
+          ")
+
+          echo "avg_duration_min=${AVG}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=CI Duration::Average CI run: ${AVG} minutes (last 20 runs)"
+
+  # ── 3. Bundle-size tracking ───────────────────────────────────────────────────
+  track-bundle-size:
+    name: Track Bundle Sizes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: tag-resources
+    outputs:
+      backend_size_kb: ${{ steps.sizes.outputs.backend_size_kb }}
+      frontend_size_kb: ${{ steps.sizes.outputs.frontend_size_kb }}
+      size_alert: ${{ steps.sizes.outputs.size_alert }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Build backend
+        working-directory: backend
+        run: npm ci --prefer-offline && npm run build
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci --prefer-offline && npm run build
+
+      - name: Measure artifact sizes
+        id: sizes
+        run: |
+          # Backend dist size
+          if [ -d backend/dist ]; then
+            BACKEND_KB=$(du -sk backend/dist | awk '{print $1}')
+          else
+            BACKEND_KB=0
+          fi
+
+          # Frontend .next size (built output, excluding cache)
+          if [ -d frontend/.next ]; then
+            FRONTEND_KB=$(du -sk --exclude=cache frontend/.next 2>/dev/null | awk '{print $1}' || \
+                          du -sk frontend/.next | awk '{print $1}')
+          else
+            FRONTEND_KB=0
+          fi
+
+          echo "backend_size_kb=${BACKEND_KB}"   >> "$GITHUB_OUTPUT"
+          echo "frontend_size_kb=${FRONTEND_KB}" >> "$GITHUB_OUTPUT"
+
+          echo "::notice title=Backend Bundle::${BACKEND_KB} KB"
+          echo "::notice title=Frontend Bundle::${FRONTEND_KB} KB"
+
+          # Compare against cached baseline (stored as artifact from prior run)
+          SIZE_ALERT="false"
+
+          if [ -f /tmp/baseline_sizes.json ]; then
+            PREV_BACKEND=$(python3 -c "import json; d=json.load(open('/tmp/baseline_sizes.json')); print(d.get('backend_kb',0))")
+            PREV_FRONTEND=$(python3 -c "import json; d=json.load(open('/tmp/baseline_sizes.json')); print(d.get('frontend_kb',0))")
+
+            BACKEND_DELTA=$(python3 -c "
+          prev=${PREV_BACKEND}; cur=${BACKEND_KB}
+          if prev > 0:
+              pct = round((cur - prev) / prev * 100, 1)
+              print(pct)
+          else:
+              print(0)
+          ")
+            FRONTEND_DELTA=$(python3 -c "
+          prev=${PREV_FRONTEND}; cur=${FRONTEND_KB}
+          if prev > 0:
+              pct = round((cur - prev) / prev * 100, 1)
+              print(pct)
+          else:
+              print(0)
+          ")
+
+            if python3 -c "import sys; sys.exit(0 if float('${BACKEND_DELTA}') > float('${BUNDLE_SIZE_ALERT_PERCENT}') or float('${FRONTEND_DELTA}') > float('${BUNDLE_SIZE_ALERT_PERCENT}') else 1)"; then
+              SIZE_ALERT="true"
+              echo "::warning title=Bundle Size Regression::Backend +${BACKEND_DELTA}%  Frontend +${FRONTEND_DELTA}%"
+            fi
+          fi
+
+          echo "size_alert=${SIZE_ALERT}" >> "$GITHUB_OUTPUT"
+
+          # Save new baseline
+          cat > bundle-sizes.json <<EOF
+          {
+            "backend_kb":  ${BACKEND_KB},
+            "frontend_kb": ${FRONTEND_KB},
+            "recorded_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "commit":      "${{ github.sha }}"
+          }
+          EOF
+
+      - name: Upload bundle size baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-sizes-${{ github.run_number }}
+          path: bundle-sizes.json
+          retention-days: 90
+
+  # ── 4. Cost report + alerts ───────────────────────────────────────────────────
+  cost-report:
+    name: Generate Cost Report & Alerts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [tag-resources, track-billing, track-bundle-size]
+    steps:
+      - name: Build cost report
+        id: report
+        run: |
+          MINUTES_USED="${{ needs.track-billing.outputs.minutes_used }}"
+          MINUTES_LIMIT="${{ needs.track-billing.outputs.minutes_limit }}"
+          USAGE_PCT="${{ needs.track-billing.outputs.usage_percent }}"
+          BACKEND_KB="${{ needs.track-bundle-size.outputs.backend_size_kb }}"
+          FRONTEND_KB="${{ needs.track-bundle-size.outputs.frontend_size_kb }}"
+          RUN_TAG="${{ needs.tag-resources.outputs.run_tag }}"
+          BUILD_DATE="${{ needs.tag-resources.outputs.build_date }}"
+
+          # Progress bar (20 chars wide)
+          FILLED=$(python3 -c "print(round(float('${USAGE_PCT}')/100*20))" 2>/dev/null || echo 0)
+          EMPTY=$(python3 -c "print(20 - ${FILLED})" 2>/dev/null || echo 20)
+          BAR=$(python3 -c "print('█' * ${FILLED} + '░' * ${EMPTY})" 2>/dev/null || echo "░░░░░░░░░░░░░░░░░░░░")
+
+          REPORT="## 📊 AgenticPay Cost Report
+
+          **Generated:** ${BUILD_DATE}
+          **Resource Tag:** \`${RUN_TAG}\`
+
+          ---
+
+          ### GitHub Actions Minutes
+          | Metric | Value |
+          |--------|-------|
+          | Minutes used | ${MINUTES_USED} / ${MINUTES_LIMIT} |
+          | Usage | ${USAGE_PCT}% |
+          | Progress | \`${BAR}\` |
+          | Alert threshold | ${ALERT_THRESHOLD_PERCENT}% |
+
+          ### Bundle Sizes
+          | Artifact | Size |
+          |----------|------|
+          | Backend \`dist/\` | ${BACKEND_KB} KB |
+          | Frontend \`.next/\` | ${FRONTEND_KB} KB |
+
+          ---
+          *Workflow run [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*"
+
+          # Write report to file for GitHub step summary
+          echo "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+
+          # Also save as output (escaping newlines for GITHUB_OUTPUT)
+          EOF_MARKER=$(dd if=/dev/urandom bs=15 count=1 2>/dev/null | base64)
+          echo "report<<${EOF_MARKER}" >> "$GITHUB_OUTPUT"
+          echo "$REPORT"              >> "$GITHUB_OUTPUT"
+          echo "${EOF_MARKER}"        >> "$GITHUB_OUTPUT"
+
+      - name: Create or update cost-alert issue
+        if: |
+          needs.track-billing.outputs.threshold_exceeded == 'true' ||
+          needs.track-bundle-size.outputs.size_alert == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="⚠️ Cost Alert: AgenticPay resource usage threshold exceeded"
+          BODY="${{ steps.report.outputs.report }}
+
+          ### Triggered alerts
+          - Actions minutes threshold: ${{ needs.track-billing.outputs.threshold_exceeded == 'true' && '🔴 EXCEEDED' || '✅ OK' }}
+          - Bundle size regression: ${{ needs.track-bundle-size.outputs.size_alert == 'true' && '🔴 DETECTED' || '✅ OK' }}
+
+          **Action required:** Review workflow efficiency and bundle sizes.
+          Consider enabling \`paths-filter\` exclusions or investigating recent large dependencies."
+
+          # Check for existing open alert issue
+          EXISTING=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "${ALERT_ISSUE_LABEL}" \
+            --state open \
+            --json number \
+            --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" \
+              --repo "${{ github.repository }}" \
+              --body "$BODY"
+            echo "::warning title=Cost Alert::Updated existing issue #${EXISTING}"
+          else
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "$TITLE" \
+              --body "$BODY" \
+              --label "${ALERT_ISSUE_LABEL}" 2>/dev/null || \
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "$TITLE" \
+              --body "$BODY"
+            echo "::warning title=Cost Alert::Created new cost-alert issue"
+          fi
+
+      - name: Emit summary notice
+        if: needs.track-billing.outputs.threshold_exceeded == 'false' && needs.track-bundle-size.outputs.size_alert == 'false'
+        run: |
+          echo "::notice title=Cost Status::✅ All metrics within thresholds — ${{ needs.track-billing.outputs.usage_percent }}% of Actions quota used"

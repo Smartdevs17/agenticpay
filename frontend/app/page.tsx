@@ -176,6 +176,9 @@ export default function Home() {
               <a href="#" className="hover:text-white transition-colors">
                 Privacy
               </a>
+              <Link href="/accessibility" className="hover:text-white transition-colors">
+                Accessibility
+              </Link>
               <a href="#" className="hover:text-white transition-colors">
                 Support
               </a>

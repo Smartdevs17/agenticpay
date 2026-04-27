@@ -1,0 +1,11 @@
+name = "agenticpay-edge"
+main = "src/index.ts"
+compatibility_date = "2026-04-23"
+
+[[kv_namespaces]]
+binding = "USER_SESSIONS"
+id = "YOUR_KV_NAMESPACE_ID"
+
+[[kv_namespaces]]
+binding = "EDGE_CACHE"
+id = "YOUR_KV_CACHE_ID"

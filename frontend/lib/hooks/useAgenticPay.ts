@@ -1,11 +1,21 @@
-import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useReadContracts, useAccount } from 'wagmi';
+import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useReadContracts, useAccount, usePublicClient } from 'wagmi';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../contracts';
 import { parseEther, formatEther } from 'viem';
 import { Project, Milestone } from '../types';
 
+type TransactionPreview = {
+    contractAddress: `0x${string}`;
+    functionName: string;
+    args: unknown[];
+    value?: bigint;
+    gasEstimate?: bigint;
+    submit: () => void;
+};
+
 export const useAgenticPay = () => {
     const { writeContract, data: hash, isPending, error } = useWriteContract();
-    const { address } = useAccount();
+    const { address, isConnecting, isReconnecting } = useAccount();
+    const publicClient = usePublicClient();
 
     const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
         hash,
@@ -17,6 +27,45 @@ export const useAgenticPay = () => {
         functionName: 'disputeArbitrator',
     });
 
+    const prepareTransaction = async (
+        functionName: string,
+        args: unknown[] = [],
+        value?: bigint
+    ): Promise<TransactionPreview> => {
+        let gasEstimate: bigint | undefined;
+
+        if (publicClient && address) {
+            try {
+                gasEstimate = await publicClient.estimateContractGas({
+                    address: CONTRACT_ADDRESS,
+                    abi: CONTRACT_ABI,
+                    functionName: functionName as never,
+                    args: args as never,
+                    account: address,
+                    value,
+                });
+            } catch {
+                // Gas estimation can fail for some wallets/networks. Modal still allows explicit confirmation.
+            }
+        }
+
+        return {
+            contractAddress: CONTRACT_ADDRESS,
+            functionName,
+            args,
+            value,
+            gasEstimate,
+            submit: () =>
+                writeContract({
+                    address: CONTRACT_ADDRESS,
+                    abi: CONTRACT_ABI,
+                    functionName: functionName as never,
+                    args: args as never,
+                    value,
+                }),
+        };
+    };
+
     const createProject = async (
         freelancer: string,
         amount: string,
@@ -25,59 +74,35 @@ export const useAgenticPay = () => {
         workDescription: string,
         deadline: number // timestamp
     ) => {
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'createProject',
-            args: [freelancer, parseEther(amount), paymentType, tokenAddress, workDescription, BigInt(deadline)],
-        });
+        const args = [freelancer, parseEther(amount), paymentType, tokenAddress, workDescription, BigInt(deadline)];
+        const prepared = await prepareTransaction('createProject', args);
+        prepared.submit();
+        return prepared;
     };
 
     const fundProject = async (projectId: string, amount: string, paymentType: number) => {
-        // If paymentType is 0 (Native ETH), send value.
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'fundProject',
-            args: [BigInt(projectId)],
-            value: paymentType === 0 ? parseEther(amount) : 0n,
-        });
+        const value = paymentType === 0 ? parseEther(amount) : 0n;
+        const prepared = await prepareTransaction('fundProject', [BigInt(projectId)], value);
+        prepared.submit();
+        return prepared;
     };
 
     const submitWork = async (projectId: string, githubRepo: string) => {
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'submitWork',
-            args: [BigInt(projectId), githubRepo],
-        });
+        const prepared = await prepareTransaction('submitWork', [BigInt(projectId), githubRepo]);
+        prepared.submit();
+        return prepared;
     };
 
     const approveWork = async (projectId: string) => {
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'approveWork',
-            args: [BigInt(projectId)],
-        });
+        const prepared = await prepareTransaction('approveWork', [BigInt(projectId)]);
+        prepared.submit();
+        return prepared;
     };
-
-    const releasePayment = async (projectId: string) => {
-        // releasePayment seems to be internal or managed by `approveWork` in some flows, 
-        // check ABI. ABI has `approveWork` and `PaymentReleased` event.
-        // `approveWork` releases payment.
-        writeContract({
-            address: CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'approveWork',
-            args: [BigInt(projectId)],
-        });
-    }
 
     // -- Data Fetching Hooks --
 
     const useUserProjects = () => {
-        const { data: clientProjects, isLoading: loadingClient } = useReadContract({
+        const { data: clientProjects, isLoading: loadingClient, isFetching: fetchingClient } = useReadContract({
             address: CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: 'getClientProjects',
@@ -85,7 +110,7 @@ export const useAgenticPay = () => {
             query: { enabled: !!address }
         });
 
-        const { data: freelancerProjects, isLoading: loadingFreelancer } = useReadContract({
+        const { data: freelancerProjects, isLoading: loadingFreelancer, isFetching: fetchingFreelancer } = useReadContract({
             address: CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: 'getFreelancerProjects',
@@ -100,25 +125,33 @@ export const useAgenticPay = () => {
         // Deduplicate
         const uniqueIds = Array.from(new Set(allIds.map(id => id.toString()))).map(id => BigInt(id));
 
-        const { data: projectsData, isLoading: loadingDetails } = useReadContracts({
+        const { data: projectsData, isLoading: loadingDetails, isFetching: fetchingDetails } = useReadContracts({
             contracts: uniqueIds.map(id => ({
                 address: CONTRACT_ADDRESS,
                 abi: CONTRACT_ABI,
                 functionName: 'getProject',
                 args: [id]
-            }))
+            })),
+            query: { enabled: !!address && uniqueIds.length > 0 }
         });
 
         const formattedProjects: Project[] = projectsData
-            ? projectsData.map((result: any) => {
-                if (result.status === 'success' && result.result) {
-                    return formatProjectData(result.result);
-                }
-                return null;
-            }).filter((p: any) => p !== null) as Project[]
+            ? projectsData
+                .map((result) => {
+                    if (result.status === 'success' && result.result) {
+                        return formatProjectData(result.result as RawProjectData);
+                    }
+                    return null;
+                })
+                .filter((project): project is Project => project !== null)
             : [];
 
-        return { projects: formattedProjects, loading: loadingClient || loadingFreelancer || loadingDetails };
+        const isWalletHydrating = isConnecting || isReconnecting;
+        const isProjectListsFetching = loadingClient || loadingFreelancer || fetchingClient || fetchingFreelancer;
+        const isDetailFetching = uniqueIds.length > 0 && (loadingDetails || fetchingDetails);
+        const loading = !!address && (isWalletHydrating || isProjectListsFetching || isDetailFetching);
+
+        return { projects: formattedProjects, loading };
     };
 
     const useProjectDetail = (projectId: string) => {
@@ -130,7 +163,11 @@ export const useAgenticPay = () => {
             query: { enabled: !!projectId }
         });
 
-        return { project: data ? formatProjectData(data) : null, loading: isLoading, refetch };
+        return {
+            project: data ? formatProjectData(data as RawProjectData) : null,
+            loading: isLoading,
+            refetch,
+        };
     };
 
 
@@ -141,6 +178,7 @@ export const useAgenticPay = () => {
         approveWork,
         useUserProjects,
         useProjectDetail,
+        prepareTransaction,
         hash,
         isPending,
         isConfirming,
@@ -150,7 +188,22 @@ export const useAgenticPay = () => {
     };
 };
 
-const formatProjectData = (data: any): Project => {
+interface RawProjectData {
+    projectId: bigint;
+    client: string;
+    freelancer: string;
+    amount: bigint;
+    depositedAmount: bigint;
+    paymentType: bigint;
+    status: bigint;
+    githubRepo: string;
+    workDescription: string;
+    deadline: bigint;
+    createdAt: bigint;
+    invoiceUri: string;
+}
+
+const formatProjectData = (data: RawProjectData): Project => {
     // data is the struct from contract
     // struct Project { projectId, client, freelancer, amount, depositedAmount, paymentType, tokenAddress, status, githubRepo, workDescription, ... }
 
@@ -161,11 +214,11 @@ const formatProjectData = (data: any): Project => {
         const parsed = JSON.parse(data.workDescription);
         if (parsed.title) title = parsed.title;
         if (parsed.description) description = parsed.description;
-    } catch (e) {
+    } catch {
         // ignore, use raw
     }
 
-    const mapStatus = (statusIdx: number) => {
+    const mapStatus = (statusIdx: number): Project['status'] => {
         // Enum: 0: Created, 1: Funded, 2: Started, 3: Submitted, 4: Completed, 5: Disputed, 6: Cancelled
         // 'active' | 'completed' | 'cancelled'
         if (statusIdx === 7) return 'verified'; // Assumed Verified based on debug info
@@ -199,7 +252,7 @@ const formatProjectData = (data: any): Project => {
         title: title,
         client: { name: 'Client', address: data.client },
         freelancer: { name: 'Freelancer', address: data.freelancer },
-        status: mapStatus(Number(data.status)) as any,
+        status: mapStatus(Number(data.status)),
         totalAmount: formatEther(data.amount),
         rawAmount: data.amount, // Pass raw amount
         currency: Number(data.paymentType) === 0 ? 'ETH' : 'ERC20', // Simplified

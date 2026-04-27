@@ -1,26 +1,39 @@
 import { Router } from 'express';
-import { getAccountInfo, getTransactionStatus } from '../services/stellar.js';
+import {
+  getAccountInfo,
+  getTransactionStatus,
+  InvalidStellarInputError,
+} from '../services/stellar.js';
+import { cacheControl, CacheTTL } from '../middleware/cache.js';
 
 export const stellarRouter = Router();
 
-// Get Stellar account info
-stellarRouter.get('/account/:address', async (req, res) => {
+// Get Stellar account info — balances change frequently; cache for 30 s
+stellarRouter.get('/account/:address', cacheControl({ maxAge: CacheTTL.SHORT }), async (req, res) => {
   try {
     const account = await getAccountInfo(req.params.address);
-    res.json(account);
+    return res.json(account);
   } catch (error) {
+    if (error instanceof InvalidStellarInputError) {
+      return res.status(400).json({ message: error.message });
+    }
+
     console.error('Stellar account error:', error);
-    res.status(500).json({ message: 'Failed to fetch account info' });
+    return res.status(500).json({ message: 'Failed to fetch account info' });
   }
 });
 
-// Get transaction status
-stellarRouter.get('/tx/:hash', async (req, res) => {
+// Get transaction status — confirmed txs are immutable; cache for 10 min
+stellarRouter.get('/tx/:hash', cacheControl({ maxAge: CacheTTL.IMMUTABLE }), async (req, res) => {
   try {
     const tx = await getTransactionStatus(req.params.hash);
-    res.json(tx);
+    return res.json(tx);
   } catch (error) {
+    if (error instanceof InvalidStellarInputError) {
+      return res.status(400).json({ message: error.message });
+    }
+
     console.error('Stellar tx error:', error);
-    res.status(500).json({ message: 'Failed to fetch transaction' });
+    return res.status(500).json({ message: 'Failed to fetch transaction' });
   }
 });

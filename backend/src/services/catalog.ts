@@ -8,7 +8,7 @@ try {
   const pkgPath = join(process.cwd(), 'package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
   cachedVersion = pkg.version || '0.1.0';
-} catch (e) {
+} catch {
   console.warn('Could not read package.json version, defaulting to 0.1.0');
   cachedVersion = '0.1.0';
 }

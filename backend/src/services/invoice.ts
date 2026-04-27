@@ -1,6 +1,17 @@
 import OpenAI from 'openai';
+import { config } from '../config/env.js';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
+
+const getOpenAIClient = () => {
+  const apiKey = config().OPENAI_API_KEY;
+
+  if (!openaiClient) {
+    openaiClient = new OpenAI({ apiKey });
+  }
+
+  return openaiClient;
+};
 
 interface InvoiceRequest {
   projectId: string;
@@ -28,7 +39,7 @@ interface Invoice {
 export async function generateInvoice(request: InvoiceRequest): Promise<Invoice> {
   const id = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await getOpenAIClient().chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
       {

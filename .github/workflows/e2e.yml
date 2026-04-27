@@ -1,0 +1,110 @@
+name: E2E
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SERVICE: agenticpay
+  ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+
+jobs:
+  # Only run if frontend changed (keeps the matrix off the critical path for
+  # backend/contract-only PRs).
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/e2e.yml'
+
+  e2e:
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
+    name: E2E (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit, mobile-chrome, mobile-safari]
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-frontend-modules-node22-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-frontend-modules-node22-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      # Cache Playwright browser binaries. Key on the installed @playwright/test
+      # version so upgrades automatically invalidate.
+      - name: Resolve Playwright version
+        id: pw-version
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw-version.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps ${{ matrix.project == 'firefox' && 'firefox' || matrix.project == 'webkit' && 'webkit' || matrix.project == 'mobile-safari' && 'webkit' || 'chromium' }}
+
+      - name: Install Playwright OS deps (cache hit path)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps ${{ matrix.project == 'firefox' && 'firefox' || matrix.project == 'webkit' && 'webkit' || matrix.project == 'mobile-safari' && 'webkit' || 'chromium' }}
+
+      - name: Run Playwright tests
+        run: npx playwright test --project=${{ matrix.project }}
+        env:
+          CI: 'true'
+
+      - name: Upload HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: frontend/playwright-report
+          retention-days: 14
+
+      - name: Upload traces & videos
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace-${{ matrix.project }}
+          path: frontend/test-results
+          retention-days: 14
