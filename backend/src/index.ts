@@ -52,6 +52,7 @@ import { threatDetectionRouter } from './routes/threat-detection.js';
 import { serviceMeshRouter } from './routes/service-mesh.js';
 import { fiatPaymentsRouter } from './routes/fiat-payments.js';
 import { paymentLinksRouter } from './routes/payment-links.js';
+import { projectsRouter } from './routes/projects.js';
 import './events/projections.js';
 
 // Validate environment variables at startup
@@ -306,6 +307,9 @@ app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
 
 // Merchant dynamic payment links
 app.use('/api/v1/payment-links', paymentLinksRouter);
+
+// Project + milestone delivery approval workflow
+app.use('/api/v1/projects', projectsRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
