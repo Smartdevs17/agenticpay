@@ -18,7 +18,7 @@ import { useRouter } from 'next/navigation';
 import { PaymentCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
 import { formatDateTimeInTimeZone } from '@/lib/utils';
-import { useAuthStore } from '@/store/useAuthStore';
+
 
 export default function PaymentsPage() {
   const router = useRouter();
@@ -141,7 +141,7 @@ export default function PaymentsPage() {
         ))}
       </div>
 
-      {payments.length === 0 && (
+      {payments.length === 0 ? (
         <Card>
           <CardContent>
             <EmptyState

@@ -151,7 +151,7 @@ export default function InvoicesPage() {
         ))}
       </div>
 
-      {filteredInvoices.length === 0 && (
+      {filteredInvoices.length === 0 ? (
         <Card>
           <CardContent className="p-0">
             <EmptyState

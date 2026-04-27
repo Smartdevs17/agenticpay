@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Download, Pencil, X, Check, History, PenLine } from 'lucide-react';
 import { PageBreadcrumb } from '@/components/layout/PageBreadcrumb';
-import { ArrowLeft, Download } from 'lucide-react';
 import Link from 'next/link';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
