@@ -50,6 +50,7 @@ import { receiptsRouter } from './routes/receipts.js';
 import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
 import { serviceMeshRouter } from './routes/service-mesh.js';
+import { fiatPaymentsRouter } from './routes/fiat-payments.js';
 import './events/projections.js';
 
 // Validate environment variables at startup
@@ -298,6 +299,9 @@ app.use('/api/v1/threat-detection', threatDetectionRouter);
 
 // Microservices service mesh — registry, discovery, circuit breakers
 app.use('/api/v1/service-mesh', serviceMeshRouter);
+
+// Fiat ACH/Wire payment approval workflows
+app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
