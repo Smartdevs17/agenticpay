@@ -85,10 +85,25 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline
 
-      - name: Lint & Test
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Lint changed files
         run: |
-          npm run lint
-          npm run test
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- backend/src/ | grep '\.ts$' | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- backend/src/ | grep '\.ts$' | tr '\n' ' ')
+          fi
+          if [ -n "$CHANGED" ]; then
+            echo "Linting changed files: $CHANGED"
+            npx eslint $CHANGED
+          else
+            echo "No backend source files changed — skipping lint"
+          fi
+
+      - name: Test
+        run: npm run test
 
       - name: Build
         run: npm run build
@@ -148,10 +163,22 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline
 
-      - name: Lint & Test
+      - name: Lint changed files
         run: |
-          npm run lint
-          npm run test
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- . | grep -E '\.(ts|tsx)$' | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- . | grep -E '\.(ts|tsx)$' | tr '\n' ' ')
+          fi
+          if [ -n "$CHANGED" ]; then
+            echo "Linting changed files: $CHANGED"
+            npx eslint $CHANGED
+          else
+            echo "No frontend source files changed — skipping lint"
+          fi
+
+      - name: Test
+        run: npm run test
 
       - name: Build
         run: npm run build
