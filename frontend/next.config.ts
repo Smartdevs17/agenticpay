@@ -37,14 +37,16 @@ const nextConfig: NextConfig = {
           },
           lib: {
             test(module: any) {
+              const context = typeof module?.context === "string" ? module.context : "";
               return (
-                !module.context.match(/[\\/]node_modules[\\/]/) ||
-                /lodash/.test(module.context) ||
-                /moment/.test(module.context)
+                !context.match(/[\\/]node_modules[\\/]/) ||
+                /lodash/.test(context) ||
+                /moment/.test(context)
               );
             },
             name(module: any) {
-              const packageName = module.context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)?.[1] || "vendors";
+              const context = typeof module?.context === "string" ? module.context : "";
+              const packageName = context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)?.[1] || "vendors";
               return `npm.${packageName.replace("@", "")}`;
             },
             priority: 30,

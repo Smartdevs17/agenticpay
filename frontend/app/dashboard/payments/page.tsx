@@ -3,6 +3,8 @@
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { PaymentQRModal } from '@/components/payment/QRCode';
 import { useState } from 'react';
 import {
   CheckCircle2,
@@ -11,19 +13,21 @@ import {
   ExternalLink,
   Wallet,
   Loader2,
-  QrCode
+  QrCode,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { PaymentCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
 import { formatDateTimeInTimeZone } from '@/lib/utils';
-import { useAuthStore } from '@/store/useAuthStore';
+import { useAccount } from 'wagmi';
 
 export default function PaymentsPage() {
   const router = useRouter();
   const { payments, loading } = useDashboardData();
   const timezone = useAuthStore((state) => state.timezone);
+  const { address } = useAccount();
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -42,12 +46,8 @@ export default function PaymentsPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">
-            Payment History
-          </h1>
-          <p className="text-gray-600 mt-1">
-            View all your payment transactions
-          </p>
+          <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
+          <p className="mt-1 text-gray-600">View all your payment transactions</p>
           <div className="mt-2 inline-flex items-center gap-2 text-sm text-gray-500">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading payments...
@@ -65,83 +65,21 @@ export default function PaymentsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">
-            Payment History
-          </h1>
-          <p className="text-gray-600 mt-1">
-            View all your payment transactions
-          </p>
+          <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
+          <p className="mt-1 text-gray-600">View all your payment transactions</p>
         </div>
 
         {address && (
-          <Button
-            onClick={() => setIsQrModalOpen(true)}
-            className="flex items-center gap-2"
-          >
+          <Button onClick={() => setIsQrModalOpen(true)} className="flex items-center gap-2">
             <QrCode className="h-4 w-4" />
             Receive Payment
           </Button>
         )}
       </div>
 
-      {/* --- PAYMENT LIST --- */}
-      <div className="space-y-4">
-        {payments.map((payment, index) => (
-          <motion.div
-            key={payment.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.05 }}
-          >
-            <Card className="hover:shadow-lg transition-all">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4 flex-1">
-                    {getStatusIcon(payment.status)}
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900">{payment.projectTitle}</h3>
-                      <p className="text-sm text-gray-600">
-                        {payment.type === 'milestone_payment' ? 'Milestone Payment' : 'Full Payment'}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {formatDateTimeInTimeZone(payment.timestamp, timezone)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">
-                      {payment.amount} {payment.currency}
-                    </p>
-                    {payment.transactionHash && (
-                      <a
-                        href={`https://testnet.cronoscan.com/tx/${payment.transactionHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2 justify-end"
-                      >
-                        View on Explorer
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-                {payment.transactionHash && (
-                  <div className="mt-4 pt-4 border-t">
-                    <p className="text-xs text-gray-500 font-mono break-all">
-                      {payment.transactionHash}
-                    </p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
-
-      {payments.length === 0 && (
+      {payments.length === 0 ? (
         <Card>
           <CardContent>
             <EmptyState
@@ -164,26 +102,18 @@ export default function PaymentsPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
             >
-              <Card className="hover:shadow-lg transition-all">
+              <Card className="transition-all hover:shadow-lg">
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4 flex-1">
+                    <div className="flex flex-1 items-center gap-4">
                       {getStatusIcon(payment.status)}
-
                       <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900">
-                          {payment.projectTitle}
-                        </h3>
-
+                        <h3 className="font-semibold text-gray-900">{payment.projectTitle}</h3>
                         <p className="text-sm text-gray-600">
                           {payment.type === 'milestone_payment' ? 'Milestone Payment' : 'Full Payment'}
                         </p>
-
-                        <p className="text-xs text-gray-500 mt-1">
-                          {formatDateTimeInTimeZone(
-                            payment.timestamp,
-                            timezone
-                          )}
+                        <p className="mt-1 text-xs text-gray-500">
+                          {formatDateTimeInTimeZone(payment.timestamp, timezone)}
                         </p>
                       </div>
                     </div>
@@ -198,7 +128,7 @@ export default function PaymentsPage() {
                           href={`https://testnet.cronoscan.com/tx/${payment.transactionHash}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2 justify-end"
+                          className="mt-2 flex items-center justify-end gap-1 text-xs text-blue-600 hover:underline"
                         >
                           View on Explorer
                           <ExternalLink className="h-3 w-3" />
@@ -208,8 +138,8 @@ export default function PaymentsPage() {
                   </div>
 
                   {payment.transactionHash && (
-                    <div className="mt-4 pt-4 border-t">
-                      <p className="text-xs text-gray-500 font-mono break-all">
+                    <div className="mt-4 border-t pt-4">
+                      <p className="break-all font-mono text-xs text-gray-500">
                         {payment.transactionHash}
                       </p>
                     </div>
@@ -221,7 +151,6 @@ export default function PaymentsPage() {
         </div>
       )}
 
-      {/* QR Modal */}
       {address && (
         <PaymentQRModal
           address={address}

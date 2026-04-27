@@ -81,16 +81,16 @@ const prefetchQueue = new Map<string, Promise<unknown>>();
 const requestDedupeMap = new Map<string, Promise<unknown>>();
 
 export function prefetchOnHover(
-  promise: () => Promise<unknown>,
+  load: () => Promise<unknown>,
   key: string = Math.random().toString(36).substring(2)
 ) {
   const handleMouseEnter = async () => {
     if (prefetchQueue.has(key)) return;
     
     try {
-      const promise = promise();
-      prefetchQueue.set(key, promise);
-      await promise;
+      const pendingRequest = load();
+      prefetchQueue.set(key, pendingRequest);
+      await pendingRequest;
       setTimeout(() => prefetchQueue.delete(key), 60000);
     } catch {
       prefetchQueue.delete(key);
