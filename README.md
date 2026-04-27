@@ -58,6 +58,7 @@ Express.js API server providing:
 - **AI Verification** — Automated code review against project specifications
 - **Milestone Tracking** — Track project progress with clear status updates
 - **Invoice Management** — Auto-generated invoices for completed projects
+- **Two-Factor Authentication** — TOTP-based 2FA using authenticator apps with backup codes for account security
 
 ---
 

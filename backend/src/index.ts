@@ -50,6 +50,7 @@ import { receiptsRouter } from './routes/receipts.js';
 import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
 import { serviceMeshRouter } from './routes/service-mesh.js';
+import { twoFactorAuthRouter } from './routes/2fa.js';
 import './events/projections.js';
 
 // Validate environment variables at startup
@@ -272,6 +273,8 @@ apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
 // Stripe card payments
 apiV1Router.use('/stripe', stripeRouter);
+// Two-Factor Authentication
+apiV1Router.use('/auth/2fa', twoFactorAuthRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
