@@ -37,8 +37,6 @@ import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { stripeRouter } from './routes/stripe.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
-import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
-import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
 import { hedgingRouter } from './routes/hedging.js';
@@ -50,7 +48,19 @@ import { receiptsRouter } from './routes/receipts.js';
 import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
 import { serviceMeshRouter } from './routes/service-mesh.js';
-import { twoFactorAuthRouter } from './routes/2fa.js';
+import { escrowRouter } from './routes/escrow.js';
+import { multisigRouter } from './routes/multisig.js';
+import { fiatPaymentsRouter } from './routes/fiat-payments.js';
+import { paymentLinksRouter } from './routes/payment-links.js';
+import { projectsRouter } from './routes/projects.js';
+import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
+import { webhooksRouter } from './routes/webhooks.js';
+import { fraudDetectionRouter } from './routes/fraud-detection.js';
+import { bridgeRouter } from './routes/bridge.js';
+import { tokenizationRouter } from './routes/tokenization.js';
+import { startWebhookWorker, stopWebhookWorker } from './services/webhooks.js';
+import { analyticsService } from './services/analytics.js';
+import { createAnalyticsRouter } from './routes/analytics.js';
 import './events/projections.js';
 
 // Validate environment variables at startup
@@ -273,8 +283,12 @@ apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
 // Stripe card payments
 apiV1Router.use('/stripe', stripeRouter);
-// Two-Factor Authentication
-apiV1Router.use('/auth/2fa', twoFactorAuthRouter);
+apiV1Router.use('/webhooks', webhooksRouter);
+apiV1Router.use('/fraud-detection', fraudDetectionRouter);
+apiV1Router.use('/bridge', bridgeRouter);
+apiV1Router.use('/tokenization', tokenizationRouter);
+apiV1Router.use('/escrow', escrowRouter);
+apiV1Router.use('/multisig', multisigRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
@@ -302,6 +316,19 @@ app.use('/api/v1/threat-detection', threatDetectionRouter);
 // Microservices service mesh — registry, discovery, circuit breakers
 app.use('/api/v1/service-mesh', serviceMeshRouter);
 
+// Fiat ACH/Wire payment approval workflows
+app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
+
+// Merchant dynamic payment links
+app.use('/api/v1/payment-links', paymentLinksRouter);
+
+// Project + milestone delivery approval workflow
+app.use('/api/v1/projects', projectsRouter);
+
+// GraphQL gateway with federation-ready schema and subscriptions stream
+app.use('/graphql', graphQLRouter);
+app.use('/graphql/ws', graphQLWsRouter);
+
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
     return next();
@@ -326,10 +353,17 @@ if (config.queue.enabled) {
   messageQueue.start();
   paymentQueue.start();
 }
+startWebhookWorker();
 
 const server = http.createServer(app);
 const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
 app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
+app.use('/api/v1/analytics', createAnalyticsRouter(wsServer));
+
+// Broadcast analytics snapshot every 30 seconds to all connected WebSocket clients
+const analyticsInterval = setInterval(() => {
+  wsServer.broadcast({ type: 'analytics:update', payload: analyticsService.snapshot() });
+}, 30_000);
 
 server.listen(config.server.port, () => {
   console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
@@ -355,10 +389,13 @@ const shutdown = (signal: string) => {
     try {
       messageQueue.stop();
       paymentQueue.stop();
+      stopWebhookWorker();
       console.log('Message queue stopped.');
     } catch (err) {
       console.error('Error stopping message queue:', err);
     }
+
+    clearInterval(analyticsInterval);
 
     try {
       wsServer.close().then(() => console.log('WebSocket server closed.'));
