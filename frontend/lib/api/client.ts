@@ -1,10 +1,9 @@
-// frontend/lib/api/client.ts
 import {
   OfflineActionQueuedError,
   isLikelyOfflineError,
   queueOfflineAction,
   shouldQueueRequest,
-} from '../offline';
+} from '@/lib/offline';
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -45,21 +44,10 @@ export class ApiError extends Error {
   }
 }
 
-/** Type guard for UI handling */
-export function isApiError(error: unknown): error is ApiError {
-  return error instanceof ApiError;
-}
-
-/* =====================================================
-   URL Resolver
-===================================================== */
 export function resolveApiUrl(endpoint: string) {
   return `${API_BASE_URL}${endpoint}`;
 }
 
-/* =====================================================
-   Retry Helpers
-===================================================== */
 function shouldRetryStatus(status: number): boolean {
   return status >= 500 || status === 429;
 }
@@ -165,7 +153,6 @@ export async function apiCall<T = unknown>(
   let lastError: Error | undefined;
   const shouldQueue = shouldQueueRequest(options);
 
-  // Queue immediately if offline
   if (shouldQueue && typeof navigator !== 'undefined' && navigator.onLine === false) {
     const action = queueOfflineAction(endpoint, options);
     throw new OfflineActionQueuedError(
@@ -193,17 +180,17 @@ export async function apiCall<T = unknown>(
     } catch (error: unknown) {
       lastError = normalizeError(error);
 
-      // Debug logging
-      console.error('[API ERROR]', { endpoint, attempt, error: lastError });
-
-      // Queue request if offline
       if (shouldQueue && isLikelyOfflineError(lastError)) {
         const action = queueOfflineAction(endpoint, options);
         throw new OfflineActionQueuedError(
-          'Network unavailable. Request queued.',
+          'The request was queued because the network is unavailable.',
           endpoint,
           action.id
         );
+      }
+
+      if (attempt === config.maxRetries || !shouldRetryError(error)) {
+        throw lastError;
       }
 
       if (attempt === config.maxRetries || !shouldRetryError(error)) throw lastError;

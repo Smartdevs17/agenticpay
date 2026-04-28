@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiCall } from './client';
-import { OfflineActionQueuedError } from '../offline';
+import { ApiError, apiCall } from './client';
+import { OfflineActionQueuedError } from '@/lib/offline';
 
 describe('apiCall', () => {
   const originalFetch = global.fetch;
   const originalNavigator = global.navigator;
-
   const localStorageMock = (() => {
     let store: Record<string, string> = {};
     return {

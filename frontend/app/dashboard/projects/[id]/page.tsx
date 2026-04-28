@@ -15,9 +15,20 @@ import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { OfflineActionQueuedError } from '@/lib/offline';
 import { formatDateInTimeZone } from '@/lib/utils';
 import { useAuthStore } from '@/store/useAuthStore';
-import { OfflineActionQueuedError } from '@/lib/offline';
+import { ConfirmModal } from '@/components/transaction/ConfirmModal';
+import { parseEther } from 'viem';
+
+type PendingTransaction = {
+  functionName: string;
+  contractAddress: string;
+  args: unknown[];
+  gasEstimate?: bigint;
+  value?: bigint;
+  submit: () => void;
+};
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -25,11 +36,12 @@ export default function ProjectDetailPage() {
   const { address } = useAccount();
   const timezone = useAuthStore((state) => state.timezone);
 
-  const { useProjectDetail, fundProject, submitWork, approveWork, isPending, isConfirming, isConfirmed, error, arbitrator } = useAgenticPay();
+  const { useProjectDetail, prepareTransaction, isPending, isConfirming, isConfirmed, error, arbitrator } = useAgenticPay();
   const { project, loading, refetch } = useProjectDetail(projectId);
 
   const [repoLink, setRepoLink] = useState('');
   const [showSubmitInput, setShowSubmitInput] = useState(false);
+  const [pendingTransaction, setPendingTransaction] = useState<PendingTransaction | null>(null);
 
   useEffect(() => {
     if (isConfirmed) {
@@ -67,8 +79,12 @@ export default function ProjectDetailPage() {
   const handleFund = async () => {
     try {
       const paymentType = project.currency === 'ETH' ? 0 : 1;
-      await fundProject(project.id, project.totalAmount, paymentType);
-      toast.info('Funding transaction submitted...');
+      const prepared = await prepareTransaction(
+        'fundProject',
+        [BigInt(project.id)],
+        paymentType === 0 ? parseEther(project.totalAmount) : 0n
+      );
+      setPendingTransaction(prepared);
     } catch (e) {
       console.error(e);
     }
@@ -76,8 +92,8 @@ export default function ProjectDetailPage() {
 
   const handleApprove = async () => {
     try {
-      await approveWork(project.id);
-      toast.info('Approval transaction submitted...');
+      const prepared = await prepareTransaction('approveWork', [BigInt(project.id)]);
+      setPendingTransaction(prepared);
     } catch (e) {
       console.error(e);
     }
@@ -217,22 +233,20 @@ export default function ProjectDetailPage() {
                           toast.success("Invoice Generated");
                           refetch();
                         } catch (invError) {
-                          const err = invError as Error;
-                          if (err.name === 'OfflineActionQueuedError' || err.message.includes('queued')) {
-                            toast.info(err.message);
+                          if (invError instanceof OfflineActionQueuedError) {
+                            toast.info(invError.message);
                           } else {
-                            toast.error("Invoice error: " + err.message);
+                            toast.error("Invoice error: " + (invError as Error).message);
                           }
                         }
                       } else {
                         toast.error("Verification failed: " + verification.summary);
                       }
                     } catch (e) {
-                      const err = e as Error;
-                      if (err.name === 'OfflineActionQueuedError' || err.message.includes('queued')) {
-                        toast.info(err.message);
+                      if (e instanceof OfflineActionQueuedError) {
+                        toast.info(e.message);
                       } else {
-                        toast.error(err.message);
+                        toast.error((e as Error).message);
                       }
                     }
                   }}>
@@ -258,10 +272,8 @@ export default function ProjectDetailPage() {
                       throw new Error('You are offline. Reconnect before submitting an on-chain transaction.');
                     }
                     if (!repoLink) throw new Error("No repo link");
-                    toast.info('Submitting work to blockchain...');
-                    await submitWork(project.id, repoLink);
-                    toast.info('Transaction submitted. Once confirmed, request verification.');
-                    setShowSubmitInput(false);
+                    const prepared = await prepareTransaction('submitWork', [BigInt(project.id), repoLink]);
+                    setPendingTransaction(prepared);
                   } catch (e) {
                     toast.error('Submission failed: ' + (e as Error).message);
                   }
@@ -371,6 +383,25 @@ export default function ProjectDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {pendingTransaction && (
+        <ConfirmModal
+          open={!!pendingTransaction}
+          functionName={pendingTransaction.functionName}
+          contractAddress={pendingTransaction.contractAddress}
+          args={pendingTransaction.args}
+          gasEstimate={pendingTransaction.gasEstimate}
+          value={pendingTransaction.value}
+          isSubmitting={isPending || isConfirming}
+          onCancel={() => setPendingTransaction(null)}
+          onConfirm={() => {
+            pendingTransaction.submit();
+            setPendingTransaction(null);
+            setShowSubmitInput(false);
+            toast.info('Transaction submitted. Waiting for confirmation...');
+          }}
+        />
+      )}
     </div>
   );
 }
