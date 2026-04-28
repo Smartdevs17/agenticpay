@@ -3,10 +3,53 @@ import { z } from 'zod';
 // Invoice Generation Schema
 export const invoiceSchema = z.object({
   projectId: z.string().min(1, 'Project ID is required'),
+  merchantId: z.string().min(1, 'Merchant ID is required'),
   workDescription: z.string().min(1, 'Work description is required'),
   hoursWorked: z.number().nonnegative('Hours worked must be a non-negative number').optional(),
   hourlyRate: z.number().nonnegative('Hourly rate must be a non-negative number').optional(),
+  countryCode: z.string().length(2, 'Country code must be 2 letters').transform((val) => val.toUpperCase()).optional(),
 });
+
+export const invoiceTaxReportSchema = z.object({
+  merchantId: z.string().min(1, 'Merchant ID is required'),
+  from: z.string().optional(),
+  to: z.string().optional(),
+});
+
+export const createEscrowSchema = z.object({
+  projectId: z.string().min(1, 'Project ID is required'),
+  payerId: z.string().min(1, 'Payer ID is required'),
+  payeeId: z.string().min(1, 'Payee ID is required'),
+  currency: z.string().min(1, 'Currency is required'),
+  totalAmount: z.number().positive('Total amount must be positive'),
+  milestones: z
+    .array(
+      z.object({
+        title: z.string().min(1, 'Milestone title is required'),
+        description: z.string().optional(),
+        amount: z.number().positive('Milestone amount must be positive'),
+        completionCriteria: z.string().min(1, 'Completion criteria is required'),
+      })
+    )
+    .min(1, 'At least one milestone is required'),
+  metadata: z.record(z.string()).optional(),
+});
+
+export const fundEscrowSchema = z.object({
+  amount: z.number().positive('Funding amount must be positive'),
+});
+
+export const escrowSubmissionSchema = z.object({
+  submissionUrl: z.string().url('A valid submission URL is required'),
+  notes: z.string().optional(),
+});
+
+export const escrowMilestoneActionSchema = z
+  .object({
+    approvedBy: z.string().min(1, 'Approver ID is required').optional(),
+    reason: z.string().min(1, 'Reason is required').optional(),
+  })
+  .refine((data) => data.approvedBy || data.reason, 'approvedBy or reason is required');
 
 // Single Work Verification Schema
 export const verificationSchema = z.object({

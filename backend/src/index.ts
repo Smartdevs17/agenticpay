@@ -48,6 +48,8 @@ import { receiptsRouter } from './routes/receipts.js';
 import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
 import { serviceMeshRouter } from './routes/service-mesh.js';
+import { escrowRouter } from './routes/escrow.js';
+import { multisigRouter } from './routes/multisig.js';
 import { fiatPaymentsRouter } from './routes/fiat-payments.js';
 import { paymentLinksRouter } from './routes/payment-links.js';
 import { projectsRouter } from './routes/projects.js';
@@ -285,6 +287,8 @@ apiV1Router.use('/webhooks', webhooksRouter);
 apiV1Router.use('/fraud-detection', fraudDetectionRouter);
 apiV1Router.use('/bridge', bridgeRouter);
 apiV1Router.use('/tokenization', tokenizationRouter);
+apiV1Router.use('/escrow', escrowRouter);
+apiV1Router.use('/multisig', multisigRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
