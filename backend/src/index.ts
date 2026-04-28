@@ -148,7 +148,15 @@ app.use(
     origin: config.cors.allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id', REQUEST_ID_HEADER],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Trace-Id',
+      REQUEST_ID_HEADER,
+      'API-Version',
+      'X-API-Version',
+      'Accept-Version',
+    ],
   })
 );
 app.use(express.json());
