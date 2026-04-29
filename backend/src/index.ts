@@ -24,6 +24,7 @@ Sentry.init({
 });
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import { tokenBucketRateLimit } from './middleware/rate-limit.js';
 import compression from 'compression';
 import { config } from './config.js';
 import { verificationRouter } from './routes/verification.js';
@@ -48,11 +49,7 @@ import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
-import { kybRouter } from './routes/kyb.js';
-import { batchRouter } from './routes/batch.js';
-import { relayerRouter } from './routes/relayer.js';
-import { paymentQueueRouter } from './routes/payment-queue.js';
-import { paymentQueue } from './queue/payment-queue.js';
+import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
 import { emailRouter } from './routes/email.js';
 import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
@@ -128,90 +125,16 @@ console.error = (...args) => originalConsole.error(...formatMessage(args));
 
 const app = express();
 
-type UserTier = 'free' | 'pro' | 'enterprise';
-
-type TierRateState = {
-  count: number;
-  resetAtMs: number;
-};
-
-const tierLimits: Record<UserTier, number> = {
-  free: config.rateLimit.free,
-  pro: config.rateLimit.pro,
-  enterprise: config.rateLimit.enterprise,
-};
-
-const tierWindowMs = config.rateLimit.windowMs;
-const tierRateStore = new Map<string, TierRateState>();
-
-function resolveUserTier(req: Request): UserTier {
-  const headerTier = req.headers['x-user-tier'];
-  const normalized = (Array.isArray(headerTier) ? headerTier[0] : headerTier)?.toLowerCase();
-
-  if (normalized === 'pro' || normalized === 'enterprise') {
-    return normalized;
-  }
-
-  return 'free';
-}
-
-function resolveClientIdentifier(req: Request): string {
-  const authHeader = req.headers.authorization;
-  if (authHeader) {
-    return authHeader;
-  }
-
-  const apiKey = req.headers['x-api-key'];
-  if (typeof apiKey === 'string' && apiKey.trim() !== '') {
-    return apiKey;
-  }
-
-  return req.ip || 'unknown-client';
-}
-
-function tieredRateLimit(req: Request, res: Response, next: NextFunction): void {
-  const tier = resolveUserTier(req);
-  const limit = tierLimits[tier];
-  const identifier = resolveClientIdentifier(req);
-  const storeKey = `${tier}:${identifier}`;
-  const nowMs = Date.now();
-  const existingState = tierRateStore.get(storeKey);
-
-  const state =
-    !existingState || existingState.resetAtMs <= nowMs
-      ? { count: 0, resetAtMs: nowMs + tierWindowMs }
-      : existingState;
-
-  state.count += 1;
-  tierRateStore.set(storeKey, state);
-
-  const remaining = Math.max(0, limit - state.count);
-  const resetInSeconds = Math.ceil((state.resetAtMs - nowMs) / 1000);
-
-  res.setHeader('X-RateLimit-Tier', tier);
-  res.setHeader('X-RateLimit-Limit', String(limit));
-  res.setHeader('X-RateLimit-Remaining', String(remaining));
-  res.setHeader('X-RateLimit-Reset', String(resetInSeconds));
-
-  if (state.count > limit) {
-    res.status(429).json({
-      error: {
-        code: 'RATE_LIMIT_EXCEEDED',
-        message: `Rate limit exceeded for tier '${tier}'`,
-        status: 429,
-      },
-    });
-    return;
-  }
-
-  next();
-}
-
-const invoiceLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
+// Token-bucket rate limiter (replaces fixed-window tieredRateLimit)
+const apiRateLimiter = tokenBucketRateLimit({ keyPrefix: 'rl:api' });
+// Stricter limiter for invoice endpoint
+const invoiceLimiter = tokenBucketRateLimit({
+  keyPrefix: 'rl:invoice',
+  endpointConfig: {
+    free:       { capacity: 10,  refillRate: 0.1, burstAllowance: 2  },
+    pro:        { capacity: 60,  refillRate: 1,   burstAllowance: 10 },
+    enterprise: { capacity: 300, refillRate: 5,   burstAllowance: 50 },
+  },
 });
 
 app.use(
@@ -283,7 +206,7 @@ app.use(healthRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 
-app.use('/api/', tieredRateLimit);
+app.use('/api/', apiRateLimiter);
 
 app.use('/api/', versionMiddleware);
 
@@ -312,8 +235,8 @@ apiV1Router.use('/portfolio', portfolioRouter);
 apiV1Router.use('/backup', backupRouter);
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
-// GDPR data subject rights
-apiV1Router.use('/gdpr', gdprRouter);
+// Rate limit analytics
+apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
