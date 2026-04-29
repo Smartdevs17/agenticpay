@@ -424,6 +424,7 @@ export function deleteDraft(formId: string, draftId: string): void {
         name: 'proposalPackage',
         label: 'Upload Proposal',
         type: 'file',
+        required: false,
         accept: '.pdf,.doc,.docx',
         maxSizeBytes: 5_000_000,
         helpText: 'Accepted formats: PDF or Word document. Max 5MB.',
