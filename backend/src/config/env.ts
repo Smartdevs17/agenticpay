@@ -5,6 +5,7 @@ dotenv.config();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/agenticpay'),
   PORT: z.coerce.number().default(3001),
   CORS_ALLOWED_ORIGINS: z.string().default('*'),
   STELLAR_NETWORK: z.enum(['testnet', 'public']).default('testnet'),
@@ -23,6 +24,9 @@ const envSchema = z.object({
   IP_ALLOWLIST_BYPASS_EXPIRY_MS: z.coerce.number().default(30 * 60 * 1000),
   VAPID_PUBLIC_KEY: z.string().default(''),
   VAPID_PRIVATE_KEY: z.string().default(''),
+  STRIPE_SECRET_KEY: z.string().default(''),
+  STRIPE_WEBHOOK_SECRET: z.string().default(''),
+  STRIPE_PUBLISHABLE_KEY: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
