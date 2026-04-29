@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { createAsyncLocalStorage } from '@walletconnect/async-storage-binding';
-import { buildSafeMath, type UniversalProvider } from '@walletconnect/universal-provider';
-import { EIP155 } from '@walletconnect/universal-provider/dist/types';
-import { Web3Modal } from '@web3modal/ethers';
+// @walletconnect/async-storage-binding was removed as it doesn't exist on npm
+// and universal-provider handles its own storage or can use browser defaults.
+import { type UniversalProvider } from '@walletconnect/universal-provider';
+
+
 import { formatWsUrl, createMessageHash } from '@walletconnect/utils';
 import { BrowserProvider, Contract } from 'ethers';
 import { mainnet, sepolia } from 'wagmi/chains';
@@ -76,7 +77,7 @@ export const wc = {
   async init(options?: { projectId?: string; metadata?: typeof DEFAULT_METADATA }) {
     const projectId = options?.projectId || WALLETCONNECT_PROJECT_ID;
     const metadata = options?.metadata || DEFAULT_METADATA;
-    const storage = createAsyncLocalStorage();
+    const storage = typeof window !== 'undefined' ? window.localStorage : undefined;
 
     const provider = awaitUniversalProvider.init({
       projectId,

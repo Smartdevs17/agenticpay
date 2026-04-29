@@ -1,6 +1,27 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN || '',
+  integrations: [
+    nodeProfilingIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+  profilesSampleRate: 1.0,
+  environment: process.env.NODE_ENV || 'development',
+  beforeSend(event, hint) {
+    if (event.exception && hint.originalException) {
+      const error = hint.originalException as Error;
+      if (error && error.message && error.message.includes('Database connection timeout')) {
+        event.fingerprint = ['database-timeout'];
+      }
+    }
+    return event;
+  }
+});
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import compression from 'compression';
@@ -18,6 +39,7 @@ import { onboardingRouter } from './routes/onboarding.js';
 import { splitsRouter } from './routes/splits.js';
 import { refundsRouter } from './routes/refunds.js';
 import { allowancesRouter } from './routes/allowances.js';
+import { formsRouter } from './routes/forms.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
@@ -197,7 +219,15 @@ app.use(
     origin: config.cors.allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id', REQUEST_ID_HEADER],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Trace-Id',
+      REQUEST_ID_HEADER,
+      'API-Version',
+      'X-API-Version',
+      'Accept-Version',
+    ],
   })
 );
 app.use(express.json());
@@ -275,6 +305,7 @@ apiV1Router.use('/queue/payments', paymentQueueRouter);
 apiV1Router.use('/splits', splitsRouter);
 apiV1Router.use('/refunds', refundsRouter);
 apiV1Router.use('/allowances', allowancesRouter);
+apiV1Router.use('/forms', formsRouter);
 apiV1Router.use('/disputes', disputeRoutes);
 apiV1Router.use('/emails', emailRouter);
 apiV1Router.use('/portfolio', portfolioRouter);
@@ -329,6 +360,9 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 });
 
 app.use(notFoundHandler);
+
+Sentry.setupExpressErrorHandler(app);
+
 app.use(errorHandler);
 
 if (config.jobs.enabled) {
