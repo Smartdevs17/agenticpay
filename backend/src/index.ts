@@ -18,6 +18,8 @@ import { splitsRouter } from './routes/splits.js';
 import { refundsRouter } from './routes/refunds.js';
 import { allowancesRouter } from './routes/allowances.js';
 import { formsRouter } from './routes/forms.js';
+import { webhooksRouter } from './routes/webhooks.js';
+import { webhookHandlersRouter } from './routes/webhookHandlers.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
@@ -240,6 +242,8 @@ apiV1Router.use('/splits', splitsRouter);
 apiV1Router.use('/refunds', refundsRouter);
 apiV1Router.use('/allowances', allowancesRouter);
 apiV1Router.use('/forms', formsRouter);
+// Webhook management and verification
+apiV1Router.use('/webhooks', webhooksRouter);
 // Email delivery system
 apiV1Router.use('/emails', emailRouter);
 // Portfolio/wallet aggregation
@@ -260,6 +264,9 @@ app.use('/api/v1/notifications', notificationsRouter);
 
 // Audit logging routes
 app.use('/api/v1/audit', auditRouter);
+
+// Webhook handlers (outside API versioning for direct access)
+app.use('/webhooks', webhookHandlersRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {

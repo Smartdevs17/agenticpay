@@ -85,16 +85,49 @@ export interface FormSubmissionsResponse {
   total: number;
 }
 
-export interface FormDraft {
+export interface WebhookSecret {
   id: string;
-  formId: string;
-  values: Record<string, unknown>;
-  savedAt: string;
+  provider: 'stripe' | 'paypal' | 'github' | 'custom';
+  isActive: boolean;
+  createdAt: string;
+  expiresAt?: string;
+  lastUsedAt?: string;
 }
 
-export interface FormDraftsResponse {
-  drafts: FormDraft[];
+export interface WebhookEvent {
+  id: string;
+  provider: 'stripe' | 'paypal' | 'github' | 'custom';
+  eventType: string;
+  payload: any;
+  signature: string;
+  timestamp: string;
+  verified: boolean;
+  processed: boolean;
+  createdAt: string;
+  processedAt?: string;
+  error?: string;
+  retryCount: number;
+}
+
+export interface WebhookSecretsResponse {
+  secrets: WebhookSecret[];
   total: number;
+}
+
+export interface WebhookEventsResponse {
+  events: WebhookEvent[];
+  total: number;
+}
+
+export interface CreateWebhookSecretRequest {
+  provider: 'stripe' | 'paypal' | 'github' | 'custom';
+  secret: string;
+  expiresAt?: string;
+}
+
+export interface RotateWebhookSecretRequest {
+  newSecret: string;
+  gracePeriodHours?: number;
 }
 
 export const api = {
@@ -166,6 +199,35 @@ export const api = {
       }),
       deleteDraft: async (id: string, draftId: string) => apiCall<void>(`/forms/${id}/drafts/${draftId}`, {
         method: 'DELETE',
+      }),
+    },
+
+    /**
+     * Webhook Management API
+     */
+    webhooks: {
+      // Secret management
+      listSecrets: async () => apiCall<WebhookSecretsResponse>('/webhooks/secrets', { method: 'GET' }),
+      createSecret: async (payload: CreateWebhookSecretRequest) => apiCall<WebhookSecret>('/webhooks/secrets', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      rotateSecret: async (provider: string, payload: RotateWebhookSecretRequest) => apiCall<WebhookSecret>(`/webhooks/secrets/${provider}/rotate`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      deleteSecret: async (secretId: string) => apiCall<void>(`/webhooks/secrets/${secretId}`, {
+        method: 'DELETE',
+      }),
+
+      // Event management
+      listEvents: async (limit?: number) => apiCall<WebhookEventsResponse>(`/webhooks/events${limit ? `?limit=${limit}` : ''}`, { method: 'GET' }),
+      listQueuedEvents: async (limit?: number) => apiCall<WebhookEventsResponse>(`/webhooks/events/queued${limit ? `?limit=${limit}` : ''}`, { method: 'GET' }),
+      retryEvent: async (eventId: string) => apiCall(`/webhooks/events/${eventId}/retry`, {
+        method: 'POST',
+      }),
+      markEventProcessed: async (eventId: string) => apiCall(`/webhooks/events/${eventId}/process`, {
+        method: 'POST',
       }),
     },
 };
