@@ -1,0 +1,39 @@
+{
+  "name": "agenticpay-contracts-evm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EVM-side AgenticPay contracts (upgradeable Splitter) with Hardhat-driven deployment automation",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:gas": "REPORT_GAS=true hardhat test",
+    "coverage": "hardhat coverage",
+    "clean": "hardhat clean",
+    "lint": "tsc --noEmit",
+    "deploy": "hardhat run scripts/deploy.ts",
+    "deploy:create2": "hardhat run scripts/deploy-create2.ts",
+    "upgrade": "hardhat run scripts/upgrade.ts",
+    "verify:deployment": "hardhat run scripts/verify.ts",
+    "propose:upgrade": "hardhat run scripts/propose-safe-upgrade.ts",
+    "list": "hardhat run scripts/list-deployments.ts",
+    "rollback": "hardhat run scripts/rollback.ts"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts-upgradeable": "5.0.2",
+    "@openzeppelin/contracts": "5.0.2",
+    "@openzeppelin/hardhat-upgrades": "^3.6.0",
+    "@types/chai": "^4.3.14",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.30",
+    "chai": "^4.4.1",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.1",
+    "hardhat": "^2.22.10",
+    "hardhat-gas-reporter": "^1.0.10",
+    "solidity-coverage": "^0.8.12",
+    "ts-node": "^10.9.2",
+    "typechain": "^8.3.2",
+    "typescript": "^5.4.3"
+  }
+}

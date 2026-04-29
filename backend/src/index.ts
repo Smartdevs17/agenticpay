@@ -14,6 +14,7 @@ import { healthRouter } from './routes/health.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
+import { onboardingRouter } from './routes/onboarding.js';
 import { splitsRouter } from './routes/splits.js';
 import { refundsRouter } from './routes/refunds.js';
 import { allowancesRouter } from './routes/allowances.js';
@@ -25,6 +26,11 @@ import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
+import { kybRouter } from './routes/kyb.js';
+import { batchRouter } from './routes/batch.js';
+import { relayerRouter } from './routes/relayer.js';
+import { paymentQueueRouter } from './routes/payment-queue.js';
+import { paymentQueue } from './queue/payment-queue.js';
 import { emailRouter } from './routes/email.js';
 import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
@@ -32,8 +38,34 @@ import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { nfcRouter } from './routes/nfc.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
-import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
-import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { notificationsRouter } from './routes/notifications.js';
+import { auditRouter } from './routes/audit.js';
+import { hedgingRouter } from './routes/hedging.js';
+import { complianceRouter } from './routes/compliance.js';
+import { disputeRoutes } from './disputes/index.js';
+import { disputeService } from './disputes/disputeService.js';
+import http from 'node:http';
+import { attachWebSocketServer } from './websocket/server.js';
+import { createWebSocketRouter } from './routes/websocket.js';
+import { complianceRouter } from './routes/compliance.js';
+import { receiptsRouter } from './routes/receipts.js';
+import { eventsRouter } from './routes/events.js';
+import { threatDetectionRouter } from './routes/threat-detection.js';
+import { serviceMeshRouter } from './routes/service-mesh.js';
+import { escrowRouter } from './routes/escrow.js';
+import { multisigRouter } from './routes/multisig.js';
+import { fiatPaymentsRouter } from './routes/fiat-payments.js';
+import { paymentLinksRouter } from './routes/payment-links.js';
+import { projectsRouter } from './routes/projects.js';
+import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
+import { webhooksRouter } from './routes/webhooks.js';
+import { fraudDetectionRouter } from './routes/fraud-detection.js';
+import { bridgeRouter } from './routes/bridge.js';
+import { tokenizationRouter } from './routes/tokenization.js';
+import { startWebhookWorker, stopWebhookWorker } from './services/webhooks.js';
+import { analyticsService } from './services/analytics.js';
+import { createAnalyticsRouter } from './routes/analytics.js';
+import './events/projections.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -169,6 +201,7 @@ app.use(
   })
 );
 app.use(express.json());
+app.use(express.text({ type: ['text/csv', 'text/plain'] }));
 
 app.use(
   compression({
@@ -232,24 +265,56 @@ apiV1Router.use('/catalog', catalogRouter);
 apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
 apiV1Router.use('/sla', slaRouter);
+apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
+apiV1Router.use('/flags', flagsRouter);
+apiV1Router.use('/kyb', kybRouter);
+apiV1Router.use('/batch', batchRouter);
+apiV1Router.use('/relayer', relayerRouter);
+apiV1Router.use('/queue/payments', paymentQueueRouter);
 apiV1Router.use('/splits', splitsRouter);
 apiV1Router.use('/refunds', refundsRouter);
 apiV1Router.use('/allowances', allowancesRouter);
-// Email delivery system
+apiV1Router.use('/disputes', disputeRoutes);
 apiV1Router.use('/emails', emailRouter);
-// Portfolio/wallet aggregation
 apiV1Router.use('/portfolio', portfolioRouter);
-// Backup system
 apiV1Router.use('/backup', backupRouter);
-// IP allowlist management
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
-// Push notifications
 apiV1Router.use('/push', pushRouter);
 // NFC / QR payment requests
 apiV1Router.use('/nfc', nfcRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
+
+app.use('/api/v1/notifications', notificationsRouter);
+app.use('/api/v1/audit', auditRouter);
+app.use('/api/v1/hedging', hedgingRouter);
+app.use('/api/v1/compliance', complianceRouter);
+
+// Payment receipt NFTs
+app.use('/api/v1/receipts', receiptsRouter);
+
+// Event-driven architecture — event store, CQRS projections
+app.use('/api/v1/events', eventsRouter);
+
+// Advanced threat detection with behavioral analysis
+app.use('/api/v1/threat-detection', threatDetectionRouter);
+
+// Microservices service mesh — registry, discovery, circuit breakers
+app.use('/api/v1/service-mesh', serviceMeshRouter);
+
+// Fiat ACH/Wire payment approval workflows
+app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
+
+// Merchant dynamic payment links
+app.use('/api/v1/payment-links', paymentLinksRouter);
+
+// Project + milestone delivery approval workflow
+app.use('/api/v1/projects', projectsRouter);
+
+// GraphQL gateway with federation-ready schema and subscriptions stream
+app.use('/graphql', graphQLRouter);
+app.use('/graphql/ws', graphQLWsRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
@@ -273,10 +338,29 @@ if (config.jobs.enabled) {
 registerDefaultProcessors();
 if (config.queue.enabled) {
   messageQueue.start();
+  paymentQueue.start();
 }
+startWebhookWorker();
 
-const server = app.listen(config.server.port, () => {
+// Auto-escalation cron
+setInterval(async () => {
+  const count = await disputeService.processEscalations();
+  if (count > 0) console.log(`Escalated ${count} disputes`);
+}, 5 * 60 * 1000);
+
+const server = http.createServer(app);
+const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
+app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
+app.use('/api/v1/analytics', createAnalyticsRouter(wsServer));
+
+// Broadcast analytics snapshot every 30 seconds to all connected WebSocket clients
+const analyticsInterval = setInterval(() => {
+  wsServer.broadcast({ type: 'analytics:update', payload: analyticsService.snapshot() });
+}, 30_000);
+
+server.listen(config.server.port, () => {
   console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
+  console.log(`WebSocket server listening on path /ws (max ${wsServer.metrics.activeConnections}/${wsServer.metrics.acceptedConnections})`);
 });
 
 const shutdown = (signal: string) => {
@@ -297,9 +381,19 @@ const shutdown = (signal: string) => {
 
     try {
       messageQueue.stop();
+      paymentQueue.stop();
+      stopWebhookWorker();
       console.log('Message queue stopped.');
     } catch (err) {
       console.error('Error stopping message queue:', err);
+    }
+
+    clearInterval(analyticsInterval);
+
+    try {
+      wsServer.close().then(() => console.log('WebSocket server closed.'));
+    } catch (err) {
+      console.error('Error closing WebSocket server:', err);
     }
 
     console.log('Graceful shutdown complete. Exiting.');

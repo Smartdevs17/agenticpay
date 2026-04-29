@@ -14,22 +14,23 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Bell, LogOut, User, Settings, Sun, Moon, Clock, CloudOff, RefreshCw } from 'lucide-react';
+import { Bell, LogOut, User, Settings, Sun, Moon, Clock, CloudOff, RefreshCw, Menu } from 'lucide-react';
 import { toast } from 'sonner';
 import { LanguageSwitcher } from '@/components/language/LanguageSwitcher';
 import { useDisconnect, useAccount } from 'wagmi';
 import { web3auth } from '@/lib/web3auth';
-import {
-  Breadcrumb,
-  BreadcrumbList,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { getDashboardBreadcrumbs } from '@/lib/breadcrumbs';
 import { ThemeSettingsModal } from '@/components/theme/ThemeSettingsModal';
 import { TimezoneSettingsModal } from '@/components/settings/TimezoneSettingsModal';
 import { getBrowserTimeZone, isValidTimeZone } from '@/lib/utils';
+import { CommandMenu } from './CommandMenu';
+
+type BreadcrumbItemType = {
+  label: string;
+  href: string;
+};
+
 import { useOfflineStatus } from '@/components/offline/OfflineProvider';
 
 /* ---------------- NETWORK INDICATOR ---------------- */
@@ -61,26 +62,20 @@ const NetworkIndicator = () => {
   );
 };
 
-export function Header() {
+export function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const { name, email, address, timezone, logout, setTimezone } = useAuthStore();
   const { isDark, mode, setIsDark } = useThemeStore();
   const { disconnect } = useDisconnect();
   const { isOnline, queueLength, isSyncing } = useOfflineStatus();
   const router = useRouter();
   const pathname = usePathname();
-  const [breadcrumbs, setBreadcrumbs] = useState<any[]>([]);
+  const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItemType[]>([]);
   const [themeSettingsOpen, setThemeSettingsOpen] = useState(false);
   const [timezoneSettingsOpen, setTimezoneSettingsOpen] = useState(false);
 
   useEffect(() => {
-    const items = getDashboardBreadcrumbs(pathname);
-    setBreadcrumbs(items);
+    setBreadcrumbs(getDashboardBreadcrumbs(pathname));
   }, [pathname]);
-
-  const breadcrumbs = getDashboardBreadcrumbs(pathname);
-
-  const [themeSettingsOpen, setThemeSettingsOpen] = useState(false);
-  const [timezoneSettingsOpen, setTimezoneSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (timezone) {
@@ -95,9 +90,7 @@ export function Header() {
 
   const handleLogout = async () => {
     disconnect();
-    if (web3auth) {
-      await web3auth.logout();
-    }
+    if (web3auth) await web3auth.logout();
     logout();
     toast.success('Logged out successfully');
     router.push('/auth');
@@ -116,12 +109,19 @@ export function Header() {
     <>
       <header className="sticky top-0 z-30 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700/60 transition-colors duration-700">
         <div className="flex h-16 items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
+          {/* LEFT */}
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent truncate max-w-[120px] sm:max-w-none">
               Dashboard
             </h1>
           </div>
 
+          {/* RIGHT */}
+          <div className="flex items-center gap-4">
+            <NetworkIndicator />
 <div className="flex items-center gap-4">
           
           {/* 3. I dropped the new component right here! */}
@@ -197,73 +197,27 @@ export function Header() {
             
             <CommandMenu />
 
-            {/* Notifications */}
-            <Button variant="ghost" size="icon">
-              <Bell className="h-5 w-5" />
+            <Button variant="ghost" size="icon" className="hidden sm:flex">
+              <Bell className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </Button>
+            
+            <Button variant="ghost" size="icon" className="hidden sm:flex" onClick={mode === 'manual' ? handleManualToggle : undefined}>
+              {isDark ? <Moon className="h-5 w-5 text-gray-500 dark:text-gray-400" /> : <Sun className="h-5 w-5 text-gray-500 dark:text-gray-400" />}
             </Button>
 
-            {/* Theme */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={mode === 'manual' ? handleManualToggle : undefined}
-            >
-              {isDark ? (
-                <Moon className="h-5 w-5" />
-              ) : (
-                <Sun className="h-5 w-5" />
-              )}
-
-              <LanguageSwitcher />
-
-              <Button variant="ghost" size="icon" className="relative">
-                <Bell className="h-5 w-5" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={mode === 'manual' ? handleManualToggle : undefined}
-                title={
-                  mode === 'manual'
-                    ? isDark
-                      ? 'Switch to light mode'
-                      : 'Switch to dark mode'
-                    : `Auto: ${mode} mode`
-                }
-                className="relative"
-              >
-                {isDark ? (
-                  <Moon className="h-5 w-5 transition-transform duration-300" />
-                ) : (
-                  <Sun className="h-5 w-5 transition-transform duration-300" />
-                )}
-                className="relative"
-              >
-                {isDark ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-                {mode !== 'manual' && (
-                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-primary flex items-center justify-center">
-                    <Clock className="h-2 w-2 text-primary-foreground" />
-                  </span>
-                )}
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setThemeSettingsOpen(true)}
-                title="Dark mode schedule"
-              >
-              <Button variant="ghost" size="icon" onClick={() => setThemeSettingsOpen(true)}>
-                <Clock className="h-5 w-5" />
-              </Button>
+            <Button variant="ghost" size="icon" className="hidden md:flex" onClick={() => setThemeSettingsOpen(true)}>
+              <Clock className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </Button>
 
             {/* User menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center gap-3 h-auto py-2 px-3">
                   <Avatar className="h-8 w-8">
+                    <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-500 text-white">{initials}</AvatarFallback>
+                  </Avatar>
+                  <div className="hidden sm:block text-left">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{name || 'User'}</p>
                     <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-500 text-white">
                       {initials}
                     </AvatarFallback>
@@ -286,6 +240,14 @@ export function Header() {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem>
+                  <User className="mr-2 h-4 w-4" /> Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setTimezoneSettingsOpen(true)}>
+                  <Settings className="mr-2 h-4 w-4" /> Timezone Settings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                  <LogOut className="mr-2 h-4 w-4" /> Logout
                   <User className="mr-2 h-4 w-4" />
                   Profile
                 </DropdownMenuItem>
@@ -310,9 +272,7 @@ export function Header() {
                 {breadcrumbs.map((item, index) => (
                   <div key={index} className="flex items-center gap-1.5">
                     <BreadcrumbItem>
-                      <BreadcrumbLink href={item.href}>
-                        {item.label}
-                      </BreadcrumbLink>
+                      <BreadcrumbLink href={item.href}>{item.label}</BreadcrumbLink>
                     </BreadcrumbItem>
                     {index < breadcrumbs.length - 1 && <BreadcrumbSeparator />}
                   </div>
@@ -324,10 +284,7 @@ export function Header() {
       </header>
 
       <ThemeSettingsModal open={themeSettingsOpen} onClose={() => setThemeSettingsOpen(false)} />
-      <TimezoneSettingsModal
-        open={timezoneSettingsOpen}
-        onClose={() => setTimezoneSettingsOpen(false)}
-      />
+      <TimezoneSettingsModal open={timezoneSettingsOpen} onClose={() => setTimezoneSettingsOpen(false)} />
     </>
   );
 }

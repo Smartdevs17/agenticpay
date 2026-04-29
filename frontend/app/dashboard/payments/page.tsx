@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
+import { useState } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,6 +18,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
+import { useAccount } from 'wagmi';
 import { PaymentCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
 import { formatDateTimeInTimeZone } from '@/lib/utils';
@@ -30,14 +33,10 @@ export default function PaymentsPage() {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed':
-        return <CheckCircle2 className="h-5 w-5 text-green-600" />;
-      case 'pending':
-        return <Clock className="h-5 w-5 text-yellow-600" />;
-      case 'failed':
-        return <XCircle className="h-5 w-5 text-red-600" />;
-      default:
-        return null;
+      case 'completed': return <CheckCircle2 className="h-5 w-5 text-green-600" />;
+      case 'pending': return <Clock className="h-5 w-5 text-yellow-600" />;
+      case 'failed': return <XCircle className="h-5 w-5 text-red-600" />;
+      default: return null;
     }
   };
 
@@ -48,7 +47,6 @@ export default function PaymentsPage() {
           <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
           <p className="text-gray-600 mt-1">View all your payment transactions</p>
           <div className="mt-2 inline-flex items-center gap-2 text-sm text-gray-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
             Loading payments...
           </div>
         </div>
@@ -91,15 +89,12 @@ export default function PaymentsPage() {
               icon={Wallet}
               title="No payments yet"
               description="Your payment history will appear here once you receive payments for completed projects."
-              action={{
-                label: 'View Projects',
-                onClick: () => router.push('/dashboard/projects'),
-              }}
+              action={{ label: 'View Projects', onClick: () => router.push('/dashboard/projects') }}
             />
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
           {payments.map((payment, index) => (
             <motion.div
               key={payment.id}
@@ -109,7 +104,7 @@ export default function PaymentsPage() {
             >
               <Card className="hover:shadow-lg transition-all">
                 <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-4 flex-1">
                       {getStatusIcon(payment.status)}
                       <div className="flex-1">
@@ -127,12 +122,8 @@ export default function PaymentsPage() {
                         {payment.amount} {payment.currency}
                       </p>
                       {payment.transactionHash && (
-                        <a
-                          href={`https://testnet.cronoscan.com/tx/${payment.transactionHash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2 justify-end"
-                        >
+                        <a href={`https://testnet.cronoscan.com/tx/${payment.transactionHash}`} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2 justify-start sm:justify-end">
                           View on Explorer
                           <ExternalLink className="h-3 w-3" />
                         </a>
@@ -141,9 +132,7 @@ export default function PaymentsPage() {
                   </div>
                   {payment.transactionHash && (
                     <div className="mt-4 pt-4 border-t">
-                      <p className="text-xs text-gray-500 font-mono break-all">
-                        {payment.transactionHash}
-                      </p>
+                      <p className="text-xs text-gray-500 font-mono break-all">{payment.transactionHash}</p>
                     </div>
                   )}
                 </CardContent>
@@ -154,13 +143,7 @@ export default function PaymentsPage() {
       )}
 
       {/* QR Modal */}
-      {address && (
-        <PaymentQRModal
-          address={address}
-          isOpen={isQrModalOpen}
-          onClose={() => setIsQrModalOpen(false)}
-        />
-      )}
+      {address && <PaymentQRModal address={address} isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} />}
     </div>
   );
 }
