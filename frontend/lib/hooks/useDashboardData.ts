@@ -51,61 +51,66 @@ export function useDashboardData() {
     // Calculate Stats
     let activeProjects = 0;
     let completedProjects = 0;
+    let totalEarningsNum = 0;
+    let pendingPaymentsNum = 0;
 
     const invoices: DashboardInvoice[] = [];
     const payments: DashboardPayment[] = [];
-    const recentActivity: { type: string; title: string; description: string; time: string; amount: string }[] = []; // Unified activity feed
+    const recentActivity: { type: string; title: string; description: string; time: string; amount: string }[] = [];
 
     projects.forEach((project) => {
         const isFreelancer = address && project.freelancer.address.toLowerCase() === address.toLowerCase();
+        const amount = parseFloat(project.totalAmount);
 
         // Stats Logic
-        if (project.status === 'completed') {
+        if (project.status === 'completed' || project.status === 'verified') {
             completedProjects++;
+            if (isFreelancer) {
+                totalEarningsNum += amount;
+            }
         } else if (project.status === 'cancelled') {
             // do nothing
         } else {
             // Active
             activeProjects++;
             if (isFreelancer) {
-                // pending
+                pendingPaymentsNum += amount;
             }
         }
 
         // Invoices Logic
-        // If project has invoiceUri, treat as invoice generated.
-        if (project.invoiceUri || project.status === 'completed') {
+        if (project.invoiceUri || project.status === 'completed' || project.status === 'verified') {
             invoices.push({
                 id: `INV-${project.id}`,
                 projectId: project.id,
                 projectTitle: project.title,
-                milestoneTitle: 'Full Project', // 1 milestone logic
-                amount: project.totalAmount, // formatted string
+                milestoneTitle: 'Project Deliverable',
+                amount: project.totalAmount,
                 currency: project.currency,
-                status: project.status === 'completed' ? 'paid' : 'pending',
-                generatedAt: project.createdAt, // approximation
+                status: (project.status === 'completed' || project.status === 'verified') ? 'paid' : 'pending',
+                generatedAt: project.createdAt,
                 date: project.createdAt
             });
         }
 
         // Payments Logic
-        if (project.status === 'completed') {
+        if (project.status === 'completed' || project.status === 'verified') {
             payments.push({
                 id: `PAY-${project.id}`,
                 projectTitle: project.title,
                 amount: project.totalAmount,
                 currency: project.currency,
                 status: 'completed',
-                timestamp: new Date().toISOString(), // we don't have completedAt in hook yet?
+                timestamp: project.createdAt, // Using createdAt as fallback
                 type: 'full_payment'
             });
 
             // Add to activity
             recentActivity.push({
                 type: 'payment',
-                title: 'Payment received',
-                description: `${project.totalAmount} ${project.currency} from ${isFreelancer ? 'Client' : 'Freelancer'}`, // text slightly off strictly speaking
-                time: 'Recently', // needs real timestamp
+                title: 'Payment processed',
+                description: `${project.totalAmount} ${project.currency} for ${project.title}`,
+                time: 'Recently',
                 amount: project.totalAmount
             });
         }
@@ -113,14 +118,14 @@ export function useDashboardData() {
 
     return {
         stats: {
-            totalEarnings: '0', // Placeholder until we fix rawAmount
-            pendingPayments: '0',
+            totalEarnings: totalEarningsNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            pendingPayments: pendingPaymentsNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
             activeProjects,
             completedProjects
         },
         invoices,
         payments,
-        recentActivity,
+        recentActivity: recentActivity.sort((a, b) => new Date(b.time === 'Recently' ? Date.now() : b.time).getTime() - new Date(a.time === 'Recently' ? Date.now() : a.time).getTime()).slice(0, 5),
         loading: false
     };
 }
