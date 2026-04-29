@@ -89,7 +89,7 @@ export default function DashboardPage() {
           </motion.div>
         ))}
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="mt-1 text-gray-600 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
+        <p className="text-gray-600 dark:text-gray-400 mt-1">Welcome back! Here&apos;s your overview.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -192,6 +192,72 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader>
+            <CardTitle>Portfolio Mix</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ProgressRow label="Completed" percentage={completedRate} color="bg-green-500" />
+            <ProgressRow label="Active" percentage={activeRate} color="bg-blue-500" />
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Activity</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {recentActivity.length === 0 ? (
+            <p className="text-sm text-gray-500">No recent activity found.</p>
+          ) : (
+            <div className="space-y-4">
+              {recentActivity.map((activity, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-4 rounded-lg border border-green-100 bg-green-50 p-3 dark:border-green-900 dark:bg-green-950/50"
+                >
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-900 dark:text-white">{activity.title}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{activity.description}</p>
+                  </div>
+                  <span className="text-sm text-gray-500">{activity.time}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+      <p className="text-sm text-gray-500">{label}</p>
+      <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">{value}</p>
+    </div>
+  );
+}
+
+function ProgressRow({
+  label,
+  percentage,
+  color,
+}: {
+  label: string;
+  percentage: number;
+  color: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-gray-600 dark:text-gray-300">{label}</span>
+        <span className="font-medium text-gray-900 dark:text-white">{percentage}%</span>
+      </div>
+      <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-800">
+        <div className={`h-2 rounded-full ${color}`} style={{ width: `${percentage}%` }} />
+      </div>
             <CardTitle>Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>

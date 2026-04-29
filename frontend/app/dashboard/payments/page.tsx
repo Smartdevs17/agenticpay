@@ -2,8 +2,18 @@
 
 import { useState } from "react";
 import { useDashboardData } from "@/lib/hooks/useDashboardData";
+import { useState } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  CheckCircle2,
+  Clock,
+  XCircle,
+  ExternalLink,
+  Wallet,
+  QrCode,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   CheckCircle2,
@@ -45,10 +55,16 @@ export default function PaymentsPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
           <p className="text-gray-600 mt-1 dark:text-gray-400">
             View all your payment transactions
           </p>
+          <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
+          <p className="text-gray-600 mt-1">
+            View all your payment transactions
+          </p>
+          <div className="mt-2 inline-flex items-center gap-2 text-sm text-gray-500">
+            Loading payments...
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[1, 2, 3, 4].map((i) => (
@@ -63,8 +79,11 @@ export default function PaymentsPage() {
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
           <p className="text-gray-600 mt-1 dark:text-gray-400">
+            View all your payment transactions
+          </p>
+          <h1 className="text-3xl font-bold text-gray-900">Payment History</h1>
+          <p className="text-gray-600 mt-1">
             View all your payment transactions
           </p>
         </div>
@@ -73,12 +92,14 @@ export default function PaymentsPage() {
             onClick={() => setIsQrModalOpen(true)}
             className="flex items-center gap-2"
           >
+            <QrCode className="h-4 w-4" /> Receive Payment
             <QrCode className="h-4 w-4" />
             Receive Payment
           </Button>
         )}
       </div>
 
+      {/* Payments Grid */}
       {/* Payment list or empty state */}
       {payments.length === 0 ? (
         <Card>
@@ -105,14 +126,22 @@ export default function PaymentsPage() {
             >
               <Card className="hover:shadow-lg transition-all h-full">
                 <CardContent className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4 flex-1">
                       {getStatusIcon(payment.status)}
-                      <div>
+                      <div className="flex-1">
                         <h3 className="font-semibold text-gray-900 dark:text-gray-100">
                           {payment.projectTitle}
                         </h3>
-                        <p className="text-xs text-gray-500 mt-0.5">
+                        <h3 className="font-semibold text-gray-900">
+                          {payment.projectTitle}
+                        </h3>
+                        <p className="text-sm text-gray-600">
+                          {payment.type === "milestone_payment"
+                            ? "Milestone Payment"
+                            : "Full Payment"}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
                           {formatDateTimeInTimeZone(
                             payment.timestamp,
                             timezone,
@@ -124,29 +153,22 @@ export default function PaymentsPage() {
                       <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                         {payment.amount} {payment.currency}
                       </p>
+                      {payment.transactionHash && (
+                        <a
+                          href={`https://testnet.cronoscan.com/tx/${payment.transactionHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2 justify-start sm:justify-end"
+                        >
+                          View on Explorer
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
                     </div>
-                  </div>
-
-                  <div className="flex items-center justify-between mt-auto">
-                    <p className="text-sm text-gray-600">
-                      {payment.type === "milestone_payment"
-                        ? "Milestone"
-                        : "Full Payment"}
-                    </p>
-                    {payment.transactionHash && (
-                      <a
-                        href={`https://testnet.cronoscan.com/tx/${payment.transactionHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:underline"
-                      >
-                        Explorer <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
                   </div>
                   {payment.transactionHash && (
                     <div className="mt-4 pt-4 border-t">
-                      <p className="text-[10px] text-gray-400 font-mono truncate">
+                      <p className="text-xs text-gray-500 font-mono break-all">
                         {payment.transactionHash}
                       </p>
                     </div>
@@ -158,6 +180,7 @@ export default function PaymentsPage() {
         </div>
       )}
 
+      {/* QR Modal */}
       {address && (
         <PaymentQRModal
           address={address}
