@@ -10,7 +10,7 @@ export function getStripe(): Stripe {
     throw new AppError(500, 'Stripe is not configured', 'STRIPE_NOT_CONFIGURED');
   }
   if (!stripeClient) {
-    stripeClient = new Stripe(cfg.STRIPE_SECRET_KEY, { apiVersion: '2025-03-31.basil' });
+    stripeClient = new Stripe(cfg.STRIPE_SECRET_KEY, { apiVersion: '2025-02-24.acacia' });
   }
   return stripeClient;
 }

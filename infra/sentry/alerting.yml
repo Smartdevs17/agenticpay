@@ -1,0 +1,50 @@
+# Sentry Alerting Workflows Configuration
+rules:
+  - name: "High Error Rate Alert"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "any"
+    frequency: 30
+    conditions:
+      - id: "sentry.rules.conditions.event_frequency.EventFrequencyCondition"
+        value: 100
+        interval: "5m"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-backend"
+      - id: "sentry.integrations.pagerduty.notify_action.PagerDutyNotifyServiceAction"
+        service: "PagerDuty (High Urgency)"
+
+  - name: "Frontend Unhandled Exception Spike"
+    environment: "production"
+    project: "agenticpay-frontend"
+    actionMatch: "all"
+    frequency: 30
+    conditions:
+      - id: "sentry.rules.conditions.event_frequency.EventFrequencyCondition"
+        value: 50
+        interval: "5m"
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "handled"
+        match: "eq"
+        value: "no"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-frontend"
+
+  - name: "Regression Detected"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "any"
+    frequency: 30
+    conditions:
+      - id: "sentry.rules.conditions.regression_event.RegressionEventCondition"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-regressions"
