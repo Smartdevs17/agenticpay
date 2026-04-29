@@ -1,4 +1,5 @@
-import { webpush, setVapidDetails } from 'webpush';
+import webpush from 'web-push';
+const { setVapidDetails } = webpush;
 import { config } from '../config.js';
 import { generateVapidKeys, VapidKeys } from './vapid.js';
 

@@ -1,0 +1,262 @@
+// Prisma schema — Issue #207
+// Full type-safe schema with soft deletes, indexes, and relations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserTier {
+  free
+  pro
+  enterprise
+}
+
+enum PaymentStatus {
+  pending
+  processing
+  completed
+  failed
+  cancelled
+  refunded
+}
+
+enum PaymentType {
+  milestone_payment
+  full_payment
+  refund
+}
+
+enum ProjectStatus {
+  draft
+  active
+  completed
+  cancelled
+  disputed
+}
+
+enum MilestoneStatus {
+  pending
+  in_progress
+  submitted
+  approved
+  rejected
+  completed
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  paid
+  overdue
+  cancelled
+}
+
+enum WebhookStatus {
+  active
+  disabled
+  failed
+}
+
+enum PaymentLinkStatus {
+  active
+  expired
+  used
+  disabled
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  email         String
+  tier          UserTier  @default(free)
+  walletAddress String?   @map("wallet_address")
+  timezone      String    @default("UTC")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  payments     Payment[]
+  webhooks     Webhook[]
+  auditLogs    AuditLog[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, email])
+  @@index([walletAddress])
+  @@map("users")
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  tenantId        String        @map("tenant_id")
+  txHash          String?       @unique @map("tx_hash")
+  amount          Decimal       @db.Decimal(20, 8)
+  currency        String        @default("XLM")
+  network         String        @default("stellar")
+  status          PaymentStatus @default(pending)
+  type            PaymentType   @default(milestone_payment)
+  projectTitle    String?       @map("project_title")
+  projectId       String?       @map("project_id")
+  milestoneId     String?       @map("milestone_id")
+  userId          String?       @map("user_id")
+  fromAddress     String?       @map("from_address")
+  toAddress       String?       @map("to_address")
+  metadata        Json?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  deletedAt       DateTime?     @map("deleted_at")
+
+  user      User?      @relation(fields: [userId], references: [id])
+  project   Project?   @relation(fields: [projectId], references: [id])
+  milestone Milestone? @relation(fields: [milestoneId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([status], map: "payments_active_status_idx", where: "status IN ('pending', 'processing')")
+  @@index([txHash])
+  @@index([projectId])
+  @@map("payments")
+}
+
+model Project {
+  id                String        @id @default(uuid())
+  title             String
+  description       String?
+  status            ProjectStatus @default(active)
+  totalAmount       Decimal       @map("total_amount") @db.Decimal(20, 8)
+  currency          String        @default("XLM")
+  clientAddress     String        @map("client_address")
+  freelancerAddress String        @map("freelancer_address")
+  tenantId          String        @map("tenant_id")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  deletedAt         DateTime?     @map("deleted_at")
+
+  milestones Milestone[]
+  invoices   Invoice[]
+  payments   Payment[]
+
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@map("projects")
+}
+
+model Milestone {
+  id        String          @id @default(uuid())
+  projectId String          @map("project_id")
+  title     String
+  amount    Decimal         @db.Decimal(20, 8)
+  currency  String          @default("XLM")
+  status    MilestoneStatus @default(pending)
+  order     Int             @default(0)
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  deletedAt DateTime?       @map("deleted_at")
+
+  project  Project   @relation(fields: [projectId], references: [id])
+  invoices Invoice[]
+  payments Payment[]
+
+  @@index([projectId])
+  @@map("milestones")
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  projectId     String        @map("project_id")
+  milestoneId   String?       @map("milestone_id")
+  tenantId      String        @map("tenant_id")
+  amount        Decimal       @db.Decimal(20, 8)
+  currency      String        @default("XLM")
+  status        InvoiceStatus @default(draft)
+  generatedAt   DateTime      @default(now()) @map("generated_at")
+  dueAt         DateTime?     @map("due_at")
+  paidAt        DateTime?     @map("paid_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  deletedAt     DateTime?     @map("deleted_at")
+
+  project   Project    @relation(fields: [projectId], references: [id])
+  milestone Milestone? @relation(fields: [milestoneId], references: [id])
+
+  @@index([tenantId, generatedAt])
+  @@index([projectId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model Webhook {
+  id        String        @id @default(uuid())
+  tenantId  String        @map("tenant_id")
+  userId    String?       @map("user_id")
+  url       String
+  events    String[]
+  secret    String
+  status    WebhookStatus @default(active)
+  failCount Int           @default(0) @map("fail_count")
+  lastFired DateTime?     @map("last_fired")
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+  deletedAt DateTime?     @map("deleted_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("webhooks")
+}
+
+model PaymentLink {
+  id          String            @id @default(uuid())
+  merchantId  String            @map("merchant_id")
+  amount      Decimal?          @db.Decimal(20, 8)
+  currency    String            @default("XLM")
+  description String?
+  status      PaymentLinkStatus @default(active)
+  expiresAt   DateTime?         @map("expires_at")
+  metadata    Json?
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  deletedAt   DateTime?         @map("deleted_at")
+
+  @@index([merchantId])
+  @@index([status])
+  @@map("payment_links")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  entityId   String   @map("entity_id")
+  entityType String   @map("entity_type")
+  action     String
+  userId     String?  @map("user_id")
+  metadata   Json?
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityId, createdAt])
+  @@index([userId])
+  @@index([entityType, action])
+  @@map("audit_logs")
+}
+
+model GasEstimate {
+  id              String   @id @default(uuid())
+  network         String   @unique
+  gasPriceGwei    Decimal  @map("gas_price_gwei") @db.Decimal(30, 9)
+  baseFeeGwei     Decimal? @map("base_fee_gwei") @db.Decimal(30, 9)
+  priorityFeeGwei Decimal? @map("priority_fee_gwei") @db.Decimal(30, 9)
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+
+  @@index([network, recordedAt])
+  @@map("gas_estimates")
+}

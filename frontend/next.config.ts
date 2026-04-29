@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import withBundleAnalyzer from "@next/bundle-analyzer";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const bundleAnalyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -77,6 +78,16 @@ const nextConfig: NextConfig = {
   },
   images: {
     formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 60 * 60 * 24 * 7,
+    remotePatterns: process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN
+      ? [
+          {
+            protocol: "https",
+            hostname: process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN,
+            pathname: "/**",
+          },
+        ]
+      : [],
   },
   compress: true,
   poweredByHeader: false,
@@ -122,4 +133,8 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default bundleAnalyzer(nextConfig);
+export default withSentryConfig(bundleAnalyzer(nextConfig), {
+  silent: true,
+  org: process.env.SENTRY_ORG || "agenticpay",
+  project: process.env.SENTRY_PROJECT || "agenticpay-frontend",
+});

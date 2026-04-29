@@ -1,0 +1,80 @@
+# Slither Configuration for AgenticPay
+# Static analysis tool for detecting smart contract bugs
+
+[solc]
+# Solc version (auto-detect)
+version = "auto"
+
+[analysis]
+# Detectors to run
+detectors = [
+  "reentrancy",
+  "reentrancy-eth",
+  "reentrancy-no-eth",
+  "uninitialized-local",
+  "uninitialized-state",
+  "uninitialized-fptr-cst",
+  "shadowing-local",
+  "shadowing-state",
+  "shadowing-abstract",
+  "constant-function-asm",
+  "constant-function-state",
+  "state-read-after-call",
+  "delegatecall-loop",
+  "timestamp",
+  "assembly",
+  "assert-state-change",
+  "bad-atomic-fragments",
+  "boolean-equal",
+  "cyclomatic-complexity",
+  "dead-code",
+  "deprecated-standards",
+  "incorrect-equality",
+  "locked-ether",
+  "missing-zero-check",
+  "missing-events",
+  "solc-version",
+  "too-many-digits",
+  "unchecked-lowlevel",
+  "unchecked-send",
+  "unchecked-transfer",
+  "unchecked-call",
+  "uninitialized"
+]
+
+# Filter low-severity findings
+exclude-low = true
+
+# Severities to report
+severities = ["high", "medium", "informational"]
+
+[output]
+# JSON output format
+format = "json"
+
+# Output file
+output-file = "slither-report.json"
+
+[performance]
+# Number of processes
+processes = 0
+
+# Skip dependencies in analysis
+exclude-dependencies = true
+
+[vulnerability]
+# Solidity version-specific checks
+solc-optimize = true
+
+# Call depth limit
+call-depth-limit = 10
+
+[security]
+# Known safe patterns
+safe-patterns = [
+  "SafeTransferFrom",
+  "SafeTransfer"
+]
+
+# Ignore specific findings (false positives)
+ignore-patterns = []

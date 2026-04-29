@@ -14,6 +14,7 @@ import {
   WebhookJobData,
 } from '../services/queue-producers.js';
 import { asyncHandler, AppError } from '../middleware/errorHandler.js';
+import { paginateArray } from '../utils/pagination.js';
 
 export const queueRouter = Router();
 
@@ -120,9 +121,16 @@ queueRouter.get(
       jobs = messageQueue.getJobsByStatus(status as JobStatus);
     }
 
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
+
+    const paginated = paginateArray(jobs, { limit, offset });
+
     res.json({
-      data: jobs,
-      count: jobs.length,
+      data: paginated.data,
+      total: paginated.total,
+      limit: paginated.limit,
+      offset: paginated.offset,
       timestamp: new Date(),
     });
   })

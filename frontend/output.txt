@@ -1,0 +1,23 @@
+C:\Users\USER\Desktop\KING\Clones\agenticpay\frontend
+├── app
+├── components
+├── components.json
+├── eslint.config.mjs
+├── lib
+├── next-env.d.ts
+├── next.config.ts
+├── node_modules
+├── output.txt
+├── package-lock.json
+├── package.json
+├── postcss.config.mjs
+├── public
+├── README.md
+├── service-worker.ts
+├── store
+├── tsconfig.json
+├── types
+└── vitest.config.ts
+
+directory: 7 file: 12
+

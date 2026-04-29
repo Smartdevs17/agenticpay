@@ -85,6 +85,18 @@ export interface FormSubmissionsResponse {
   total: number;
 }
 
+export interface FormDraft {
+  id: string;
+  formId: string;
+  values: Record<string, unknown>;
+  savedAt: string;
+}
+
+export interface FormDraftsResponse {
+  drafts: FormDraft[];
+  total: number;
+}
+
 export interface WebhookSecret {
   id: string;
   provider: 'stripe' | 'paypal' | 'github' | 'custom';

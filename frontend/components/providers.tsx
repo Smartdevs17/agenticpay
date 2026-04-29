@@ -7,6 +7,7 @@ import { useState, useEffect, LazyExoticComponent, Suspense as ReactSuspense, Re
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import { OfflineProvider } from '@/components/offline/OfflineProvider';
+import { Web3StoreProvider } from '@/components/providers/Web3StoreProvider';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -40,16 +41,18 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
-        <OfflineProvider>
-          {children}
-          <Toaster />
-          <button 
-            onClick={() => setNotificationsEnabled(!notificationsEnabled)}
-            className="fixed bottom-4 right-4 z-50 px-3 py-1 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-md shadow-sm text-sm"
-          >
-            {notificationsEnabled ? 'Disable Notifications' : 'Enable Notifications'}
-          </button>
-        </OfflineProvider>
+        <Web3StoreProvider>
+          <OfflineProvider>
+            {children}
+            <Toaster />
+            <button
+              onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+              className="fixed bottom-4 right-4 z-50 px-3 py-1 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-md shadow-sm text-sm"
+            >
+              {notificationsEnabled ? 'Disable Notifications' : 'Enable Notifications'}
+            </button>
+          </OfflineProvider>
+        </Web3StoreProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );
@@ -88,9 +91,9 @@ export function prefetchOnHover(
     if (prefetchQueue.has(key)) return;
     
     try {
-      const promise = promise();
-      prefetchQueue.set(key, promise);
-      await promise;
+      const resultPromise: Promise<unknown> = promise();
+      prefetchQueue.set(key, resultPromise);
+      await resultPromise;
       setTimeout(() => prefetchQueue.delete(key), 60000);
     } catch {
       prefetchQueue.delete(key);
