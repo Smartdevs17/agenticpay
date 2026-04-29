@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -150,7 +151,7 @@ export default function InvoicesPage() {
         ))}
       </div>
 
-      {filteredInvoices.length === 0 && (
+      {filteredInvoices.length === 0 ? (
         <Card>
           <CardContent className="p-0">
             <EmptyState

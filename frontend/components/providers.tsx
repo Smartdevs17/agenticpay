@@ -91,9 +91,9 @@ export function prefetchOnHover(
     if (prefetchQueue.has(key)) return;
     
     try {
-      const promise = promise();
-      prefetchQueue.set(key, promise);
-      await promise;
+      const resultPromise: Promise<unknown> = promise();
+      prefetchQueue.set(key, resultPromise);
+      await resultPromise;
       setTimeout(() => prefetchQueue.delete(key), 60000);
     } catch {
       prefetchQueue.delete(key);

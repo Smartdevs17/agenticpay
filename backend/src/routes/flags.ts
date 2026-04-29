@@ -14,6 +14,7 @@ import { Router } from 'express';
 import { createHash } from 'node:crypto';
 import { featureFlags, FeatureFlagName } from '../config/featureFlags.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { paginateArray } from '../utils/pagination.js';
 
 export const flagsRouter = Router();
 
@@ -101,10 +102,19 @@ flagsRouter.get(
 // GET /api/v1/flags
 flagsRouter.get(
   '/',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const flags = featureFlags.getAll().map(serializeFlag);
+
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
+
+    const paginated = paginateArray(flags, { limit, offset });
+
     res.json({
-      flags: featureFlags.getAll().map(serializeFlag),
-      total: featureFlags.getAll().length,
+      flags: paginated.data,
+      total: paginated.total,
+      limit: paginated.limit,
+      offset: paginated.offset,
     });
   }),
 );
