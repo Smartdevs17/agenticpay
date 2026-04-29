@@ -77,8 +77,6 @@ export function Header() {
     setBreadcrumbs(items);
   }, [pathname]);
 
-
-
   useEffect(() => {
     if (timezone) {
       return;
@@ -119,104 +117,98 @@ export function Header() {
             </h1>
           </div>
 
-<div className="flex items-center gap-4">
-          
-          {/* 3. I dropped the new component right here! */}
-          <NetworkIndicator />
+          <div className="flex items-center gap-4">
+            <NetworkIndicator />
 
-          <div className="flex items-center gap-2">
-            {(!isOnline || queueLength > 0 || isSyncing) && (
-              <div className="hidden sm:flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900">
-                {isSyncing ? (
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            <div className="flex items-center gap-2">
+              {(!isOnline || queueLength > 0 || isSyncing) && (
+                <div className="hidden sm:flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900">
+                  {isSyncing ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CloudOff className="h-3.5 w-3.5" />
+                  )}
+                  <span>
+                    {isSyncing
+                      ? `Syncing ${queueLength}`
+                      : !isOnline
+                        ? `Offline${queueLength > 0 ? ` - ${queueLength} queued` : ''}`
+                        : `${queueLength} queued`}
+                  </span>
+                </div>
+              )}
+
+              <Button variant="ghost" size="icon" className="relative">
+                <Bell className="h-5 w-5" />
+                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={mode === 'manual' ? handleManualToggle : undefined}
+                title={
+                  mode === 'manual'
+                    ? isDark
+                      ? 'Switch to light mode'
+                      : 'Switch to dark mode'
+                    : `Auto: ${mode} mode`
+                }
+                className="relative"
+              >
+                {isDark ? (
+                  <Moon className="h-5 w-5 transition-transform duration-300" />
                 ) : (
-                  <CloudOff className="h-3.5 w-3.5" />
+                  <Sun className="h-5 w-5 transition-transform duration-300" />
                 )}
-                <span>
-                  {isSyncing
-                    ? `Syncing ${queueLength}`
-                    : !isOnline
-                      ? `Offline${queueLength > 0 ? ` - ${queueLength} queued` : ''}`
-                      : `${queueLength} queued`}
-                </span>
-              </div>
-            )}
+                {mode !== 'manual' && (
+                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-primary flex items-center justify-center">
+                    <Clock className="h-2 w-2 text-primary-foreground" />
+                  </span>
+                )}
+              </Button>
 
-            {/* Notifications */}
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
-            </Button>
-
-            {/* Dark mode toggle — only interactive label when manual */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={mode === 'manual' ? handleManualToggle : undefined}
-              title={
-                mode === 'manual'
-                  ? isDark
-                    ? 'Switch to light mode'
-                    : 'Switch to dark mode'
-                  : `Auto: ${mode} mode`
-              }
-              className="relative"
-            >
-              {isDark ? (
-                <Moon className="h-5 w-5 transition-transform duration-300" />
-              ) : (
-                <Sun className="h-5 w-5 transition-transform duration-300" />
-              )}
-              {mode !== 'manual' && (
-                <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-primary flex items-center justify-center">
-                  <Clock className="h-2 w-2 text-primary-foreground" />
-                </span>
-              )}
-            </Button>
-
-
-
-            {/* User menu */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex items-center gap-3 h-auto py-2 px-3">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-500 text-white">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="hidden sm:block text-left">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {name || 'User'}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{shortAddress}</p>
-                  </div>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>
-                  <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium">{name || 'User'}</p>
-                    <p className="text-xs text-gray-500">{email || 'No email'}</p>
-                    <p className="text-xs text-gray-400 font-mono">{shortAddress}</p>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <User className="mr-2 h-4 w-4" />
-                  Profile
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setTimezoneSettingsOpen(true)}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Timezone Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="text-red-600">
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="flex items-center gap-3 h-auto py-2 px-3">
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-500 text-white">
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="hidden sm:block text-left">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {name || 'User'}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{shortAddress}</p>
+                    </div>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium">{name || 'User'}</p>
+                      <p className="text-xs text-gray-500">{email || 'No email'}</p>
+                      <p className="text-xs text-gray-400 font-mono">{shortAddress}</p>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem>
+                    <User className="mr-2 h-4 w-4" />
+                    Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setTimezoneSettingsOpen(true)}>
+                    <Settings className="mr-2 h-4 w-4" />
+                    Timezone Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </div>
 

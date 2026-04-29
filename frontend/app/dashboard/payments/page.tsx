@@ -3,6 +3,7 @@
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 import {
   CheckCircle2,
@@ -18,12 +19,14 @@ import { useRouter } from 'next/navigation';
 import { PaymentCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
 import { formatDateTimeInTimeZone } from '@/lib/utils';
+import { PaymentQRModal } from '@/components/payment/QRCode';
 
 
 export default function PaymentsPage() {
   const router = useRouter();
   const { payments, loading } = useDashboardData();
-  const timezone = useAuthStore((state) => state.timezone);
+  const { timezone, address } = useAuthStore();
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
   const getStatusIcon = (status: string) => {
     switch (status) {

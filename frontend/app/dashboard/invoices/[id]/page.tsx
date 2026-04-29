@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,6 +17,15 @@ import {
   formatTimeInTimeZone,
 } from '@/lib/utils';
 import { useAuthStore } from '@/store/useAuthStore';
+
+interface InvoiceVersion {
+  timestamp: string;
+  workDescription: string;
+  hoursWorked: number;
+  hourlyRate: number;
+  calculatedAmount: number;
+  signedAt: string;
+}
 
 export default function InvoiceDetailPage() {
   const params = useParams();
