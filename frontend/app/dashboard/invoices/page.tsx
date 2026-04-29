@@ -59,8 +59,9 @@ export default function InvoicesPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Invoices</h1>
-          <p className="mt-1 text-gray-600">View and manage your invoices</p>
+          <p className="text-gray-600 mt-1 dark:text-gray-400">
+            View and manage your invoices
+          </p>
           <div className="mt-2 inline-flex items-center gap-2 text-sm text-gray-500">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading invoices...
@@ -79,24 +80,28 @@ export default function InvoicesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Invoices</h1>
-        <p className="mt-1 text-gray-600">View and manage your invoices</p>
+        <p className="text-gray-600 mt-1 dark:text-gray-400">
+          View and manage your invoices
+        </p>
       </div>
 
-      <div className="flex items-center gap-2">
-        <Filter className="h-4 w-4 text-gray-500" />
+      {/* Filters */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 no-scrollbar">
+        <Filter className="h-4 w-4 text-gray-500 flex-shrink-0" />
         <div className="flex gap-2">
-          {(['all', 'paid', 'pending', 'overdue'] as const).map((status) => (
-            <Button
-              key={status}
-              variant={filter === status ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilter(status)}
-              className="capitalize"
-            >
-              {status}
-            </Button>
-          ))}
+          {(['all', 'paid', 'pending', 'overdue'] as const).map(
+            (status) => (
+              <Button
+                key={status}
+                variant={filter === status ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilter(status)}
+                className="capitalize whitespace-nowrap"
+              >
+                {status}
+              </Button>
+            )
+          )}
         </div>
       </div>
 
@@ -136,23 +141,34 @@ export default function InvoicesPage() {
               <Link href={`/dashboard/projects/${invoice.projectId}`}>
                 <Card className="cursor-pointer transition-all hover:shadow-lg">
                   <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex flex-1 items-center gap-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-4 flex-1">
                         {getStatusIcon(invoice.status)}
                         <div className="flex-1">
-                          <h3 className="font-semibold text-gray-900">{invoice.projectTitle}</h3>
-                          <p className="text-sm text-gray-600">{invoice.milestoneTitle}</p>
-                          <p className="mt-1 text-xs text-gray-500">
-                            Ref #{invoice.id} / {formatDateInTimeZone(invoice.generatedAt, timezone)}
+                          <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                            {invoice.projectTitle}
+                          </h3>
+
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {invoice.milestoneTitle}
+                          </p>
+
+                          <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                            Ref #{invoice.id} •{' '}
+                            {formatDateInTimeZone(
+                              invoice.generatedAt,
+                              timezone
+                            )}
                           </p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-xl font-bold text-gray-900">
+
+                      <div className="text-left sm:text-right flex items-center sm:block justify-between sm:justify-end gap-2">
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                           {invoice.amount} {invoice.currency}
                         </p>
                         <span
-                          className={`mt-2 inline-block rounded-full border px-3 py-1 text-xs font-medium ${getStatusColor(
+                          className={`inline-block px-3 py-1 rounded-full text-xs font-medium border sm:mt-2 ${getStatusColor(
                             invoice.status
                           )}`}
                         >

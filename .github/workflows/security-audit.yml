@@ -1,0 +1,364 @@
+name: Smart Contract Security Auditing
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/security-audit.yml'
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'contracts/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SERVICE: agenticpay-security
+  SECURITY_REPORT_DIR: security-reports
+
+jobs:
+  # ── Detect contract changes ────────────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      contracts: ${{ steps.filter.outputs.contracts }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            contracts:
+              - 'contracts/**'
+
+  # ── Slither Static Analysis ────────────────────────────────────────────────
+  slither:
+    needs: changes
+    if: ${{ needs.changes.outputs.contracts == 'true' }}
+    name: Slither Static Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Slither
+        run: |
+          python -m pip install --no-cache-dir slither-analyzer
+          python -m slither --version
+
+      - name: Create security reports directory
+        run: mkdir -p ${{ env.SECURITY_REPORT_DIR }}
+
+      - name: Run Slither Analysis
+        working-directory: contracts
+        continue-on-error: true
+        run: |
+          # Run Slither with JSON output for parsing
+          slither . --json ${{ runner.temp }}/slither-report.json \
+            --exclude-dependencies \
+            --exclude-low \
+            --solc-remaps "" || true
+
+          # Convert to human-readable format
+          slither . \
+            --exclude-dependencies \
+            --exclude-low \
+            --risk high,medium \
+            --output-to-file {severity}-{type}-slither-report.md
+
+      - name: Parse Slither Results
+        id: parse_slither
+        working-directory: contracts
+        run: |
+          if [ -f "HIGH-high-slither-report.md" ]; then
+            echo "slither_high_findings=true" >> $GITHUB_OUTPUT
+            echo "## 🔴 Slither: Critical Findings Found" >> $GITHUB_STEP_SUMMARY
+            cat HIGH-high-slither-report.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f "MEDIUM-medium-slither-report.md" ]; then
+            echo "slither_medium_findings=true" >> $GITHUB_OUTPUT
+            echo "## 🟠 Slither: Medium-Risk Findings" >> $GITHUB_STEP_SUMMARY
+            cat MEDIUM-medium-slither-report.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Move Slither reports
+        if: always()
+        working-directory: contracts
+        run: |
+          mv -f *slither-report.md ${{ github.workspace }}/${{ env.SECURITY_REPORT_DIR }}/ || true
+          mv -f ${{ runner.temp }}/slither-report.json ${{ github.workspace }}/${{ env.SECURITY_REPORT_DIR }}/ || true
+
+      - name: Upload Slither Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slither-reports
+          path: ${{ env.SECURITY_REPORT_DIR }}/
+          retention-days: 30
+
+      - name: Fail on Critical Findings
+        if: steps.parse_slither.outputs.slither_high_findings == 'true'
+        run: |
+          echo "❌ Pipeline failed: Critical security findings detected by Slither"
+          exit 1
+
+  # ── Mythril Symbolic Execution ─────────────────────────────────────────────
+  mythril:
+    needs: changes
+    if: ${{ needs.changes.outputs.contracts == 'true' }}
+    name: Mythril Symbolic Execution
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Mythril
+        run: |
+          python -m pip install --no-cache-dir mythril
+
+      - name: Create security reports directory
+        run: mkdir -p ${{ env.SECURITY_REPORT_DIR }}
+
+      - name: Run Mythril Analysis
+        working-directory: contracts
+        continue-on-error: true
+        run: |
+          # Find all Solidity files and analyze them
+          find src -name "*.sol" 2>/dev/null | while read file; do
+            CONTRACT_NAME=$(basename "$file" .sol)
+            echo "Analyzing $CONTRACT_NAME..."
+            
+            myth analyze "$file" \
+              --execution-timeout 300 \
+              --create-timeout 300 \
+              --output json \
+              > "${{ github.workspace }}/${{ env.SECURITY_REPORT_DIR }}/mythril-${CONTRACT_NAME}.json" 2>&1 || true
+              
+            myth analyze "$file" \
+              --execution-timeout 300 \
+              --create-timeout 300 \
+              > "${{ github.workspace }}/${{ env.SECURITY_REPORT_DIR }}/mythril-${CONTRACT_NAME}.txt" 2>&1 || true
+          done
+
+      - name: Parse Mythril Results
+        id: parse_mythril
+        working-directory: ${{ github.workspace }}/${{ env.SECURITY_REPORT_DIR }}
+        run: |
+          CRITICAL_COUNT=0
+          
+          for file in mythril-*.json; do
+            if [ -f "$file" ]; then
+              # Count issues by severity
+              CRITICAL=$((CRITICAL + $(jq '[.issues[] | select(.severity=="High")] | length' "$file" 2>/dev/null || echo 0)))
+            fi
+          done
+          
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "mythril_critical_found=true" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "## 🔬 Mythril Symbolic Execution Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Critical Issues Found: $CRITICAL_COUNT" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Mythril Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mythril-reports
+          path: ${{ env.SECURITY_REPORT_DIR }}/
+          retention-days: 30
+
+  # ── Property-Based Testing ─────────────────────────────────────────────────
+  property-tests:
+    needs: changes
+    if: ${{ needs.changes.outputs.contracts == 'true' }}
+    name: Property-Based Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: contracts/target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Install Soroban CLI
+        run: cargo install soroban-cli --locked
+
+      - name: Create security reports directory
+        run: mkdir -p ${{ env.SECURITY_REPORT_DIR }}
+
+      - name: Run Property-Based Tests
+        working-directory: contracts
+        run: |
+          # Run property-based tests with different seeds
+          echo "## 🧪 Property-Based Testing Results" > ../property-test-report.md
+          echo "" >> ../property-test-report.md
+          
+          for seed in 1 42 123 666 9999; do
+            echo "Running tests with seed: $seed"
+            SEED=$seed cargo test --lib --release -- --test-threads=1 2>&1 | tee -a ../property-test-report.md || true
+          done
+          
+          mv ../property-test-report.md ${{ github.workspace }}/${{ env.SECURITY_REPORT_DIR }}/
+
+      - name: Run Fuzz Testing
+        working-directory: contracts
+        continue-on-error: true
+        run: |
+          if [ -f scripts/fuzz_test.sh ]; then
+            head -c 50000 /dev/urandom | timeout 60 bash scripts/fuzz_test.sh 2>&1 > ${{ github.workspace }}/${{ env.SECURITY_REPORT_DIR }}/fuzz-test-results.txt || true
+          fi
+
+      - name: Upload Property Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: property-test-reports
+          path: ${{ env.SECURITY_REPORT_DIR }}/
+          retention-days: 30
+
+  # ── Security Report Aggregation ────────────────────────────────────────────
+  security-report:
+    needs: [slither, mythril, property-tests]
+    if: always()
+    name: Aggregate Security Reports
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          path: all-reports
+
+      - name: Generate Security Summary
+        run: |
+          mkdir -p ${{ env.SECURITY_REPORT_DIR }}
+          cat > ${{ env.SECURITY_REPORT_DIR }}/SECURITY_SUMMARY.md << 'EOF'
+          # Security Audit Report
+          
+          **Generated**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          **Commit**: ${{ github.sha }}
+          
+          ## Findings Summary
+          
+          ### Slither (Static Analysis)
+          - Automated detection of smart contract bugs and code patterns
+          - Configuration: Excludes low-severity, focuses on medium/high risk
+          
+          ### Mythril (Symbolic Execution)
+          - Deep semantic analysis of bytecode
+          - Detects vulnerabilities through symbolic execution
+          
+          ### Property-Based Testing
+          - Random input generation with custom properties
+          - Multiple seed values for comprehensive testing
+          - Fuzz testing integration
+          
+          ## Severity Classification
+          
+          - 🔴 **CRITICAL**: Blocks merge, requires immediate fix
+          - 🟠 **HIGH**: Requires review and resolution before merge
+          - 🟡 **MEDIUM**: Should be reviewed and addressed
+          - 🔵 **LOW**: Informational, may be ignored with justification
+          
+          ## Historical Tracking
+          
+          All reports are archived in Artifacts for trend analysis and historical tracking.
+          
+          ## Recommendations
+          
+          1. Review all critical and high-severity findings
+          2. Implement fixes following security best practices
+          3. Re-run analysis after changes
+          4. Document any findings that are intentional design choices
+          
+          EOF
+          
+          cat ${{ env.SECURITY_REPORT_DIR }}/SECURITY_SUMMARY.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Security Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-report
+          path: ${{ env.SECURITY_REPORT_DIR }}/
+          retention-days: 90
+
+  # ── Team Notification ──────────────────────────────────────────────────────
+  notify:
+    needs: [slither, property-tests]
+    if: always() && (needs.slither.result == 'failure' || needs.property-tests.result == 'failure')
+    name: Notify Team of Security Issues
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub Issue for Security Findings
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🔒 Security Issues Detected in Contracts',
+              body: `Security auditing tools have detected issues in the smart contracts.
+
+              **Commit**: ${context.sha}
+              **Workflow**: [View Run](${context.payload.repository.html_url}/actions/runs/${{ github.run_id }})
+              
+              Please review the security audit reports in the workflow artifacts.`,
+              labels: ['security', 'contracts', 'bugfix']
+            })

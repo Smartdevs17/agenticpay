@@ -14,32 +14,23 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import {
-  Bell,
-  LogOut,
-  User,
-  Settings,
-  Sun,
-  Moon,
-  Clock,
-  CloudOff,
-  RefreshCw,
-} from 'lucide-react';
+import { Bell, LogOut, User, Settings, Sun, Moon, Clock, CloudOff, RefreshCw, Menu } from 'lucide-react';
 import { toast } from 'sonner';
 import { LanguageSwitcher } from '@/components/language/LanguageSwitcher';
 import { useDisconnect, useAccount } from 'wagmi';
 import { web3auth } from '@/lib/web3auth';
-import {
-  Breadcrumb,
-  BreadcrumbList,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { getDashboardBreadcrumbs } from '@/lib/breadcrumbs';
 import { ThemeSettingsModal } from '@/components/theme/ThemeSettingsModal';
 import { TimezoneSettingsModal } from '@/components/settings/TimezoneSettingsModal';
 import { getBrowserTimeZone, isValidTimeZone } from '@/lib/utils';
+import { CommandMenu } from './CommandMenu';
+
+type BreadcrumbItemType = {
+  label: string;
+  href: string;
+};
+
 import { useOfflineStatus } from '@/components/offline/OfflineProvider';
 import { CommandMenu } from '@/components/layout/CommandMenu';
 
@@ -72,17 +63,20 @@ const NetworkIndicator = () => {
   );
 };
 
-export function Header() {
+export function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const { name, email, address, timezone, logout, setTimezone } = useAuthStore();
   const { isDark, mode, setIsDark } = useThemeStore();
   const { disconnect } = useDisconnect();
   const { isOnline, queueLength, isSyncing } = useOfflineStatus();
   const router = useRouter();
   const pathname = usePathname();
+  const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItemType[]>([]);
   const [themeSettingsOpen, setThemeSettingsOpen] = useState(false);
   const [timezoneSettingsOpen, setTimezoneSettingsOpen] = useState(false);
 
-  const breadcrumbs = useMemo(() => getDashboardBreadcrumbs(pathname), [pathname]);
+  useEffect(() => {
+    setBreadcrumbs(getDashboardBreadcrumbs(pathname));
+  }, [pathname]);
 
   useEffect(() => {
     if (timezone) return;
@@ -95,9 +89,7 @@ export function Header() {
 
   const handleLogout = async () => {
     disconnect();
-    if (web3auth) {
-      await web3auth.logout();
-    }
+    if (web3auth) await web3auth.logout();
     logout();
     toast.success('Logged out successfully');
     router.push('/auth');
@@ -118,15 +110,23 @@ export function Header() {
     <>
       <header className="sticky top-0 z-30 w-full border-b border-gray-200 bg-white/80 backdrop-blur-sm dark:border-gray-700/60 dark:bg-gray-900/80">
         <div className="flex h-16 items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+          {/* LEFT */}
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent truncate max-w-[120px] sm:max-w-none">
               Dashboard
             </h1>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          {/* RIGHT */}
+          <div className="flex items-center gap-4">
             <NetworkIndicator />
-            <CommandMenu />
+<div className="flex items-center gap-4">
+          
+          {/* 3. I dropped the new component right here! */}
+          <NetworkIndicator />
 
             {showOfflineBadge && (
               <div className="hidden sm:flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900">
@@ -173,19 +173,46 @@ export function Header() {
               )}
             </Button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setThemeSettingsOpen(true)}
-              title="Appearance settings"
-            >
-              <Settings className="h-5 w-5" />
+            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
+              {(!isOnline || queueLength > 0 || isSyncing) && (
+                <div className="hidden sm:flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900">
+                  {isSyncing ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CloudOff className="h-3.5 w-3.5" />
+                  )}
+                  <span>
+                    {isSyncing
+                      ? `Syncing ${queueLength}`
+                      : !isOnline
+                        ? `Offline${queueLength > 0 ? ` - ${queueLength} queued` : ''}`
+                        : `${queueLength} queued`}
+                  </span>
+                </div>
+            
+            <CommandMenu />
+
+            <Button variant="ghost" size="icon" className="hidden sm:flex">
+              <Bell className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </Button>
+            
+            <Button variant="ghost" size="icon" className="hidden sm:flex" onClick={mode === 'manual' ? handleManualToggle : undefined}>
+              {isDark ? <Moon className="h-5 w-5 text-gray-500 dark:text-gray-400" /> : <Sun className="h-5 w-5 text-gray-500 dark:text-gray-400" />}
+            </Button>
+
+            <Button variant="ghost" size="icon" className="hidden md:flex" onClick={() => setThemeSettingsOpen(true)}>
+              <Clock className="h-5 w-5 text-gray-500 dark:text-gray-400" />
             </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="h-auto items-center gap-3 px-3 py-2">
                   <Avatar className="h-8 w-8">
+                    <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-500 text-white">{initials}</AvatarFallback>
+                  </Avatar>
+                  <div className="hidden sm:block text-left">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{name || 'User'}</p>
                     <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-500 text-white">
                       {initials}
                     </AvatarFallback>
@@ -208,6 +235,14 @@ export function Header() {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem>
+                  <User className="mr-2 h-4 w-4" /> Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setTimezoneSettingsOpen(true)}>
+                  <Settings className="mr-2 h-4 w-4" /> Timezone Settings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                  <LogOut className="mr-2 h-4 w-4" /> Logout
                   <User className="mr-2 h-4 w-4" />
                   Profile
                 </DropdownMenuItem>
@@ -244,10 +279,7 @@ export function Header() {
       </header>
 
       <ThemeSettingsModal open={themeSettingsOpen} onClose={() => setThemeSettingsOpen(false)} />
-      <TimezoneSettingsModal
-        open={timezoneSettingsOpen}
-        onClose={() => setTimezoneSettingsOpen(false)}
-      />
+      <TimezoneSettingsModal open={timezoneSettingsOpen} onClose={() => setTimezoneSettingsOpen(false)} />
     </>
   );
 }
