@@ -1,19 +1,102 @@
 /**
- * flags.ts — Admin endpoints for inspecting and overriding feature flags.
- *
- * Routes (all under /api/v1/flags):
- *
- *   GET  /              — list all flags with current state and usage stats
- *   GET  /:name         — get a single flag
- *   PATCH /:name        — runtime override (enabled, rolloutPercentage, allowlist)
- *   POST  /:name/reset  — reset a flag to its default / env-var value
- */
+* flags.ts — Admin and Client endpoints for inspecting, overriding, and evaluating feature flags.
+*
+* Routes (all under /api/v1/flags):
+* * GET  /evaluate      — (Client) evaluate a single flag for a user deterministically
+* GET  /state         — (Client) bulk fetch all active flags for a user
+* GET  /              — (Admin) list all flags with current state and usage stats
+* GET  /:name         — (Admin) get a single flag
+* PATCH /:name        — (Admin) runtime override (enabled, rolloutPercentage, allowlist)
+* POST  /:name/reset  — (Admin) reset a flag to its default / env-var value
+*/
 
 import { Router } from 'express';
+import { createHash } from 'node:crypto';
 import { featureFlags, FeatureFlagName } from '../config/featureFlags.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 
 export const flagsRouter = Router();
+
+// ─── Deterministic Evaluation Engine ──────────────────────────────────────────
+
+/**
+* Deterministically evaluates a flag using the existing config object.
+* Hashes the user identifier to ensure consistent A/B test experiences.
+*/
+function evaluateDeterministic(name: FeatureFlagName, identifier: string): boolean {
+  const flag = featureFlags.get(name);
+  if (!flag) return false;
+
+  const rollout = flag.currentRolloutPercentage;
+
+  // Safely extract allowlist (handling potential type variations in the existing config)
+  const allowlist: string[] = (flag as any).allowlist || (flag as any).definition?.allowlist || [];
+
+  // 1. User Targeting: If user is explicitly targeted, they get it
+  if (allowlist.includes(identifier)) return true;
+
+  // 2. Global Toggles: If no percentage is set, fallback to default status
+  if (rollout === undefined || rollout === null) {
+    return flag.definition.defaultEnabled ?? false;
+  }
+
+  // 3. Absolute Rollouts
+  if (rollout >= 100) return true;
+  if (rollout <= 0) return false;
+
+  // 4. Percentage Rollout (A/B Testing)
+  const hash = createHash('md5').update(`${name}-${identifier}`).digest('hex');
+  const hashInt = parseInt(hash.substring(0, 4), 16);
+  const normalizedHash = (hashInt % 100) + 1;
+
+  return normalizedHash <= rollout;
+}
+
+// ─── CLIENT ENDPOINTS ─────────────────────────────────────────────────────────
+
+// GET /api/v1/flags/evaluate?flag=name&identifier=user123
+flagsRouter.get(
+  '/evaluate',
+  asyncHandler(async (req, res) => {
+    const { flag, identifier } = req.query;
+
+    if (typeof flag !== 'string' || typeof identifier !== 'string') {
+      throw new AppError(400, 'Missing flag name or identifier in query', 'VALIDATION_ERROR');
+    }
+
+    const isEnabled = evaluateDeterministic(flag as FeatureFlagName, identifier);
+
+    res.json({
+      flag,
+      identifier,
+      enabled: isEnabled
+    });
+  })
+);
+
+// GET /api/v1/flags/state?identifier=user123
+flagsRouter.get(
+  '/state',
+  asyncHandler(async (req, res) => {
+    const { identifier } = req.query;
+
+    if (typeof identifier !== 'string') {
+      throw new AppError(400, 'Missing identifier in query', 'VALIDATION_ERROR');
+    }
+
+    const allFlags = featureFlags.getAll();
+    const clientState: Record<string, boolean> = {};
+
+    allFlags.forEach(f => {
+      clientState[f.definition.name] = evaluateDeterministic(f.definition.name as FeatureFlagName, identifier);
+    });
+
+    res.json({ identifier, flags: clientState });
+  })
+);
+
+
+// ─── ADMIN ENDPOINTS (Existing Code Preserved) ────────────────────────────────
 
 // GET /api/v1/flags
 flagsRouter.get(

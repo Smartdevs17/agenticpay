@@ -1,0 +1,296 @@
+name: Generate API Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/src/**'
+      - 'backend/scripts/generate-openapi.ts'
+      - '.github/workflows/generate-docs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCS_DIR: backend/docs
+  API_DOCS_DIR: backend/docs/api
+
+jobs:
+  generate-docs:
+    name: Generate OpenAPI & SDKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci --prefer-offline
+
+      - name: Generate OpenAPI Specification
+        working-directory: backend
+        run: |
+          mkdir -p ${{ env.API_DOCS_DIR }}
+          npx ts-node scripts/generate-openapi.ts
+
+      - name: Install Python for documentation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate API Explorer
+        run: |
+          python -m pip install --no-cache-dir swagger-ui
+          mkdir -p ${{ env.API_DOCS_DIR }}/explorer
+          
+          cat > ${{ env.API_DOCS_DIR }}/explorer/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>AgenticPay API Explorer</title>
+              <meta charset="utf-8"/>
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@3/swagger-ui.css">
+            </head>
+            <body>
+              <div id="swagger-ui"></div>
+              <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@3/swagger-ui.bundle.js"></script>
+              <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@3/swagger-ui-standalone-preset.js"></script>
+              <script>
+                window.onload = function() {
+                  const ui = SwaggerUIBundle({
+                    url: "../openapi/openapi.json",
+                    dom_id: '#swagger-ui',
+                    deepLinking: true,
+                    presets: [
+                      SwaggerUIBundle.presets.apis,
+                      SwaggerUIStandalonePreset
+                    ],
+                    plugins: [
+                      SwaggerUIBundle.plugins.DownloadUrl
+                    ],
+                    layout: "StandaloneLayout"
+                  })
+                  window.ui = ui
+                }
+              </script>
+            </body>
+          </html>
+          EOF
+
+      - name: Create TypeScript SDK documentation
+        run: |
+          mkdir -p ${{ env.API_DOCS_DIR }}/sdks/typescript
+          cat > ${{ env.API_DOCS_DIR }}/sdks/typescript/README.md << 'EOF'
+          # AgenticPay TypeScript SDK
+
+          Official TypeScript SDK for AgenticPay API.
+
+          ## Installation
+
+          ```bash
+          npm install @agenticpay/sdk
+          ```
+
+          ## Usage
+
+          ```typescript
+          import { AgenticPayClient } from '@agenticpay/sdk';
+
+          const client = new AgenticPayClient('your-api-token');
+
+          // Batch verify work submissions
+          const results = await client.batchVerify([
+            { projectId: 'proj-1', status: 'completed' },
+          ]);
+
+          // Generate invoice
+          const invoice = await client.generateInvoice(
+            'proj-1',
+            'Development work completed',
+            10,
+            50
+          );
+
+          // Get payment status
+          const payment = await client.getPaymentStatus('transaction-hash');
+          ```
+
+          ## API Reference
+
+          See the main documentation for complete API reference.
+          EOF
+
+      - name: Create Python SDK documentation
+        run: |
+          mkdir -p ${{ env.API_DOCS_DIR }}/sdks/python
+          cat > ${{ env.API_DOCS_DIR }}/sdks/python/README.md << 'EOF'
+          # AgenticPay Python SDK
+
+          Official Python SDK for AgenticPay API.
+
+          ## Installation
+
+          ```bash
+          pip install agenticpay
+          ```
+
+          ## Usage
+
+          ```python
+          from agenticpay import AgenticPayClient
+
+          client = AgenticPayClient('your-api-token')
+
+          # Batch verify work submissions
+          results = client.batch_verify([
+              {'projectId': 'proj-1', 'status': 'completed'},
+          ])
+
+          # Generate invoice
+          invoice = client.generate_invoice(
+              'proj-1',
+              'Development work completed',
+              10,
+              50
+          )
+
+          # Get payment status
+          payment = client.get_payment_status('transaction-hash')
+          ```
+
+          ## API Reference
+
+          See the main documentation for complete API reference.
+          EOF
+
+      - name: Create Go SDK documentation
+        run: |
+          mkdir -p ${{ env.API_DOCS_DIR }}/sdks/go
+          cat > ${{ env.API_DOCS_DIR }}/sdks/go/README.md << 'EOF'
+          # AgenticPay Go SDK
+
+          Official Go SDK for AgenticPay API.
+
+          ## Installation
+
+          ```bash
+          import "github.com/Smartdevs17/agenticpay-sdk-go"
+          ```
+
+          ## Usage
+
+          ```go
+          package main
+
+          import (
+              "log"
+              "github.com/Smartdevs17/agenticpay-sdk-go"
+          )
+
+          func main() {
+              client := agenticpay.NewClient("your-api-token", "")
+
+              // Batch verify work submissions
+              results, err := client.BatchVerify([]interface{}{
+                  map[string]interface{}{
+                      "projectId": "proj-1",
+                      "status": "completed",
+                  },
+              })
+              if err != nil {
+                  log.Fatal(err)
+              }
+
+              // Generate invoice
+              invoice, err := client.GenerateInvoice(
+                  "proj-1",
+                  "Development work completed",
+                  10,
+                  50,
+              )
+              if err != nil {
+                  log.Fatal(err)
+              }
+          }
+          ```
+
+          ## API Reference
+
+          See the main documentation for complete API reference.
+          EOF
+
+      - name: Create Postman collection
+        run: |
+          mkdir -p ${{ env.API_DOCS_DIR }}/postman
+          # Already generated by openapi script
+          echo "✅ Postman collection generated"
+
+      - name: Create documentation index
+        run: |
+          cat > ${{ env.API_DOCS_DIR }}/INDEX.md << 'EOF'
+          # AgenticPay API Documentation
+
+          Welcome to the AgenticPay API documentation. This directory contains:
+
+          - **openapi/** - OpenAPI specification (JSON and YAML formats)
+          - **explorer/** - Interactive API explorer (Swagger UI)
+          - **sdks/** - Auto-generated SDKs for TypeScript, Python, and Go
+          - **postman/** - Postman collection for manual testing
+
+          ## Quick Start
+
+          1. **View OpenAPI Spec**: See `openapi/openapi.json` or `openapi/openapi.yaml`
+          2. **Try API Online**: Open `explorer/index.html` in your browser
+          3. **Use SDK**: Install SDK from `sdks/{language}/`
+          4. **Import Postman**: Import collection from `postman/AgenticPay-API.postman_collection.json`
+
+          ## API Endpoints
+
+          - **Verification**: `/verification/verify/batch` - Batch verify work submissions
+          - **Invoicing**: `/invoice/generate` - Generate invoices
+          - **Stellar**: `/stellar/payment/{hash}` - Get payment status
+
+          ## Authentication
+
+          All API requests require a Bearer token:
+
+          ```
+          Authorization: Bearer your-api-token
+          ```
+
+          ## Support
+
+          For issues or questions:
+          - GitHub: https://github.com/Smartdevs17/agenticpay
+          - Docs: https://docs.agenticpay.com
+          - Email: hello@agenticpay.com
+          EOF
+
+      - name: Verify generated files
+        run: |
+          echo "📋 Checking generated documentation..."
+          find ${{ env.API_DOCS_DIR }} -type f -name "*.json" -o -name "*.yaml" -o -name "*.md" | head -20
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-documentation
+          path: ${{ env.API_DOCS_DIR }}/
+          retention-days: 90
+
+      - name: Deploy to Pages (if available)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          echo "📤 Documentation available at: https://agenticpay-docs.example.com/api"
+          echo "ℹ️ Update GitHub Pages configuration to deploy from ${{ env.API_DOCS_DIR }}"

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { InvoiceCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
 import { formatDateInTimeZone } from '@/lib/utils';
@@ -61,8 +62,7 @@ export default function InvoicesPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Invoices</h1>
-          <p className="text-gray-600 mt-1">
+          <p className="text-gray-600 mt-1 dark:text-gray-400">
             View and manage your invoices
           </p>
           <div className="mt-2 inline-flex items-center gap-2 text-sm text-gray-500">
@@ -84,15 +84,14 @@ export default function InvoicesPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Invoices</h1>
-        <p className="text-gray-600 mt-1">
+        <p className="text-gray-600 mt-1 dark:text-gray-400">
           View and manage your invoices
         </p>
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-2">
-        <Filter className="h-4 w-4 text-gray-500" />
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 no-scrollbar">
+        <Filter className="h-4 w-4 text-gray-500 flex-shrink-0" />
         <div className="flex gap-2">
           {(['all', 'paid', 'pending', 'overdue'] as const).map(
             (status) => (
@@ -101,7 +100,7 @@ export default function InvoicesPage() {
                 variant={filter === status ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => setFilter(status)}
-                className="capitalize"
+                className="capitalize whitespace-nowrap"
               >
                 {status}
               </Button>
@@ -197,20 +196,20 @@ export default function InvoicesPage() {
               >
                 <Card className="hover:shadow-lg transition-all cursor-pointer">
                   <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-center gap-4 flex-1">
                         {getStatusIcon(invoice.status)}
 
                         <div className="flex-1">
-                          <h3 className="font-semibold text-gray-900">
+                          <h3 className="font-semibold text-gray-900 dark:text-gray-100">
                             {invoice.projectTitle}
                           </h3>
 
-                          <p className="text-sm text-gray-600">
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
                             {invoice.milestoneTitle}
                           </p>
 
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
                             Ref #{invoice.id} •{' '}
                             {formatDateInTimeZone(
                               invoice.generatedAt,
@@ -220,13 +219,13 @@ export default function InvoicesPage() {
                         </div>
                       </div>
 
-                      <div className="text-right">
-                        <p className="text-xl font-bold text-gray-900">
+                      <div className="text-left sm:text-right flex items-center sm:block justify-between sm:justify-end gap-2">
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                           {invoice.amount} {invoice.currency}
                         </p>
 
                         <span
-                          className={`inline-block px-3 py-1 rounded-full text-xs font-medium border mt-2 ${getStatusColor(
+                          className={`inline-block px-3 py-1 rounded-full text-xs font-medium border sm:mt-2 ${getStatusColor(
                             invoice.status
                           )}`}
                         >
