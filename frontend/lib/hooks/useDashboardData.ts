@@ -24,12 +24,28 @@ export interface DashboardInvoice {
 export interface DashboardPayment {
     id: string;
     projectTitle: string;
+    description: string;
     amount: string;
     currency: string;
     status: 'completed' | 'pending' | 'failed';
     timestamp: string;
     transactionHash?: string;
-    type: 'milestone_payment' | 'full_payment';
+    type: 'milestone_payment' | 'full_payment' | 'refund';
+    category: string;
+}
+
+function categorizePayment(description: string, amount: number, type?: string): string {
+    const normalizedDescription = description.toLowerCase();
+
+    if (type === 'refund' || amount < 0 || normalizedDescription.includes('refund')) return 'refund';
+    if (normalizedDescription.includes('subscription') || normalizedDescription.includes('monthly') || normalizedDescription.includes('yearly') || normalizedDescription.includes('saas')) return 'subscription';
+    if (normalizedDescription.includes('invoice') || normalizedDescription.includes('inv-') || normalizedDescription.includes('billing')) return 'invoice';
+    if (normalizedDescription.includes('donation') || normalizedDescription.includes('gift') || normalizedDescription.includes('support')) return 'donation';
+    if (normalizedDescription.includes('payroll') || normalizedDescription.includes('salary') || normalizedDescription.includes('wage')) return 'payroll';
+    if (normalizedDescription.includes('software') || normalizedDescription.includes('api') || normalizedDescription.includes('license')) return 'software';
+    if (normalizedDescription.includes('infrastructure') || normalizedDescription.includes('cloud') || normalizedDescription.includes('aws') || normalizedDescription.includes('hosting')) return 'infrastructure';
+
+    return 'uncategorized';
 }
 
 export function useDashboardData() {
@@ -95,21 +111,25 @@ export function useDashboardData() {
 
         // Payments Logic
         if (project.status === 'completed' || project.status === 'verified') {
+            const description = project.description || project.title || '';
+            const category = categorizePayment(description, amount);
             payments.push({
                 id: `PAY-${project.id}`,
                 projectTitle: project.title,
+                description: description,
                 amount: project.totalAmount,
                 currency: project.currency,
                 status: 'completed',
-                timestamp: project.createdAt, // Using createdAt as fallback
-                type: 'full_payment'
+                timestamp: project.createdAt,
+                type: 'full_payment',
+                category: category
             });
 
             // Add to activity
             recentActivity.push({
                 type: 'payment',
                 title: 'Payment processed',
-                description: `${project.totalAmount} ${project.currency} for ${project.title}`,
+                description: `${project.totalAmount} ${project.currency} for ${project.title} (${category})`,
                 time: 'Recently',
                 amount: project.totalAmount
             });

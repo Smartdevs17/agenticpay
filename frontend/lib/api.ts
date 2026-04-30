@@ -98,74 +98,104 @@ export interface FormDraftsResponse {
 }
 
 export const api = {
-    /**
-     * AI Work Verification
-     */
-    verifyWork: async (data: VerificationRequest) => {
-        return apiCall<VerificationResponse>('/verification/verify', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(data),
-        });
-    },
+  /**
+   * AI Work Verification
+   */
+  verifyWork: async (data: VerificationRequest) => {
+    return apiCall<VerificationResponse>('/verification/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+  },
 
-    /**
-     * AI Invoice Generation
-     */
-    generateInvoice: async (data: InvoiceRequest) => {
-        return apiCall('/invoice/generate', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(data),
-        });
-    },
+  /**
+   * AI Invoice Generation
+   */
+  generateInvoice: async (data: InvoiceRequest) => {
+    return apiCall('/invoice/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+  },
 
-    /**
-     * Get Verification Result
-     */
-    getVerification: async (id: string) => {
-        return apiCall(`/verification/${id}`, {
-            method: 'GET',
-        });
-    },
+  /**
+   * Get Verification Result
+   */
+  getVerification: async (id: string) => {
+    return apiCall(`/verification/${id}`, {
+      method: 'GET',
+    });
+  },
 
-    /**
-     * Forms API
-     */
-    forms: {
-      listForms: async () => apiCall<FormListResponse>('/forms', { method: 'GET' }),
-      getForm: async (id: string) => apiCall<FormSchema>(`/forms/${id}`, { method: 'GET' }),
-      createForm: async (payload: FormCreateRequest) => apiCall<FormSchema>('/forms', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }),
-      updateForm: async (id: string, payload: FormCreateRequest) => apiCall<FormSchema>(`/forms/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      }),
-      deleteForm: async (id: string) => apiCall<void>(`/forms/${id}`, {
-        method: 'DELETE',
-      }),
-      submitForm: async (id: string, values: Record<string, unknown>) => apiCall(`/forms/${id}/submissions`, {
-        method: 'POST',
-        body: JSON.stringify({ values }),
-      }),
-      getSubmissions: async (id: string) => apiCall<FormSubmissionsResponse>(`/forms/${id}/submissions`, {
-        method: 'GET',
-      }),
-      saveDraft: async (id: string, values: Record<string, unknown>) => apiCall<FormDraft>(`/forms/${id}/drafts`, {
-        method: 'POST',
-        body: JSON.stringify({ values }),
-      }),
-      getDrafts: async (id: string) => apiCall<FormDraftsResponse>(`/forms/${id}/drafts`, {
-        method: 'GET',
-      }),
-      deleteDraft: async (id: string, draftId: string) => apiCall<void>(`/forms/${id}/drafts/${draftId}`, {
-        method: 'DELETE',
-      }),
+  /**
+   * Categories API
+   */
+  categories: {
+    getDefinitions: async () => {
+      return apiCall('/categories/definitions', { method: 'GET' });
     },
+    override: async (paymentId: string, category: string) => {
+      return apiCall('/categories/override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentId, category }),
+      });
+    },
+    getAnalytics: async (payments: unknown[]) => {
+      return apiCall('/categories/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payments }),
+      });
+    },
+    export: async (payments: unknown[], category = 'all') => {
+      return apiCall<string>('/categories/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payments, category }),
+      });
+    },
+  },
+
+  /**
+   * Forms API
+   */
+  forms: {
+    listForms: async () => apiCall<FormListResponse>('/forms', { method: 'GET' }),
+    getForm: async (id: string) => apiCall<FormSchema>(`/forms/${id}`, { method: 'GET' }),
+    createForm: async (payload: FormCreateRequest) => apiCall<FormSchema>('/forms', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+    updateForm: async (id: string, payload: FormCreateRequest) => apiCall<FormSchema>(`/forms/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+    deleteForm: async (id: string) => apiCall<void>(`/forms/${id}`, {
+      method: 'DELETE',
+    }),
+    submitForm: async (id: string, values: Record<string, unknown>) => apiCall(`/forms/${id}/submissions`, {
+      method: 'POST',
+      body: JSON.stringify({ values }),
+    }),
+    getSubmissions: async (id: string) => apiCall<FormSubmissionsResponse>(`/forms/${id}/submissions`, {
+      method: 'GET',
+    }),
+    saveDraft: async (id: string, values: Record<string, unknown>) => apiCall<FormDraft>(`/forms/${id}/drafts`, {
+      method: 'POST',
+      body: JSON.stringify({ values }),
+    }),
+    getDrafts: async (id: string) => apiCall<FormDraftsResponse>(`/forms/${id}/drafts`, {
+      method: 'GET',
+    }),
+    deleteDraft: async (id: string, draftId: string) => apiCall<void>(`/forms/${id}/drafts/${draftId}`, {
+      method: 'DELETE',
+    }),
+  },
 };

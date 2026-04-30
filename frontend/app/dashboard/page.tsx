@@ -4,7 +4,10 @@ import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { Badge } from '@/components/ui/badge';
 import { DashboardStatsSkeleton } from '@/components/ui/loading-skeletons';
+import { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
 
 import {
   LineChart,
@@ -22,23 +25,60 @@ import {
   Bar,
 } from 'recharts';
 
-export default function DashboardPage() {
-  const { stats, recentActivity, loading } = useDashboardData();
+type CategoryAnalytics = {
+  category: string;
+  totalAmount: number;
+};
 
-  // Sample analytics data
-  const trendData = [
+type CategoryTrend = {
+  month: string;
+  [key: string]: number | string;
+};
+
+export default function DashboardPage() {
+  const { stats, recentActivity, payments, loading } = useDashboardData();
+  const [analytics, setAnalytics] = useState<CategoryAnalytics[] | null>(null);
+  const [trends, setTrends] = useState<CategoryTrend[]>([]);
+
+  useEffect(() => {
+    if (payments.length === 0) {
+      return;
+    }
+
+    api.categories.getAnalytics(payments).then((data: { analytics: CategoryAnalytics[]; trends: CategoryTrend[] }) => {
+      setAnalytics(data.analytics);
+      setTrends(data.trends);
+    });
+  }, [payments]);
+
+  const distributionData = analytics
+    ? analytics.map((a) => ({
+        name: a.category,
+        value: a.totalAmount,
+        color: {
+          subscription: '#3b82f6',
+          invoice: '#10b981',
+          donation: '#f59e0b',
+          refund: '#ef4444',
+          payroll: '#8b5cf6',
+          software: '#06b6d4',
+          infrastructure: '#6366f1',
+          uncategorized: '#94a3b8',
+        }[a.category] || '#94a3b8'
+      })).filter((a) => a.value > 0)
+    : [
+        { name: 'Completed Projects', value: 65, color: '#10b981' },
+        { name: 'Pending Payments', value: 20, color: '#f59e0b' },
+        { name: 'Active Contracts', value: 15, color: '#3b82f6' },
+      ];
+
+  const trendData = trends.length > 0 ? trends : [
     { month: 'Jan', revenue: 12400, earnings: 9800 },
     { month: 'Feb', revenue: 15200, earnings: 11300 },
     { month: 'Mar', revenue: 18900, earnings: 14500 },
     { month: 'Apr', revenue: 22100, earnings: 16800 },
     { month: 'May', revenue: 19800, earnings: 15200 },
     { month: 'Jun', revenue: 25400, earnings: 20100 },
-  ];
-
-  const distributionData = [
-    { name: 'Completed Projects', value: 65, color: '#10b981' },
-    { name: 'Pending Payments', value: 20, color: '#f59e0b' },
-    { name: 'Active Contracts', value: 15, color: '#3b82f6' },
   ];
 
   const comparisonData = [
@@ -51,6 +91,7 @@ export default function DashboardPage() {
     return (
       <div className="space-y-6">
         <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
           <p className="text-gray-600 mt-1 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
         </div>
         <DashboardStatsSkeleton />
@@ -66,10 +107,6 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">Welcome back! Here&apos;s your overview.</p>
-        </div>
-        <DashboardStatsSkeleton />
       </div>
     );
   }
@@ -77,6 +114,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8 pb-8">
       <div>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
         <p className="text-gray-600 mt-1 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
       </div>
 
@@ -115,11 +153,6 @@ export default function DashboardPage() {
             </Card>
           </motion.div>
         ))}
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">Welcome back! Here&apos;s your overview.</p>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
       </div>
 
       {/* Charts Section */}
@@ -132,9 +165,12 @@ export default function DashboardPage() {
         >
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                Revenue Trends
-                <TrendingUp className="h-5 w-5 text-green-600" />
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  Category Trends
+                  <TrendingUp className="h-5 w-5 text-green-600" />
+                </div>
+                {trends.length > 0 && <Badge variant="secondary">Live Data</Badge>}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -145,20 +181,38 @@ export default function DashboardPage() {
                   <YAxis />
                   <Tooltip />
                   <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="revenue"
-                    stroke="#3b82f6"
-                    strokeWidth={3}
-                    name="Revenue"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="earnings"
-                    stroke="#10b981"
-                    strokeWidth={3}
-                    name="Earnings"
-                  />
+                  {trends.length > 0 ? (
+                    Object.keys(trends[0]).filter(k => k !== 'month').map((cat, idx) => (
+                      <Line
+                        key={cat}
+                        type="monotone"
+                        dataKey={cat}
+                        stroke={[
+                          '#3b82f6', '#10b981', '#f59e0b', '#ef4444', 
+                          '#8b5cf6', '#06b6d4', '#6366f1', '#94a3b8'
+                        ][idx % 8]}
+                        strokeWidth={3}
+                        name={cat.charAt(0).toUpperCase() + cat.slice(1)}
+                      />
+                    ))
+                  ) : (
+                    <>
+                      <Line
+                        type="monotone"
+                        dataKey="revenue"
+                        stroke="#3b82f6"
+                        strokeWidth={3}
+                        name="Revenue"
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="earnings"
+                        stroke="#10b981"
+                        strokeWidth={3}
+                        name="Earnings"
+                      />
+                    </>
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </CardContent>
@@ -173,7 +227,10 @@ export default function DashboardPage() {
         >
           <Card>
             <CardHeader>
-              <CardTitle>Portfolio Distribution</CardTitle>
+              <CardTitle className="flex items-center justify-between">
+                Spending Distribution
+                {analytics && <Badge variant="secondary">Live Data</Badge>}
+              </CardTitle>
             </CardHeader>
             <CardContent className="flex justify-center">
               <ResponsiveContainer width="100%" height={320}>

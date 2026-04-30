@@ -23,7 +23,6 @@ Sentry.init({
   }
 });
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
 import { tokenBucketRateLimit } from './middleware/rate-limit.js';
 import compression from 'compression';
 import { config } from './config.js';
@@ -57,16 +56,20 @@ import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { gdprRouter } from './routes/gdpr.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
+import { categoriesRouter } from './routes/categories.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
 import { hedgingRouter } from './routes/hedging.js';
 import { complianceRouter } from './routes/compliance.js';
+import { kybRouter } from './routes/kyb.js';
+import { batchRouter } from './routes/batch.js';
+import { relayerRouter } from './routes/relayer.js';
+import { paymentQueueRouter } from './routes/payment-queue.js';
 import { disputeRoutes } from './disputes/index.js';
 import { disputeService } from './disputes/disputeService.js';
 import http from 'node:http';
 import { attachWebSocketServer } from './websocket/server.js';
 import { createWebSocketRouter } from './routes/websocket.js';
-import { complianceRouter } from './routes/compliance.js';
 import { receiptsRouter } from './routes/receipts.js';
 import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
@@ -84,6 +87,7 @@ import { tokenizationRouter } from './routes/tokenization.js';
 import { startWebhookWorker, stopWebhookWorker } from './services/webhooks.js';
 import { analyticsService } from './services/analytics.js';
 import { createAnalyticsRouter } from './routes/analytics.js';
+import { paymentQueue } from './queue/payment-queue.js';
 import './events/projections.js';
 
 // Validate environment variables at startup
@@ -235,8 +239,8 @@ apiV1Router.use('/portfolio', portfolioRouter);
 apiV1Router.use('/backup', backupRouter);
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
-// Rate limit analytics
 apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
+apiV1Router.use('/categories', categoriesRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
@@ -244,6 +248,13 @@ app.use('/api/v1/notifications', notificationsRouter);
 app.use('/api/v1/audit', auditRouter);
 app.use('/api/v1/hedging', hedgingRouter);
 app.use('/api/v1/compliance', complianceRouter);
+app.use('/api/v1/gdpr', gdprRouter);
+app.use('/api/v1/escrow', escrowRouter);
+app.use('/api/v1/multisig', multisigRouter);
+app.use('/api/v1/webhooks', webhooksRouter);
+app.use('/api/v1/fraud-detection', fraudDetectionRouter);
+app.use('/api/v1/bridge', bridgeRouter);
+app.use('/api/v1/tokenization', tokenizationRouter);
 
 // Payment receipt NFTs
 app.use('/api/v1/receipts', receiptsRouter);
