@@ -1,0 +1,22 @@
+[profile.default]
+src = '.'
+test = 'test/foundry'
+script = 'script'
+out = 'out'
+libs = ['lib']
+solc = '0.8.24'
+evm_version = 'cancun'
+optimizer = true
+optimizer_runs = 200
+fs_permissions = [{ access = 'read', path = './' }]
+
+[fuzz]
+runs = 500
+
+[invariant]
+runs = 128
+depth = 64
+fail_on_revert = false
+
+[rpc_endpoints]
+mainnet = '${MAINNET_RPC_URL}'

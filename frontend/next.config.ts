@@ -8,7 +8,16 @@ const bundleAnalyzer = withBundleAnalyzer({
 
 const nextConfig: NextConfig = {
   experimental: {
-    optimizePackageImports: ["lucide-react", "@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-select", "@radix-ui/react-popover", "@radix-ui/react-tabs", "@radix-ui/react-avatar", "@radix-ui/react-label"],
+    optimizePackageImports: [
+      "lucide-react",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-select",
+      "@radix-ui/react-popover",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-avatar",
+      "@radix-ui/react-label",
+    ],
   },
   webpack: (config, { isServer, defaultLoaders, nextRuntime }) => {
     if (!isServer) {
@@ -38,14 +47,20 @@ const nextConfig: NextConfig = {
           },
           lib: {
             test(module: any) {
+              const context =
+                typeof module?.context === "string" ? module.context : "";
               return (
-                !module.context.match(/[\\/]node_modules[\\/]/) ||
-                /lodash/.test(module.context) ||
-                /moment/.test(module.context)
+                !context.match(/[\\/]node_modules[\\/]/) ||
+                /lodash/.test(context) ||
+                /moment/.test(context)
               );
             },
             name(module: any) {
-              const packageName = module.context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)?.[1] || "vendors";
+              const context =
+                typeof module?.context === "string" ? module.context : "";
+              const packageName =
+                context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)?.[1] ||
+                "vendors";
               return `npm.${packageName.replace("@", "")}`;
             },
             priority: 30,

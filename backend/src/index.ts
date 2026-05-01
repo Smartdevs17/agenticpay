@@ -23,7 +23,7 @@ Sentry.init({
   }
 });
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
+import { tokenBucketRateLimit } from './middleware/rate-limit.js';
 import compression from 'compression';
 import { config } from './config.js';
 import { verificationRouter } from './routes/verification.js';
@@ -38,8 +38,10 @@ import { legacyRouter } from './routes/legacy.js';
 import { onboardingRouter } from './routes/onboarding.js';
 import { splitsRouter } from './routes/splits.js';
 import { refundsRouter } from './routes/refunds.js';
-import { allowancesRouter } from './routes/allowances.js';
-import { formsRouter } from './routes/forms.js';
+import allowancesRouter from './routes/allowances.js';
+import { formsRouter } from './routes/forms.ts';
+import { webhooksRouter } from './routes/webhooks.js';
+import { webhookHandlersRouter } from './routes/webhookHandlers.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
@@ -48,11 +50,7 @@ import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
-import { kybRouter } from './routes/kyb.js';
-import { batchRouter } from './routes/batch.js';
-import { relayerRouter } from './routes/relayer.js';
-import { paymentQueueRouter } from './routes/payment-queue.js';
-import { paymentQueue } from './queue/payment-queue.js';
+import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
 import { emailRouter } from './routes/email.js';
 import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
@@ -60,16 +58,21 @@ import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { nfcRouter } from './routes/nfc.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
+import { sessionsRouter } from './routes/sessions.js';
+import { sessionMiddleware } from './middleware/session.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
 import { hedgingRouter } from './routes/hedging.js';
 import { complianceRouter } from './routes/compliance.js';
+import { kybRouter } from './routes/kyb.js';
+import { batchRouter } from './routes/batch.js';
+import { relayerRouter } from './routes/relayer.js';
+import { paymentQueueRouter } from './routes/payment-queue.js';
 import { disputeRoutes } from './disputes/index.js';
 import { disputeService } from './disputes/disputeService.js';
 import http from 'node:http';
 import { attachWebSocketServer } from './websocket/server.js';
 import { createWebSocketRouter } from './routes/websocket.js';
-import { complianceRouter } from './routes/compliance.js';
 import { receiptsRouter } from './routes/receipts.js';
 import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
@@ -87,7 +90,12 @@ import { tokenizationRouter } from './routes/tokenization.js';
 import { startWebhookWorker, stopWebhookWorker } from './services/webhooks.js';
 import { analyticsService } from './services/analytics.js';
 import { createAnalyticsRouter } from './routes/analytics.js';
+import { paymentQueue } from './queue/payment-queue.js';
 import './events/projections.js';
+import { stripeRouter } from './routes/stripe.js';
+import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
+import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { signaturesRouter } from './routes/signatures.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -128,90 +136,16 @@ console.error = (...args) => originalConsole.error(...formatMessage(args));
 
 const app = express();
 
-type UserTier = 'free' | 'pro' | 'enterprise';
-
-type TierRateState = {
-  count: number;
-  resetAtMs: number;
-};
-
-const tierLimits: Record<UserTier, number> = {
-  free: config.rateLimit.free,
-  pro: config.rateLimit.pro,
-  enterprise: config.rateLimit.enterprise,
-};
-
-const tierWindowMs = config.rateLimit.windowMs;
-const tierRateStore = new Map<string, TierRateState>();
-
-function resolveUserTier(req: Request): UserTier {
-  const headerTier = req.headers['x-user-tier'];
-  const normalized = (Array.isArray(headerTier) ? headerTier[0] : headerTier)?.toLowerCase();
-
-  if (normalized === 'pro' || normalized === 'enterprise') {
-    return normalized;
-  }
-
-  return 'free';
-}
-
-function resolveClientIdentifier(req: Request): string {
-  const authHeader = req.headers.authorization;
-  if (authHeader) {
-    return authHeader;
-  }
-
-  const apiKey = req.headers['x-api-key'];
-  if (typeof apiKey === 'string' && apiKey.trim() !== '') {
-    return apiKey;
-  }
-
-  return req.ip || 'unknown-client';
-}
-
-function tieredRateLimit(req: Request, res: Response, next: NextFunction): void {
-  const tier = resolveUserTier(req);
-  const limit = tierLimits[tier];
-  const identifier = resolveClientIdentifier(req);
-  const storeKey = `${tier}:${identifier}`;
-  const nowMs = Date.now();
-  const existingState = tierRateStore.get(storeKey);
-
-  const state =
-    !existingState || existingState.resetAtMs <= nowMs
-      ? { count: 0, resetAtMs: nowMs + tierWindowMs }
-      : existingState;
-
-  state.count += 1;
-  tierRateStore.set(storeKey, state);
-
-  const remaining = Math.max(0, limit - state.count);
-  const resetInSeconds = Math.ceil((state.resetAtMs - nowMs) / 1000);
-
-  res.setHeader('X-RateLimit-Tier', tier);
-  res.setHeader('X-RateLimit-Limit', String(limit));
-  res.setHeader('X-RateLimit-Remaining', String(remaining));
-  res.setHeader('X-RateLimit-Reset', String(resetInSeconds));
-
-  if (state.count > limit) {
-    res.status(429).json({
-      error: {
-        code: 'RATE_LIMIT_EXCEEDED',
-        message: `Rate limit exceeded for tier '${tier}'`,
-        status: 429,
-      },
-    });
-    return;
-  }
-
-  next();
-}
-
-const invoiceLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
+// Token-bucket rate limiter (replaces fixed-window tieredRateLimit)
+const apiRateLimiter = tokenBucketRateLimit({ keyPrefix: 'rl:api' });
+// Stricter limiter for invoice endpoint
+const invoiceLimiter = tokenBucketRateLimit({
+  keyPrefix: 'rl:invoice',
+  endpointConfig: {
+    free:       { capacity: 10,  refillRate: 0.1, burstAllowance: 2  },
+    pro:        { capacity: 60,  refillRate: 1,   burstAllowance: 10 },
+    enterprise: { capacity: 300, refillRate: 5,   burstAllowance: 50 },
+  },
 });
 
 app.use(
@@ -270,6 +204,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 app.use(slaTrackingMiddleware);
+app.use(sessionMiddleware);
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -283,7 +218,7 @@ app.use(healthRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 
-app.use('/api/', tieredRateLimit);
+app.use('/api/', apiRateLimiter);
 
 app.use('/api/', versionMiddleware);
 
@@ -306,6 +241,9 @@ apiV1Router.use('/splits', splitsRouter);
 apiV1Router.use('/refunds', refundsRouter);
 apiV1Router.use('/allowances', allowancesRouter);
 apiV1Router.use('/forms', formsRouter);
+// Webhook management and verification
+apiV1Router.use('/webhooks', webhooksRouter);
+// Email delivery system
 apiV1Router.use('/disputes', disputeRoutes);
 apiV1Router.use('/emails', emailRouter);
 apiV1Router.use('/portfolio', portfolioRouter);
@@ -321,6 +259,13 @@ app.use('/api/v1/notifications', notificationsRouter);
 app.use('/api/v1/audit', auditRouter);
 app.use('/api/v1/hedging', hedgingRouter);
 app.use('/api/v1/compliance', complianceRouter);
+app.use('/api/v1/gdpr', gdprRouter);
+app.use('/api/v1/escrow', escrowRouter);
+app.use('/api/v1/multisig', multisigRouter);
+app.use('/api/v1/webhooks', webhooksRouter);
+app.use('/api/v1/fraud-detection', fraudDetectionRouter);
+app.use('/api/v1/bridge', bridgeRouter);
+app.use('/api/v1/tokenization', tokenizationRouter);
 
 // Payment receipt NFTs
 app.use('/api/v1/receipts', receiptsRouter);
@@ -346,6 +291,9 @@ app.use('/api/v1/projects', projectsRouter);
 // GraphQL gateway with federation-ready schema and subscriptions stream
 app.use('/graphql', graphQLRouter);
 app.use('/graphql/ws', graphQLWsRouter);
+
+// Webhook handlers (outside API versioning for direct access)
+app.use('/webhooks', webhookHandlersRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
