@@ -37,6 +37,10 @@
     "**/*.mts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "lib/wallet-connect.ts",
+    "service-worker.ts",
+    "src/wallets/hardware/**/*",
+    "src/components/hardware-wallet-connect.tsx"
   ]
 }

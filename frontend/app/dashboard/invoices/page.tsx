@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useDashboardData } from '@/lib/hooks/useDashboardData';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useDashboardData } from "@/lib/hooks/useDashboardData";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   CheckCircle2,
   Clock,
@@ -26,12 +26,14 @@ export default function InvoicesPage() {
   const router = useRouter();
   const { invoices, loading } = useDashboardData();
   const timezone = useAuthStore((state) => state.timezone);
-  const [filter, setFilter] = useState<'all' | 'paid' | 'pending' | 'overdue'>('all');
+  const [filter, setFilter] = useState<"all" | "paid" | "pending" | "overdue">(
+    "all",
+  );
 
   const filteredInvoices =
-    filter === 'all'
+    filter === "all"
       ? invoices
-      : invoices.filter((inv) => inv.status === filter);
+      : invoices.filter((invoice) => invoice.status === filter);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -101,7 +103,6 @@ export default function InvoicesPage() {
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
 
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <p className="text-gray-600 mt-1 dark:text-gray-400">
           View and manage your invoices
@@ -156,10 +157,15 @@ export default function InvoicesPage() {
                     <div className="flex items-center gap-4 flex-1">
                       {getStatusIcon(invoice.status)}
                       <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900">{invoice.projectTitle}</h3>
-                        <p className="text-sm text-gray-600">{invoice.milestoneTitle}</p>
+                        <h3 className="font-semibold text-gray-900">
+                          {invoice.projectTitle}
+                        </h3>
+                        <p className="text-sm text-gray-600">
+                          {invoice.milestoneTitle}
+                        </p>
                         <p className="text-xs text-gray-500 mt-1">
-                          Ref #{invoice.id} • {formatDateInTimeZone(invoice.generatedAt, timezone)}
+                          Ref #{invoice.id} •{" "}
+                          {formatDateInTimeZone(invoice.generatedAt, timezone)}
                         </p>
                       </div>
                     </div>
@@ -169,7 +175,7 @@ export default function InvoicesPage() {
                       </p>
                       <span
                         className={`inline-block px-3 py-1 rounded-full text-xs font-medium border mt-2 ${getStatusColor(
-                          invoice.status
+                          invoice.status,
                         )}`}
                       >
                         {invoice.status}
@@ -189,25 +195,20 @@ export default function InvoicesPage() {
             <EmptyState
               icon={FileText}
               title={
-                filter === 'all'
-                  ? 'No invoices yet'
-                  : `No ${filter} invoices`
+                filter === "all" ? "No invoices yet" : `No ${filter} invoices`
               }
               description={
-                filter === 'all'
-                  ? 'Your invoices will appear here once projects generate them.'
+                filter === "all"
+                  ? "Your invoices will appear here once projects generate them."
                   : `You don't have any ${filter} invoices at the moment.`
               }
               action={{
-                label:
-                  filter === 'all'
-                    ? 'View Projects'
-                    : 'Show All Invoices',
+                label: filter === "all" ? "View Projects" : "Show All Invoices",
                 onClick: () => {
-                  if (filter === 'all') {
-                    router.push('/dashboard/projects');
+                  if (filter === "all") {
+                    router.push("/dashboard/projects");
                   } else {
-                    setFilter('all');
+                    setFilter("all");
                   }
                 },
               }}
@@ -307,7 +308,6 @@ export default function InvoicesPage() {
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-center gap-4 flex-1">
                         {getStatusIcon(invoice.status)}
-
                         <div className="flex-1">
                           <h3 className="font-semibold text-gray-900 dark:text-gray-100">
                             {invoice.projectTitle}
@@ -318,10 +318,10 @@ export default function InvoicesPage() {
                           </p>
 
                           <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                            Ref #{invoice.id} •{' '}
+                            Ref #{invoice.id} •{" "}
                             {formatDateInTimeZone(
                               invoice.generatedAt,
-                              timezone
+                              timezone,
                             )}
                           </p>
                         </div>
@@ -331,13 +331,12 @@ export default function InvoicesPage() {
                         <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                           {invoice.amount} {invoice.currency}
                         </p>
-
                         <span
                           className={`inline-block px-3 py-1 rounded-full text-xs font-medium border sm:mt-2 ${getStatusColor(
-                            invoice.status
+                            invoice.status,
                           )}`}
                         >
-                          {invoice.status.toUpperCase()}
+                          {invoice.status}
                         </span>
 
                       </div>
