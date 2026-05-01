@@ -7,6 +7,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { Card, CardContent } from '@/components/ui/card';
 import { CheckCircle2, Clock, XCircle, ExternalLink, Wallet, QrCode, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useState } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -36,8 +37,8 @@ import { PaymentQRModal } from "@/components/payment/QRCode";
 export default function PaymentsPage() {
   const router = useRouter();
   const { payments, loading } = useDashboardData();
+  const address = useAuthStore((state) => state.address);
   const timezone = useAuthStore((state) => state.timezone);
-  const { address } = useAccount();
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
   const getStatusIcon = (status: string) => {
@@ -70,8 +71,7 @@ export default function PaymentsPage() {
 
           <p className="text-gray-600 mt-1 dark:text-gray-400">View all your payment transactions</p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
+        <div className="space-y-4">
           {[1, 2, 3, 4].map((i) => (
             <PaymentCardSkeleton key={i} />
           ))}
@@ -90,17 +90,21 @@ export default function PaymentsPage() {
             View all your payment transactions
           </p>
         </div>
-        {address && (
-          <Button onClick={() => setIsQrModalOpen(true)} className="flex items-center gap-2">
-            <QrCode className="h-4 w-4" /> Receive Payment
+        <div className="flex items-center gap-2">
+          {address && (
+            <Button onClick={() => setIsQrModalOpen(true)} className="flex items-center gap-2">
+              <QrCode className="h-4 w-4" />
+              Receive Payment
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => router.push('/dashboard/payments/qr')} className="flex items-center gap-2">
             <QrCode className="h-4 w-4" />
-            Receive Payment
+            QR / NFC
           </Button>
-        )}
+        </div>
       </div>
 
-      {/* Payments Grid */}
-      {/* Payment list or empty state */}
+      {/* Payment list */}
       {payments.length === 0 ? (
         <Card>
           <CardContent className="p-0">
@@ -145,22 +149,12 @@ export default function PaymentsPage() {
                     <div className="flex items-center gap-3">
                       {getStatusIcon(payment.status)}
                       <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                          {payment.projectTitle}
-                        </h3>
-                        <h3 className="font-semibold text-gray-900">
-                          {payment.projectTitle}
-                        </h3>
+                        <h3 className="font-semibold text-gray-900">{payment.projectTitle}</h3>
                         <p className="text-sm text-gray-600">
-                          {payment.type === "milestone_payment"
-                            ? "Milestone Payment"
-                            : "Full Payment"}
+                          {payment.type === 'milestone_payment' ? 'Milestone Payment' : 'Full Payment'}
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
-                          {formatDateTimeInTimeZone(
-                            payment.timestamp,
-                            timezone,
-                          )}
+                          {formatDateTimeInTimeZone(payment.timestamp, timezone)}
                         </p>
                       </div>
                     </div>

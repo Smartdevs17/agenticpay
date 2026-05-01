@@ -56,7 +56,7 @@ import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
 import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
-import { gdprRouter } from './routes/gdpr.js';
+import { nfcRouter } from './routes/nfc.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { sessionMiddleware } from './middleware/session.js';
@@ -250,11 +250,8 @@ apiV1Router.use('/portfolio', portfolioRouter);
 apiV1Router.use('/backup', backupRouter);
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
-apiV1Router.use('/sessions', sessionsRouter);
-apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
-// Stripe card payments
-apiV1Router.use('/stripe', stripeRouter);
-apiV1Router.use('/signatures', signaturesRouter);
+// NFC / QR payment requests
+apiV1Router.use('/nfc', nfcRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
