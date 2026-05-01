@@ -51,6 +51,28 @@ export const escrowMilestoneActionSchema = z
   })
   .refine((data) => data.approvedBy || data.reason, 'approvedBy or reason is required');
 
+// EIP-712 Signature Schemas
+export const signatureChallengeSchema = z.object({
+  signer: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid signer address'),
+  chainId: z.number().int().positive('chainId must be a positive integer'),
+  origin: z.string().url('Invalid origin URL'),
+  action: z.string().min(1, 'Action is required'),
+  payloadHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'payloadHash must be 32-byte hex'),
+  ttlSeconds: z.number().int().positive().max(15 * 60).optional(),
+});
+
+export const signatureVerifySchema = z.object({
+  signer: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid signer address'),
+  signature: z.string().regex(/^0x[a-fA-F0-9]+$/, 'Invalid signature'),
+  nonce: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'nonce must be 32-byte hex'),
+  chainId: z.number().int().positive('chainId must be a positive integer'),
+  origin: z.string().url('Invalid origin URL'),
+  action: z.string().min(1, 'Action is required'),
+  payloadHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'payloadHash must be 32-byte hex'),
+  expiresAt: z.number().int().positive('expiresAt must be unix timestamp'),
+});
+
+
 // Single Work Verification Schema
 export const verificationSchema = z.object({
   repositoryUrl: z.string().url('Invalid repository URL'),

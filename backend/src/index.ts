@@ -68,7 +68,6 @@ import { disputeService } from './disputes/disputeService.js';
 import http from 'node:http';
 import { attachWebSocketServer } from './websocket/server.js';
 import { createWebSocketRouter } from './routes/websocket.js';
-import { complianceRouter } from './routes/compliance.js';
 import { receiptsRouter } from './routes/receipts.js';
 import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
@@ -87,6 +86,10 @@ import { startWebhookWorker, stopWebhookWorker } from './services/webhooks.js';
 import { analyticsService } from './services/analytics.js';
 import { createAnalyticsRouter } from './routes/analytics.js';
 import './events/projections.js';
+import { stripeRouter } from './routes/stripe.js';
+import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
+import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { signaturesRouter } from './routes/signatures.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -242,6 +245,9 @@ apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
 // Rate limit analytics
 apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
+// Stripe card payments
+apiV1Router.use('/stripe', stripeRouter);
+apiV1Router.use('/signatures', signaturesRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
