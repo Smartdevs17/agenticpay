@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowLeft, CheckCircle2, LifeBuoy, ShieldCheck } from 'lucide-react';
 import { Navbar } from '@/components/landing/Navbar';
+import { observeCacheEnvelope } from '@/lib/cache/headers';
+import { getAccessibilitySnapshot } from '@/lib/server/public-cache';
 
 export const metadata: Metadata = {
   title: 'Accessibility Statement | AgenticPay',
@@ -9,20 +11,13 @@ export const metadata: Metadata = {
     'Learn how AgenticPay approaches accessibility, inclusive design, keyboard support, and ongoing improvements.',
 };
 
-const commitments = [
-  'Design flows that work with keyboard navigation and visible focus states.',
-  'Use semantic structure, readable content, and clear labels for interactive elements.',
-  'Review motion and contrast choices so the interface stays comfortable to use.',
-  'Keep improving accessibility as new product areas and integrations ship.',
-];
+export const revalidate = 86400;
 
-const supportItems = [
-  'Tell us which page or feature caused trouble.',
-  'Share the device, browser, and any assistive technology you were using.',
-  'Include screenshots or exact steps when possible so we can reproduce the issue faster.',
-];
+export default async function AccessibilityPage() {
+  const snapshot = await getAccessibilitySnapshot();
+  observeCacheEnvelope(snapshot);
+  const { commitments, supportItems, lastUpdated } = snapshot.data;
 
-export default function AccessibilityPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
       <Navbar />
@@ -52,7 +47,7 @@ export default function AccessibilityPage() {
                   and inclusive for everyone. Accessibility is part of how we design, build, and
                   improve the platform.
                 </p>
-                <p className="mt-4 text-sm text-blue-100">Last updated: March 25, 2026</p>
+                <p className="mt-4 text-sm text-blue-100">Last updated: {lastUpdated}</p>
               </div>
 
               <div className="space-y-12 px-6 py-10 sm:px-10 sm:py-12">

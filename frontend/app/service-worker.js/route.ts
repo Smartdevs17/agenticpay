@@ -1,11 +1,13 @@
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'fs/promises';
+import { join } from 'path';
+
+export const dynamic = 'force-static';
 
 export async function GET() {
-  const swPath = path.join(process.cwd(), 'public', 'sw.js');
-  const serviceWorkerSource = await readFile(swPath, 'utf8');
+  const filePath = join(process.cwd(), 'public', 'sw.js');
+  const source = await readFile(filePath, 'utf8');
 
-  return new Response(serviceWorkerSource, {
+  return new Response(source, {
     headers: {
       'Content-Type': 'application/javascript; charset=utf-8',
       'Cache-Control': 'no-cache, no-store, must-revalidate',

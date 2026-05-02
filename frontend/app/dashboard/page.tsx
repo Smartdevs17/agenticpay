@@ -5,46 +5,28 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DashboardStatsSkeleton } from '@/components/ui/loading-skeletons';
-
 import {
   LineChart,
   Line,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
 } from 'recharts';
 
 export default function DashboardPage() {
   const { stats, recentActivity, loading } = useDashboardData();
 
-  // Sample analytics data
-  const trendData = [
-    { month: 'Jan', revenue: 12400, earnings: 9800 },
-    { month: 'Feb', revenue: 15200, earnings: 11300 },
-    { month: 'Mar', revenue: 18900, earnings: 14500 },
-    { month: 'Apr', revenue: 22100, earnings: 16800 },
-    { month: 'May', revenue: 19800, earnings: 15200 },
-    { month: 'Jun', revenue: 25400, earnings: 20100 },
-  ];
-
-  const distributionData = [
-    { name: 'Completed Projects', value: 65, color: '#10b981' },
-    { name: 'Pending Payments', value: 20, color: '#f59e0b' },
-    { name: 'Active Contracts', value: 15, color: '#3b82f6' },
-  ];
-
-  const comparisonData = [
-    { period: 'This Month', revenue: 25400, projects: 18 },
-    { period: 'Last Month', revenue: 19800, projects: 14 },
-    { period: 'This Quarter', revenue: 68200, projects: 47 },
+  const metrics = [
+    { title: 'Total Earnings', value: stats.totalEarnings, suffix: ' USD', icon: DollarSign, accent: 'text-emerald-600' },
+    { title: 'Pending Payments', value: stats.pendingPayments, suffix: ' USD', icon: Clock, accent: 'text-amber-600' },
+    { title: 'Active Projects', value: String(stats.activeProjects), suffix: '', icon: Folder, accent: 'text-blue-600' },
+    { title: 'Completed Projects', value: String(stats.completedProjects), suffix: '', icon: CheckCircle2, accent: 'text-violet-600' },
   ];
 
   if (loading) {
@@ -52,21 +34,86 @@ export default function DashboardPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">Welcome back! Here&apos;s your overview.</p>
+          <p className="text-gray-600 mt-1 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
         </div>
         <DashboardStatsSkeleton />
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
+
+  const totalProjects = stats.completedProjects + stats.activeProjects;
+  const completedRate = totalProjects > 0 ? Math.round((stats.completedProjects / totalProjects) * 100) : 0;
+  const activeRate = totalProjects > 0 ? Math.round((stats.activeProjects / totalProjects) * 100) : 0;
+
+  const trendData = [
+    { month: 'Jan', revenue: 4200, earnings: 3800 },
+    { month: 'Feb', revenue: 5100, earnings: 4600 },
+    { month: 'Mar', revenue: 4800, earnings: 4400 },
+    { month: 'Apr', revenue: 6300, earnings: 5900 },
+    { month: 'May', revenue: 5800, earnings: 5300 },
+    { month: 'Jun', revenue: 7200, earnings: 6800 },
+  ];
+
+  const distributionData = [
+    { name: 'Completed', value: stats.completedProjects, color: '#10b981' },
+    { name: 'Active', value: stats.activeProjects, color: '#3b82f6' },
+    { name: 'Pending', value: Math.max(0, Math.round(Number(stats.pendingPayments) / 100)), color: '#f59e0b' },
+  ];
 
   return (
     <div className="space-y-8 pb-8">
       <div>
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">Welcome back! Here&apos;s your overview.</p>
+        <p className="text-gray-600 mt-1 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        {[{
+          title: 'Total Earnings', icon: <DollarSign className="h-4 w-4 text-gray-400" />, value: stats.totalEarnings, subtitle: 'All time', color: 'text-green-600', extraIcon: <TrendingUp className="h-3 w-3" />
+        }, {
+          title: 'Pending Payments', icon: <Clock className="h-4 w-4 text-gray-400" />, value: stats.pendingPayments, subtitle: 'Awaiting approval', color: 'text-yellow-600'
+        }, {
+          title: 'Active Projects', icon: <Folder className="h-4 w-4 text-gray-400" />, value: stats.activeProjects, subtitle: 'In progress', color: 'text-blue-600'
+        }, {
+          title: 'Completed', icon: <CheckCircle2 className="h-4 w-4 text-gray-400" />, value: stats.completedProjects, subtitle: 'Projects done', color: 'text-gray-600'
+        }].map((stat, idx) => (
+          <motion.div
+            key={idx}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 + idx * 0.1 }}
+          >
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">{stat.title}</CardTitle>
+                {stat.icon}
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stat.value}</div>
+                {stat.extraIcon ? (
+                  <p className={`text-xs ${stat.color} mt-1 flex items-center gap-1`}>
+                    {stat.extraIcon} {stat.subtitle}
+                  </p>
+                ) : (
+                  <p className={`text-xs ${stat.color} mt-1`}>{stat.subtitle}</p>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
       </div>
 
       {/* Charts Section */}
@@ -132,7 +179,7 @@ export default function DashboardPage() {
                     innerRadius={70}
                     outerRadius={110}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                    label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
                   >
                     {distributionData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
@@ -147,64 +194,91 @@ export default function DashboardPage() {
         </motion.div>
       </div>
 
-      {/* 3. Bar Chart - Comparison */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.8 }}
-      >
-        <Card>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Performance Comparison</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              Performance Snapshot
+              <TrendingUp className="h-5 w-5 text-green-600" />
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={340}>
-              <BarChart data={comparisonData}>
-                <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                <XAxis dataKey="period" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="revenue" fill="#3b82f6" name="Revenue ($)" radius={4} />
-                <Bar dataKey="projects" fill="#10b981" name="Projects" radius={4} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <SummaryTile label="Completion Rate" value={`${completedRate}%`} />
+              <SummaryTile label="Active Load" value={`${stats.activeProjects} open`} />
+              <SummaryTile label="Payment Queue" value={`${stats.pendingPayments} USD`} />
+            </div>
           </CardContent>
         </Card>
-      </motion.div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.9 }}
-      >
         <Card>
           <CardHeader>
-            <CardTitle>Recent Activity</CardTitle>
+            <CardTitle>Portfolio Mix</CardTitle>
           </CardHeader>
-          <CardContent>
-            {recentActivity.length === 0 ? (
-              <p className="text-gray-500 text-sm">No recent activity found.</p>
-            ) : (
-              <div className="space-y-4">
-                {recentActivity.map((activity, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center gap-4 p-3 bg-green-50 dark:bg-green-950/50 rounded-lg border border-green-100 dark:border-green-900"
-                  >
-                    <CheckCircle2 className="h-5 w-5 text-green-600" />
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900 dark:text-white">{activity.title}</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">{activity.description}</p>
-                    </div>
-                    <span className="text-sm text-gray-500">{activity.time}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+          <CardContent className="space-y-4">
+            <ProgressRow label="Completed" percentage={completedRate} color="bg-green-500" />
+            <ProgressRow label="Active" percentage={activeRate} color="bg-blue-500" />
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Activity</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {recentActivity.length === 0 ? (
+            <p className="text-sm text-gray-500">No recent activity found.</p>
+          ) : (
+            <div className="space-y-4">
+              {recentActivity.map((activity, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-4 rounded-lg border border-green-100 bg-green-50 p-3 dark:border-green-900 dark:bg-green-950/50"
+                >
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-900 dark:text-white">{activity.title}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{activity.description}</p>
+                  </div>
+                  <span className="text-sm text-gray-500">{activity.time}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+      <p className="text-sm text-gray-500">{label}</p>
+      <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">{value}</p>
+    </div>
+  );
+}
+
+function ProgressRow({
+  label,
+  percentage,
+  color,
+}: {
+  label: string;
+  percentage: number;
+  color: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-gray-600 dark:text-gray-300">{label}</span>
+        <span className="font-medium text-gray-900 dark:text-white">{percentage}%</span>
+      </div>
+      <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-800">
+        <div className={`h-2 rounded-full ${color}`} style={{ width: `${percentage}%` }} />
+      </div>
     </div>
   );
 }

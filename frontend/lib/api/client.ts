@@ -6,7 +6,9 @@ import {
 } from '@/lib/offline';
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001/api/v1';
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  'http://localhost:3001/api/v1';
 
 /* =====================================================
    Retry Configuration
@@ -190,8 +192,6 @@ export async function apiCall<T = unknown>(
       if (attempt === config.maxRetries || !shouldRetryError(error)) {
         throw lastError;
       }
-
-      if (attempt === config.maxRetries || !shouldRetryError(error)) throw lastError;
 
       await delay(calculateDelay(attempt, config));
     }

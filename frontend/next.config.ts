@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import withBundleAnalyzer from "@next/bundle-analyzer";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const bundleAnalyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -7,7 +8,16 @@ const bundleAnalyzer = withBundleAnalyzer({
 
 const nextConfig: NextConfig = {
   experimental: {
-    optimizePackageImports: ["lucide-react", "@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-select", "@radix-ui/react-popover", "@radix-ui/react-tabs", "@radix-ui/react-avatar", "@radix-ui/react-label"],
+    optimizePackageImports: [
+      "lucide-react",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-select",
+      "@radix-ui/react-popover",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-avatar",
+      "@radix-ui/react-label",
+    ],
   },
   typescript: {
     ignoreBuildErrors: true,
@@ -40,16 +50,20 @@ const nextConfig: NextConfig = {
           },
           lib: {
             test(module: any) {
-              const moduleContext = typeof module?.context === "string" ? module.context : "";
+              const context =
+                typeof module?.context === "string" ? module.context : "";
               return (
-                !moduleContext.match(/[\\/]node_modules[\\/]/) ||
-                /lodash/.test(moduleContext) ||
-                /moment/.test(moduleContext)
+                !context.match(/[\\/]node_modules[\\/]/) ||
+                /lodash/.test(context) ||
+                /moment/.test(context)
               );
             },
             name(module: any) {
-              const moduleContext = typeof module?.context === "string" ? module.context : "";
-              const packageName = moduleContext.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)?.[1] || "vendors";
+              const context =
+                typeof module?.context === "string" ? module.context : "";
+              const packageName =
+                context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)?.[1] ||
+                "vendors";
               return `npm.${packageName.replace("@", "")}`;
             },
             priority: 30,
@@ -82,6 +96,16 @@ const nextConfig: NextConfig = {
   },
   images: {
     formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 60 * 60 * 24 * 7,
+    remotePatterns: process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN
+      ? [
+          {
+            protocol: "https",
+            hostname: process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN,
+            pathname: "/**",
+          },
+        ]
+      : [],
   },
   compress: true,
   poweredByHeader: false,
@@ -127,4 +151,8 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default bundleAnalyzer(nextConfig);
+export default withSentryConfig(bundleAnalyzer(nextConfig), {
+  silent: true,
+  org: process.env.SENTRY_ORG || "agenticpay",
+  project: process.env.SENTRY_PROJECT || "agenticpay-frontend",
+});

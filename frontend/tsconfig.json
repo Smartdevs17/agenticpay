@@ -40,6 +40,10 @@
     "node_modules",
     "**/*.stories.ts",
     "**/*.stories.tsx",
-    ".storybook"
+    ".storybook",
+    "lib/wallet-connect.ts",
+    "service-worker.ts",
+    "src/wallets/hardware/**/*",
+    "src/components/hardware-wallet-connect.tsx"
   ]
 }

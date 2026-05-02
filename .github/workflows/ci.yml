@@ -257,3 +257,20 @@ jobs:
         run: |
           cargo build --target wasm32-unknown-unknown --release
           cargo check
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install forge-std
+        working-directory: contracts
+        run: forge install foundry-rs/forge-std --no-commit
+
+      - name: Run Foundry tests
+        working-directory: contracts
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: forge test -vv
+
+      - name: Gas snapshot
+        working-directory: contracts
+        run: forge snapshot --check --snap test/foundry/.gas-snapshot || forge snapshot

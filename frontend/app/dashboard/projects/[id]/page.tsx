@@ -102,11 +102,12 @@ export default function ProjectDetailPage() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
-        return <CheckCircle2 className="h-5 w-5 text-green-600" />;
+      case 'verified':
+        return <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />;
       case 'in_progress':
-        return <Clock className="h-5 w-5 text-blue-600" />;
+        return <Clock className="h-5 w-5 text-blue-600 dark:text-blue-400" />;
       default:
-        return <Circle className="h-5 w-5 text-gray-400" />;
+        return <Circle className="h-5 w-5 text-gray-400 dark:text-gray-500" />;
     }
   };
 
@@ -130,20 +131,20 @@ export default function ProjectDetailPage() {
       {/* Project Overview */}
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-start">
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
             <div>
-              <CardTitle className="text-2xl mb-2">{project.title}</CardTitle>
-              <p className="text-gray-600">Client: {project.client.address.slice(0, 6)}...{project.client.address.slice(-4)}</p>
-              <p className="text-gray-600">Freelancer: {project.freelancer.address.slice(0, 6)}...{project.freelancer.address.slice(-4)}</p>
+              <CardTitle className="text-2xl mb-2 dark:text-gray-100">{project.title}</CardTitle>
+              <p className="text-gray-600 dark:text-gray-400">Client: <span className="font-mono text-xs">{project.client.address}</span></p>
+              <p className="text-gray-600 dark:text-gray-400">Freelancer: <span className="font-mono text-xs">{project.freelancer.address}</span></p>
             </div>
             <span
-              className={`px-4 py-2 rounded-full text-sm font-medium ${project.status === 'active'
-                ? 'bg-blue-100 text-blue-700'
+              className={`px-4 py-2 rounded-full text-sm font-medium border ${project.status === 'active'
+                ? 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800'
                 : project.status === 'completed'
-                  ? 'bg-green-100 text-green-700'
+                  ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800'
                   : project.status === 'verified'
-                    ? 'bg-indigo-100 text-indigo-700'
-                    : 'bg-gray-100 text-gray-700'
+                    ? 'bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800'
+                    : 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
                 }`}
             >
               {project.status.toUpperCase()}
@@ -153,14 +154,14 @@ export default function ProjectDetailPage() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <p className="text-sm text-gray-600">Total Amount</p>
-              <p className="text-xl font-bold">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Total Amount</p>
+              <p className="text-xl font-bold dark:text-gray-100">
                 {project.totalAmount} {project.currency}
               </p>
             </div>
             <div>
-              <p className="text-sm text-gray-600">Created</p>
-              <p className="text-lg font-medium">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Created</p>
+              <p className="text-lg font-medium dark:text-gray-200">
                 {formatDateInTimeZone(project.createdAt, timezone)}
               </p>
             </div>
@@ -303,22 +304,22 @@ export default function ProjectDetailPage() {
                 transition={{ delay: index * 0.1 }}
                 className="p-4 border border-gray-200 rounded-lg"
               >
-                <div className="flex items-start justify-between mb-3">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-3">
                   <div className="flex items-start gap-3 flex-1">
                     {getStatusIcon(milestone.status)}
                     <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900">{milestone.title}</h4>
+                      <h4 className="font-semibold text-gray-900 dark:text-gray-100">{milestone.title}</h4>
                       {milestone.description && (
-                        <p className="text-sm text-gray-600 mt-1">{milestone.description}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{milestone.description}</p>
                       )}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-gray-900">
+                  <div className="text-left sm:text-right flex items-center sm:block justify-between gap-2 border-t sm:border-t-0 pt-2 sm:pt-0">
+                    <p className="font-semibold text-gray-900 dark:text-gray-100">
                       {milestone.amount} {project.currency}
                     </p>
                     {milestone.dueDate && (
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-500 dark:text-gray-500">
                         Due: {formatDateInTimeZone(milestone.dueDate, timezone)}
                       </p>
                     )}

@@ -1,21 +1,30 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { ArrowLeft, Download, Pencil, X, Check, History, PenLine } from 'lucide-react';
-import Link from 'next/link';
-import { Skeleton } from '@/components/ui/skeleton';
+import { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
+import { useAgenticPay } from "@/lib/hooks/useAgenticPay";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  ArrowLeft,
+  Download,
+  Pencil,
+  X,
+  Check,
+  History,
+  PenLine,
+} from "lucide-react";
+import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
+import Link from "next/link";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   formatDateInTimeZone,
   formatDateTimeInTimeZone,
   formatTimeInTimeZone,
-} from '@/lib/utils';
-import { useAuthStore } from '@/store/useAuthStore';
+} from "@/lib/utils";
+import { useAuthStore } from "@/store/useAuthStore";
 
 interface InvoiceVersion {
   timestamp: string;
@@ -29,7 +38,9 @@ interface InvoiceVersion {
 export default function InvoiceDetailPage() {
   const params = useParams();
   const rawId = params.id as string;
-  const projectId = rawId.startsWith('INV-') ? rawId.replace('INV-', '') : rawId;
+  const projectId = rawId.startsWith("INV-")
+    ? rawId.replace("INV-", "")
+    : rawId;
   const timezone = useAuthStore((state) => state.timezone);
 
   const { useProjectDetail } = useAgenticPay();
@@ -42,7 +53,7 @@ export default function InvoiceDetailPage() {
   const [versionHistory, setVersionHistory] = useState<InvoiceVersion[]>([]);
 
   const [editedValues, setEditedValues] = useState({
-    workDescription: 'Verified work',
+    workDescription: "Verified work",
     hoursWorked: 0,
     hourlyRate: 0,
   });
@@ -78,7 +89,7 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  if (!project || (!project.invoiceUri && project.status !== 'completed')) {
+  if (!project || (!project.invoiceUri && project.status !== "completed")) {
     return (
       <div className="flex h-64 flex-col items-center justify-center">
         <p className="mb-4 text-gray-600">Invoice not found</p>
@@ -89,7 +100,7 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  const status = project.status === 'completed' ? 'paid' : 'pending';
+  const status = project.status === "completed" ? "paid" : "pending";
   const generatedAt = new Date(project.createdAt);
 
   const handlePrint = () => window.print();
@@ -117,9 +128,8 @@ export default function InvoiceDetailPage() {
     setIsSigned(true);
   };
 
-  const displayAmount = isSigned && calculatedAmount
-    ? calculatedAmount
-    : project.totalAmount;
+  const displayAmount =
+    isSigned && calculatedAmount ? calculatedAmount : project.totalAmount;
 
   return (
     <div className="invoice-print-page space-y-6">
@@ -131,7 +141,10 @@ export default function InvoiceDetailPage() {
           </Button>
         </Link>
         <div className="flex gap-2 mb-4">
-          <Button variant="outline" onClick={() => setShowHistory(!showHistory)}>
+          <Button
+            variant="outline"
+            onClick={() => setShowHistory(!showHistory)}
+          >
             <History className="mr-2 h-4 w-4" />
             Version History ({versionHistory.length})
           </Button>
@@ -147,7 +160,9 @@ export default function InvoiceDetailPage() {
       {showHistory && (
         <Card className="border-blue-200 bg-blue-50">
           <CardHeader>
-            <CardTitle className="text-base text-blue-800">Version History</CardTitle>
+            <CardTitle className="text-base text-blue-800">
+              Version History
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {versionHistory.length === 0 ? (
@@ -155,17 +170,22 @@ export default function InvoiceDetailPage() {
             ) : (
               <div className="space-y-3">
                 {versionHistory.map((version, index) => (
-                  <div key={index} className="rounded-lg border border-blue-200 bg-white p-4 text-sm">
+                  <div
+                    key={index}
+                    className="rounded-lg border border-blue-200 bg-white p-4 text-sm"
+                  >
                     <div className="flex justify-between">
                       <span className="font-semibold text-slate-700">
                         Version {versionHistory.length - index}
                       </span>
                       <span className="text-slate-500">{version.signedAt}</span>
                     </div>
-                    <p className="mt-1 text-slate-600">Description: {version.workDescription}</p>
+                    <p className="mt-1 text-slate-600">
+                      Description: {version.workDescription}
+                    </p>
                     <p className="text-slate-600">
-                      Hours: {version.hoursWorked} x Rate: {version.hourlyRate} ={' '}
-                      <strong>{version.calculatedAmount}</strong>
+                      Hours: {version.hoursWorked} x Rate: {version.hourlyRate}{" "}
+                      = <strong>{version.calculatedAmount}</strong>
                     </p>
                   </div>
                 ))}
@@ -181,13 +201,18 @@ export default function InvoiceDetailPage() {
             <div className="flex items-center gap-3">
               <PenLine className="h-5 w-5 text-yellow-700" />
               <div>
-                <p className="font-semibold text-yellow-800">Re-signature Required</p>
+                <p className="font-semibold text-yellow-800">
+                  Re-signature Required
+                </p>
                 <p className="text-sm text-yellow-700">
                   Invoice was edited. Please confirm and sign to apply changes.
                 </p>
               </div>
             </div>
-            <Button onClick={handleSign} className="bg-yellow-600 hover:bg-yellow-700">
+            <Button
+              onClick={handleSign}
+              className="bg-yellow-600 hover:bg-yellow-700"
+            >
               <Check className="mr-2 h-4 w-4" />
               Confirm and Sign
             </Button>
@@ -207,7 +232,10 @@ export default function InvoiceDetailPage() {
                 className="mt-1"
                 value={editedValues.workDescription}
                 onChange={(e) =>
-                  setEditedValues({ ...editedValues, workDescription: e.target.value })
+                  setEditedValues({
+                    ...editedValues,
+                    workDescription: e.target.value,
+                  })
                 }
               />
             </div>
@@ -220,7 +248,10 @@ export default function InvoiceDetailPage() {
                   min="0"
                   value={editedValues.hoursWorked}
                   onChange={(e) =>
-                    setEditedValues({ ...editedValues, hoursWorked: Number(e.target.value) })
+                    setEditedValues({
+                      ...editedValues,
+                      hoursWorked: Number(e.target.value),
+                    })
                   }
                 />
               </div>
@@ -232,7 +263,10 @@ export default function InvoiceDetailPage() {
                   min="0"
                   value={editedValues.hourlyRate}
                   onChange={(e) =>
-                    setEditedValues({ ...editedValues, hourlyRate: Number(e.target.value) })
+                    setEditedValues({
+                      ...editedValues,
+                      hourlyRate: Number(e.target.value),
+                    })
                   }
                 />
               </div>
@@ -266,14 +300,16 @@ export default function InvoiceDetailPage() {
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">
                 AgenticPay Invoice
               </p>
-              <CardTitle className="mb-2 mt-2 text-2xl">Invoice #{rawId}</CardTitle>
+              <CardTitle className="mb-2 mt-2 text-2xl">
+                Invoice #{rawId}
+              </CardTitle>
               <p className="text-gray-600">{project.title}</p>
             </div>
             <span
               className={`inline-flex w-fit rounded-full px-4 py-2 text-sm font-medium ${
-                status === 'paid'
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-yellow-100 text-yellow-700'
+                status === "paid"
+                  ? "bg-green-100 text-green-700"
+                  : "bg-yellow-100 text-yellow-700"
               }`}
             >
               {status.toUpperCase()}
@@ -288,13 +324,17 @@ export default function InvoiceDetailPage() {
               <p className="mt-2 font-medium text-slate-900">
                 {formatDateInTimeZone(generatedAt, timezone)}
               </p>
-              <p className="text-xs text-slate-500">{formatTimeInTimeZone(generatedAt, timezone)}</p>
+              <p className="text-xs text-slate-500">
+                {formatTimeInTimeZone(generatedAt, timezone)}
+              </p>
             </div>
             <div className="print-break-inside-avoid rounded-xl border border-slate-200 bg-white p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Invoice Status
               </p>
-              <p className="mt-2 font-medium text-slate-900">{status.toUpperCase()}</p>
+              <p className="mt-2 font-medium text-slate-900">
+                {status.toUpperCase()}
+              </p>
             </div>
             <div className="print-break-inside-avoid rounded-xl border border-slate-200 bg-white p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -315,7 +355,7 @@ export default function InvoiceDetailPage() {
               <p className="mt-2 text-sm text-slate-500">
                 {isSigned && calculatedAmount
                   ? editedValues.workDescription
-                  : 'Payment for the completed work recorded in AgenticPay.'}
+                  : "Payment for the completed work recorded in AgenticPay."}
               </p>
             </div>
             <div className="print-break-inside-avoid rounded-2xl border border-slate-200 p-5">
@@ -349,12 +389,16 @@ export default function InvoiceDetailPage() {
 
           <div className="print-break-inside-avoid rounded-2xl border border-slate-200">
             <div className="border-b border-slate-200 px-5 py-4">
-              <h2 className="text-lg font-semibold text-slate-900">Invoice Summary</h2>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Invoice Summary
+              </h2>
             </div>
             <div className="divide-y divide-slate-200">
               <div className="flex items-center justify-between gap-4 px-5 py-4 text-sm">
                 <span className="text-slate-600">Project</span>
-                <span className="text-right font-medium text-slate-900">{project.title}</span>
+                <span className="text-right font-medium text-slate-900">
+                  {project.title}
+                </span>
               </div>
               <div className="flex items-center justify-between gap-4 px-5 py-4 text-sm">
                 <span className="text-slate-600">Generated</span>
@@ -367,7 +411,7 @@ export default function InvoiceDetailPage() {
                 <span className="text-right font-medium text-slate-900">
                   {isSigned && editedValues.workDescription
                     ? editedValues.workDescription
-                    : 'Full Project'}
+                    : "Full Project"}
                 </span>
               </div>
               {isSigned && editedValues.hoursWorked > 0 && (
@@ -396,8 +440,8 @@ export default function InvoiceDetailPage() {
           </div>
 
           <div className="print-break-inside-avoid rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-sm text-slate-600">
-            This invoice was generated from AgenticPay project data and is formatted
-            for on-screen review and browser printing.
+            This invoice was generated from AgenticPay project data and is
+            formatted for on-screen review and browser printing.
           </div>
 
           <div className="no-print flex gap-3 pt-2">
