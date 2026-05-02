@@ -1,5 +1,8 @@
 #![no_std]
 
+#[cfg(test)]
+extern crate std;
+
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec};
 
 #[contracttype]
@@ -470,6 +473,7 @@ impl AgenticPayContract {
 mod test {
     use super::*;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Ledger as _;
     use soroban_sdk::Env;
 
     #[test]
@@ -754,6 +758,7 @@ mod test {
             &700,
             &String::from_str(&env, "Single"),
             &String::from_str(&env, "https://github.com/s1"),
+            &0,
         );
 
         assert_eq!(id, 3);

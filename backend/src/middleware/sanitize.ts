@@ -4,7 +4,8 @@ import sanitizeHtml from 'sanitize-html';
 import validator from 'validator';
 import xss from 'xss';
 import escape from 'escape-html';
-import SQLString from 'sqlstring';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const SQLString = require('sqlstring');
 
 /**
  * Input Sanitization Middleware
@@ -187,7 +188,7 @@ export class InputSanitizer {
     if (!validator.isURL(url, { protocols: ['http', 'https'] })) {
       return null;
     }
-    return validator.normalizeUrl(url);
+    return url;
   }
 
   /**

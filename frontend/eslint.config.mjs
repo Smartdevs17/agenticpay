@@ -29,6 +29,11 @@ const eslintConfig = defineConfig([
       "react/no-unescaped-entities": "warn",
       "prefer-const": "warn",
       "@typescript-eslint/no-unused-vars": "warn",
+      "@typescript-eslint/ban-ts-comment": ["error", {
+        "ts-expect-error": "allow-with-description",
+        "ts-ignore": "allow-with-description",
+        "ts-nocheck": false
+      }],
     },
   },
 ]);

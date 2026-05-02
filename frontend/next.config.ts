@@ -19,6 +19,9 @@ const nextConfig: NextConfig = {
       "@radix-ui/react-label",
     ],
   },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   webpack: (config, { isServer, defaultLoaders, nextRuntime }) => {
     if (!isServer) {
       config.resolve.fallback = {

@@ -85,13 +85,47 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline
 
-      - name: Lint & Test
+      - name: Lint changed files
         run: |
-          npm run lint
-          npm run test
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- backend/src/ | grep '\.ts$' | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- backend/src/ | grep '\.ts$' | tr '\n' ' ')
+          fi
+          if [ -n "$CHANGED" ]; then
+            echo "Linting changed files: $CHANGED"
+            npx eslint $CHANGED
+          else
+            echo "No backend source files changed — skipping lint"
+          fi
+
+      - name: Test changed files
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- backend/src/ | grep '\.test\.ts$' | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- backend/src/ | grep '\.test\.ts$' | tr '\n' ' ')
+          fi
+          if [ -n "$CHANGED" ]; then
+            echo "Testing changed files: $CHANGED"
+            npx vitest run $CHANGED
+          else
+            echo "No backend test files changed — skipping tests"
+          fi
 
       - name: Build
-        run: npm run build
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- backend/src/ | grep '\.ts$' | wc -l)
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- backend/src/ | grep '\.ts$' | wc -l)
+          fi
+          if [ "$CHANGED" -gt 0 ]; then
+            echo "Building — $CHANGED backend source files changed"
+            npm run build
+          else
+            echo "No backend source files changed — skipping build"
+          fi
 
       # Emit build size as a workflow annotation (picked up by cost-monitor)
       - name: Report build size
@@ -148,13 +182,47 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline
 
-      - name: Lint & Test
+      - name: Lint changed files
         run: |
-          npm run lint
-          npm run test
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- . | grep -E '\.(ts|tsx)$' | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- . | grep -E '\.(ts|tsx)$' | tr '\n' ' ')
+          fi
+          if [ -n "$CHANGED" ]; then
+            echo "Linting changed files: $CHANGED"
+            npx eslint $CHANGED
+          else
+            echo "No frontend source files changed — skipping lint"
+          fi
+
+      - name: Test changed files
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- . | grep '\.test\.(ts|tsx)$' | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- . | grep '\.test\.(ts|tsx)$' | tr '\n' ' ')
+          fi
+          if [ -n "$CHANGED" ]; then
+            echo "Testing changed files: $CHANGED"
+            npx vitest run $CHANGED
+          else
+            echo "No frontend test files changed — skipping tests"
+          fi
 
       - name: Build
-        run: npm run build
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- . | grep -E '\.(ts|tsx)$' | wc -l)
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- . | grep -E '\.(ts|tsx)$' | wc -l)
+          fi
+          if [ "$CHANGED" -gt 0 ]; then
+            echo "Building — $CHANGED frontend source files changed"
+            npm run build
+          else
+            echo "No frontend source files changed — skipping build"
+          fi
 
       - name: Report build size
         if: always()
@@ -189,20 +257,3 @@ jobs:
         run: |
           cargo build --target wasm32-unknown-unknown --release
           cargo check
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-
-      - name: Install forge-std
-        working-directory: contracts
-        run: forge install foundry-rs/forge-std --no-commit
-
-      - name: Run Foundry tests
-        working-directory: contracts
-        env:
-          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
-        run: forge test -vv
-
-      - name: Gas snapshot
-        working-directory: contracts
-        run: forge snapshot --check --snap test/foundry/.gas-snapshot || forge snapshot

@@ -5,6 +5,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DashboardStatsSkeleton } from '@/components/ui/loading-skeletons';
+import {
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 
 export default function DashboardPage() {
   const { stats, recentActivity, loading } = useDashboardData();
@@ -20,6 +33,7 @@ export default function DashboardPage() {
     return (
       <div className="space-y-6">
         <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
           <p className="text-gray-600 mt-1 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
         </div>
         <DashboardStatsSkeleton />
@@ -35,10 +49,6 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <p className="mt-1 text-gray-600 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
-        </div>
-        <DashboardStatsSkeleton />
       </div>
     );
   }
@@ -47,9 +57,25 @@ export default function DashboardPage() {
   const completedRate = totalProjects > 0 ? Math.round((stats.completedProjects / totalProjects) * 100) : 0;
   const activeRate = totalProjects > 0 ? Math.round((stats.activeProjects / totalProjects) * 100) : 0;
 
+  const trendData = [
+    { month: 'Jan', revenue: 4200, earnings: 3800 },
+    { month: 'Feb', revenue: 5100, earnings: 4600 },
+    { month: 'Mar', revenue: 4800, earnings: 4400 },
+    { month: 'Apr', revenue: 6300, earnings: 5900 },
+    { month: 'May', revenue: 5800, earnings: 5300 },
+    { month: 'Jun', revenue: 7200, earnings: 6800 },
+  ];
+
+  const distributionData = [
+    { name: 'Completed', value: stats.completedProjects, color: '#10b981' },
+    { name: 'Active', value: stats.activeProjects, color: '#3b82f6' },
+    { name: 'Pending', value: Math.max(0, Math.round(Number(stats.pendingPayments) / 100)), color: '#f59e0b' },
+  ];
+
   return (
     <div className="space-y-8 pb-8">
       <div>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
         <p className="text-gray-600 mt-1 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
       </div>
 
@@ -88,11 +114,6 @@ export default function DashboardPage() {
             </Card>
           </motion.div>
         ))}
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">Welcome back! Here&apos;s your overview.</p>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
       </div>
 
       {/* Charts Section */}
@@ -258,31 +279,6 @@ function ProgressRow({
       <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-800">
         <div className={`h-2 rounded-full ${color}`} style={{ width: `${percentage}%` }} />
       </div>
-            <CardTitle>Recent Activity</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {recentActivity.length === 0 ? (
-              <p className="text-gray-500 text-sm">No recent activity found.</p>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {recentActivity.map((activity, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center gap-4 p-3 bg-green-50 dark:bg-green-950/50 rounded-lg border border-green-100 dark:border-green-900"
-                  >
-                    <CheckCircle2 className="h-5 w-5 text-green-600" />
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900 dark:text-white">{activity.title}</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">{activity.description}</p>
-                    </div>
-                    <span className="text-sm text-gray-500">{activity.time}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
     </div>
   );
 }

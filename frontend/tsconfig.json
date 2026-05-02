@@ -38,6 +38,9 @@
   ],
   "exclude": [
     "node_modules",
+    "**/*.stories.ts",
+    "**/*.stories.tsx",
+    ".storybook",
     "lib/wallet-connect.ts",
     "service-worker.ts",
     "src/wallets/hardware/**/*",

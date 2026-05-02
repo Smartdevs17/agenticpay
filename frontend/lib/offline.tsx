@@ -237,11 +237,11 @@ export async function requestBackgroundSync(tag: string): Promise<boolean> {
 }
 
 export function useOfflineIndicator() {
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
 
   useEffect(() => {
-    setIsOnline(navigator.onLine);
-
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
@@ -258,5 +258,33 @@ export function useOfflineIndicator() {
 }
 
 export function OfflinePaymentIndicator() {
-  return null;
+  const isOnline = useOfflineIndicator();
+  const [pendingCount, setPendingCount] = useState(readQueue().length);
+
+  useEffect(() => {
+    const listener = () => {
+      setPendingCount(readQueue().length);
+    };
+
+    window.addEventListener(OFFLINE_QUEUE_EVENT, listener);
+    window.addEventListener('storage', listener);
+
+    return () => {
+      window.removeEventListener(OFFLINE_QUEUE_EVENT, listener);
+      window.removeEventListener('storage', listener);
+    };
+  }, []);
+
+  if (isOnline && pendingCount === 0) return null;
+
+  return (
+    <div className="fixed bottom-4 left-4 bg-amber-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 z-50">
+      <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+      <span className="text-sm font-medium">
+        {!isOnline
+          ? 'Offline - payments queued'
+          : `${pendingCount} payment${pendingCount > 1 ? 's' : ''} pending sync`}
+      </span>
+    </div>
+  );
 }

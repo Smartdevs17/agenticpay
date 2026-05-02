@@ -193,8 +193,6 @@ export async function apiCall<T = unknown>(
         throw lastError;
       }
 
-      if (attempt === config.maxRetries || !shouldRetryError(error)) throw lastError;
-
       await delay(calculateDelay(attempt, config));
     }
   }

@@ -83,7 +83,6 @@ import { fiatPaymentsRouter } from './routes/fiat-payments.js';
 import { paymentLinksRouter } from './routes/payment-links.js';
 import { projectsRouter } from './routes/projects.js';
 import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
-import { webhooksRouter } from './routes/webhooks.js';
 import { fraudDetectionRouter } from './routes/fraud-detection.js';
 import { bridgeRouter } from './routes/bridge.js';
 import { tokenizationRouter } from './routes/tokenization.js';
