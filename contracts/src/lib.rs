@@ -3,7 +3,9 @@
 #[cfg(test)]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec,
+};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -40,6 +42,9 @@ pub enum DataKey {
     ProjectCount,
     Admin,
     Metadata(String),
+    ReentrancyLock,
+    EmergencyPaused,
+    ReentrancyIncidentCount,
 }
 
 /// Input parameters for batch project creation.
@@ -52,23 +57,138 @@ pub struct ProjectInput {
     pub github_repo: String,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SecurityStatus {
+    pub paused: bool,
+    pub locked: bool,
+    pub reentrancy_incidents: u32,
+}
+
 #[contract]
 pub struct AgenticPayContract;
+
+struct ReentrancyScope<'a> {
+    env: &'a Env,
+}
+
+impl Drop for ReentrancyScope<'_> {
+    fn drop(&mut self) {
+        AgenticPayContract::exit_reentrancy_guard(self.env);
+    }
+}
+
+impl AgenticPayContract {
+    fn get_admin(env: &Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized")
+    }
+
+    fn require_admin(env: &Env, admin: &Address) {
+        let stored_admin = Self::get_admin(env);
+        assert!(*admin == stored_admin, "Only admin");
+    }
+
+    fn is_reentrancy_locked(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::ReentrancyLock)
+            .unwrap_or(false)
+    }
+
+    fn is_paused(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::EmergencyPaused)
+            .unwrap_or(false)
+    }
+
+    fn reentrancy_incidents(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ReentrancyIncidentCount)
+            .unwrap_or(0)
+    }
+
+    fn record_reentrancy_attempt(env: &Env) {
+        let incidents = Self::reentrancy_incidents(env).saturating_add(1);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyIncidentCount, &incidents);
+        env.storage()
+            .instance()
+            .set(&DataKey::EmergencyPaused, &true);
+        env.events().publish(
+            (symbol_short!("security"), symbol_short!("reentrant")),
+            incidents,
+        );
+    }
+
+    fn enter_reentrancy_guard(env: &Env) -> bool {
+        if Self::is_reentrancy_locked(env) {
+            Self::record_reentrancy_attempt(env);
+            return false;
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyLock, &true);
+        true
+    }
+
+    fn exit_reentrancy_guard(env: &Env) {
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyLock, &false);
+    }
+
+    fn with_reentrancy_lock<R, F: FnOnce() -> R, G: FnOnce() -> R>(
+        env: &Env,
+        on_reentrant: G,
+        action: F,
+    ) -> R {
+        if !Self::enter_reentrancy_guard(env) {
+            return on_reentrant();
+        }
+
+        let _scope = ReentrancyScope { env };
+        action()
+    }
+
+    fn with_reentrancy_guard<R, F: FnOnce() -> R, G: FnOnce() -> R>(
+        env: &Env,
+        on_reentrant: G,
+        action: F,
+    ) -> R {
+        Self::with_reentrancy_lock(env, on_reentrant, || {
+            assert!(!Self::is_paused(env), "Emergency circuit breaker active");
+            action()
+        })
+    }
+}
 
 #[contractimpl]
 impl AgenticPayContract {
     /// Initialize the contract with an admin address
     pub fn initialize(env: Env, admin: Address) {
         admin.require_auth();
+        assert!(
+            !env.storage().instance().has(&DataKey::Admin),
+            "Already initialized"
+        );
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::ProjectCount, &0u64);
-    }
-
-    fn get_admin(env: &Env) -> Address {
         env.storage()
             .instance()
-            .get(&DataKey::Admin)
-            .expect("Not initialized")
+            .set(&DataKey::ReentrancyLock, &false);
+        env.storage()
+            .instance()
+            .set(&DataKey::EmergencyPaused, &false);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyIncidentCount, &0u32);
     }
 
     /// Create a new project with escrow
@@ -86,37 +206,47 @@ impl AgenticPayContract {
     ) -> u64 {
         client.require_auth();
 
-        let mut count: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::ProjectCount)
-            .unwrap_or(0);
-        count += 1;
+        Self::with_reentrancy_guard(
+            &env,
+            || 0,
+            || {
+                assert!(amount > 0, "Amount must be positive");
+                let now = env.ledger().timestamp();
+                assert!(deadline == 0 || deadline > now, "Deadline must be future");
 
-        let project = Project {
-            id: count,
-            client: client.clone(),
-            freelancer: freelancer.clone(),
-            amount,
-            deposited: 0,
-            status: ProjectStatus::Created,
-            github_repo,
-            description,
-            created_at: env.ledger().timestamp(),
-            deadline,
-        };
+                let mut count: u64 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::ProjectCount)
+                    .unwrap_or(0);
+                count += 1;
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Project(count), &project);
-        env.storage().instance().set(&DataKey::ProjectCount, &count);
+                let project = Project {
+                    id: count,
+                    client: client.clone(),
+                    freelancer: freelancer.clone(),
+                    amount,
+                    deposited: 0,
+                    status: ProjectStatus::Created,
+                    github_repo,
+                    description,
+                    created_at: now,
+                    deadline,
+                };
 
-        env.events().publish(
-            (symbol_short!("project"), symbol_short!("created")),
-            (count, client, freelancer, amount),
-        );
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Project(count), &project);
+                env.storage().instance().set(&DataKey::ProjectCount, &count);
 
-        count
+                env.events().publish(
+                    (symbol_short!("project"), symbol_short!("created")),
+                    (count, client, freelancer, amount),
+                );
+
+                count
+            },
+        )
     }
 
     /// Create multiple projects in a single call.
@@ -138,78 +268,102 @@ impl AgenticPayContract {
     ) -> Vec<u64> {
         client.require_auth();
 
-        let mut count: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::ProjectCount)
-            .unwrap_or(0);
+        Self::with_reentrancy_guard(
+            &env,
+            || Vec::new(&env),
+            || {
+                let mut count: u64 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::ProjectCount)
+                    .unwrap_or(0);
 
-        let timestamp = env.ledger().timestamp();
-        let mut ids = Vec::new(&env);
+                let timestamp = env.ledger().timestamp();
+                let mut ids = Vec::new(&env);
 
-        for i in 0..projects.len() {
-            let input = projects.get(i).expect("Invalid project input");
-            count += 1;
+                for i in 0..projects.len() {
+                    let input = projects.get(i).expect("Invalid project input");
+                    assert!(input.amount > 0, "Amount must be positive");
+                    count += 1;
 
-            let project = Project {
-                id: count,
-                client: client.clone(),
-                freelancer: input.freelancer.clone(),
-                amount: input.amount,
-                deposited: 0,
-                status: ProjectStatus::Created,
-                github_repo: input.github_repo,
-                description: input.description,
-                created_at: timestamp,
-                deadline: 0,
-            };
+                    let project = Project {
+                        id: count,
+                        client: client.clone(),
+                        freelancer: input.freelancer.clone(),
+                        amount: input.amount,
+                        deposited: 0,
+                        status: ProjectStatus::Created,
+                        github_repo: input.github_repo,
+                        description: input.description,
+                        created_at: timestamp,
+                        deadline: 0,
+                    };
 
-            env.storage()
-                .persistent()
-                .set(&DataKey::Project(count), &project);
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::Project(count), &project);
 
-            env.events().publish(
-                (symbol_short!("project"), symbol_short!("created")),
-                (count, client.clone(), input.freelancer, input.amount),
-            );
+                    env.events().publish(
+                        (symbol_short!("project"), symbol_short!("created")),
+                        (count, client.clone(), input.freelancer, input.amount),
+                    );
 
-            ids.push_back(count);
-        }
+                    ids.push_back(count);
+                }
 
-        // Single counter update after all projects are created
-        env.storage().instance().set(&DataKey::ProjectCount, &count);
+                // Single counter update after all projects are created
+                env.storage().instance().set(&DataKey::ProjectCount, &count);
 
-        ids
+                ids
+            },
+        )
     }
 
     /// Fund a project escrow with XLM
     pub fn fund_project(env: Env, project_id: u64, client: Address, amount: i128) {
         client.require_auth();
 
-        let mut project: Project = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Project(project_id))
-            .expect("Project not found");
+        Self::with_reentrancy_guard(
+            &env,
+            || (),
+            || {
+                assert!(amount > 0, "Amount must be positive");
 
-        assert!(project.client == client, "Only client can fund");
-        assert!(
-            project.status == ProjectStatus::Created,
-            "Project must be in Created status"
-        );
+                let mut project: Project = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Project(project_id))
+                    .expect("Project not found");
 
-        project.deposited += amount;
-        if project.deposited >= project.amount {
-            project.status = ProjectStatus::Funded;
-        }
+                assert!(project.client == client, "Only client can fund");
+                assert!(
+                    project.status == ProjectStatus::Created,
+                    "Project must be in Created status"
+                );
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Project(project_id), &project);
+                let new_deposit = project
+                    .deposited
+                    .checked_add(amount)
+                    .expect("Deposit overflow");
+                assert!(
+                    new_deposit <= project.amount,
+                    "Deposit exceeds project amount"
+                );
 
-        env.events().publish(
-            (symbol_short!("project"), symbol_short!("funded")),
-            (project_id, amount),
+                project.deposited = new_deposit;
+                if project.deposited == project.amount {
+                    project.status = ProjectStatus::Funded;
+                }
+
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Project(project_id), &project);
+
+                env.events().publish(
+                    (symbol_short!("project"), symbol_short!("funded")),
+                    (project_id, amount),
+                );
+            },
         );
     }
 
@@ -217,31 +371,38 @@ impl AgenticPayContract {
     pub fn submit_work(env: Env, project_id: u64, freelancer: Address, github_repo: String) {
         freelancer.require_auth();
 
-        let mut project: Project = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Project(project_id))
-            .expect("Project not found");
+        Self::with_reentrancy_guard(
+            &env,
+            || (),
+            || {
+                let mut project: Project = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Project(project_id))
+                    .expect("Project not found");
 
-        assert!(
-            project.freelancer == freelancer,
-            "Only assigned freelancer can submit"
-        );
-        assert!(
-            project.status == ProjectStatus::Funded || project.status == ProjectStatus::InProgress,
-            "Project must be funded or in progress"
-        );
+                assert!(
+                    project.freelancer == freelancer,
+                    "Only assigned freelancer can submit"
+                );
+                assert!(
+                    project.status == ProjectStatus::Funded
+                        || project.status == ProjectStatus::InProgress,
+                    "Project must be funded or in progress"
+                );
 
-        project.github_repo = github_repo.clone();
-        project.status = ProjectStatus::WorkSubmitted;
+                project.github_repo = github_repo.clone();
+                project.status = ProjectStatus::WorkSubmitted;
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Project(project_id), &project);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Project(project_id), &project);
 
-        env.events().publish(
-            (symbol_short!("project"), symbol_short!("work_sub")),
-            (project_id, github_repo),
+                env.events().publish(
+                    (symbol_short!("project"), symbol_short!("work_sub")),
+                    (project_id, github_repo),
+                );
+            },
         );
     }
 
@@ -249,32 +410,37 @@ impl AgenticPayContract {
     pub fn approve_work(env: Env, project_id: u64, client: Address) {
         client.require_auth();
 
-        let mut project: Project = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Project(project_id))
-            .expect("Project not found");
+        Self::with_reentrancy_guard(
+            &env,
+            || (),
+            || {
+                let mut project: Project = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Project(project_id))
+                    .expect("Project not found");
 
-        assert!(project.client == client, "Only client can approve");
-        assert!(
-            project.status == ProjectStatus::WorkSubmitted
-                || project.status == ProjectStatus::Verified,
-            "Work must be submitted or verified"
-        );
+                assert!(project.client == client, "Only client can approve");
+                assert!(
+                    project.status == ProjectStatus::WorkSubmitted
+                        || project.status == ProjectStatus::Verified,
+                    "Work must be submitted or verified"
+                );
 
-        // TODO: Transfer deposited funds to freelancer via Stellar token transfer
+                // Effects are committed before any future token interaction is added.
+                let amount_released = project.deposited;
+                project.status = ProjectStatus::Completed;
+                project.deposited = 0;
 
-        let amount_released = project.deposited;
-        project.status = ProjectStatus::Completed;
-        project.deposited = 0;
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Project(project_id), &project);
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Project(project_id), &project);
-
-        env.events().publish(
-            (symbol_short!("project"), symbol_short!("payment")),
-            (project_id, amount_released),
+                env.events().publish(
+                    (symbol_short!("project"), symbol_short!("payment")),
+                    (project_id, amount_released),
+                );
+            },
         );
     }
 
@@ -282,26 +448,37 @@ impl AgenticPayContract {
     pub fn raise_dispute(env: Env, project_id: u64, caller: Address) {
         caller.require_auth();
 
-        let mut project: Project = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Project(project_id))
-            .expect("Project not found");
+        Self::with_reentrancy_guard(
+            &env,
+            || (),
+            || {
+                let mut project: Project = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Project(project_id))
+                    .expect("Project not found");
 
-        assert!(
-            caller == project.client || caller == project.freelancer,
-            "Only client or freelancer can dispute"
-        );
+                assert!(
+                    caller == project.client || caller == project.freelancer,
+                    "Only client or freelancer can dispute"
+                );
+                assert!(
+                    project.status != ProjectStatus::Completed
+                        && project.status != ProjectStatus::Cancelled,
+                    "Terminal project cannot be disputed"
+                );
 
-        project.status = ProjectStatus::Disputed;
+                project.status = ProjectStatus::Disputed;
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Project(project_id), &project);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Project(project_id), &project);
 
-        env.events().publish(
-            (symbol_short!("project"), symbol_short!("disputed")),
-            (project_id, caller),
+                env.events().publish(
+                    (symbol_short!("project"), symbol_short!("disputed")),
+                    (project_id, caller),
+                );
+            },
         );
     }
 
@@ -309,36 +486,35 @@ impl AgenticPayContract {
     pub fn resolve_dispute(env: Env, project_id: u64, admin: Address, release_to_freelancer: bool) {
         admin.require_auth();
 
-        let stored_admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Not initialized");
-        assert!(admin == stored_admin, "Only admin can resolve disputes");
+        Self::with_reentrancy_guard(
+            &env,
+            || (),
+            || {
+                Self::require_admin(&env, &admin);
 
-        let mut project: Project = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Project(project_id))
-            .expect("Project not found");
+                let mut project: Project = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Project(project_id))
+                    .expect("Project not found");
 
-        assert!(
-            project.status == ProjectStatus::Disputed,
-            "Project must be disputed"
+                assert!(
+                    project.status == ProjectStatus::Disputed,
+                    "Project must be disputed"
+                );
+
+                if release_to_freelancer {
+                    project.status = ProjectStatus::Completed;
+                } else {
+                    project.status = ProjectStatus::Cancelled;
+                }
+
+                project.deposited = 0;
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Project(project_id), &project);
+            },
         );
-
-        if release_to_freelancer {
-            // TODO: Transfer funds to freelancer
-            project.status = ProjectStatus::Completed;
-        } else {
-            // TODO: Refund funds to client
-            project.status = ProjectStatus::Cancelled;
-        }
-
-        project.deposited = 0;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Project(project_id), &project);
     }
 
     /// Check if a project's deadline has expired and auto-cancel if so.
@@ -351,44 +527,49 @@ impl AgenticPayContract {
     ///
     /// Returns `true` if the project was auto-cancelled, `false` otherwise.
     pub fn check_deadline(env: Env, project_id: u64) -> bool {
-        let mut project: Project = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Project(project_id))
-            .expect("Project not found");
+        Self::with_reentrancy_guard(
+            &env,
+            || false,
+            || {
+                let mut project: Project = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Project(project_id))
+                    .expect("Project not found");
 
-        // No deadline set or already in a terminal state
-        if project.deadline == 0 {
-            return false;
-        }
-        if project.status == ProjectStatus::Completed
-            || project.status == ProjectStatus::Cancelled
-            || project.status == ProjectStatus::Disputed
-        {
-            return false;
-        }
+                // No deadline set or already in a terminal state
+                if project.deadline == 0 {
+                    return false;
+                }
+                if project.status == ProjectStatus::Completed
+                    || project.status == ProjectStatus::Cancelled
+                    || project.status == ProjectStatus::Disputed
+                {
+                    return false;
+                }
 
-        let now = env.ledger().timestamp();
-        if now < project.deadline {
-            return false;
-        }
+                let now = env.ledger().timestamp();
+                if now < project.deadline {
+                    return false;
+                }
 
-        // Deadline expired — auto-cancel and refund escrow
-        // TODO: Transfer deposited funds back to client via Stellar token transfer
-        let refund_amount = project.deposited;
-        project.deposited = 0;
-        project.status = ProjectStatus::Cancelled;
+                // Deadline expired - effects are recorded before any future refund call.
+                let refund_amount = project.deposited;
+                project.deposited = 0;
+                project.status = ProjectStatus::Cancelled;
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Project(project_id), &project);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Project(project_id), &project);
 
-        env.events().publish(
-            (symbol_short!("project"), symbol_short!("expired")),
-            (project_id, refund_amount),
-        );
+                env.events().publish(
+                    (symbol_short!("project"), symbol_short!("expired")),
+                    (project_id, refund_amount),
+                );
 
-        true
+                true
+            },
+        )
     }
 
     /// Get project details
@@ -410,16 +591,20 @@ impl AgenticPayContract {
     /// Store metadata key-value pair (admin only)
     pub fn set_metadata(env: Env, admin: Address, key: String, value: String) {
         admin.require_auth();
-        let stored_admin = Self::get_admin(&env);
-        assert!(admin == stored_admin, "Only admin can set metadata");
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Metadata(key.clone()), &value);
+        Self::with_reentrancy_guard(
+            &env,
+            || (),
+            || {
+                Self::require_admin(&env, &admin);
 
-        env.events().publish(
-            (symbol_short!("meta"), symbol_short!("set")),
-            (key, value),
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Metadata(key.clone()), &value);
+
+                env.events()
+                    .publish((symbol_short!("meta"), symbol_short!("set")), (key, value));
+            },
         );
     }
 
@@ -431,16 +616,52 @@ impl AgenticPayContract {
     /// Remove metadata entry (admin only)
     pub fn remove_metadata(env: Env, admin: Address, key: String) {
         admin.require_auth();
-        let stored_admin = Self::get_admin(&env);
-        assert!(admin == stored_admin, "Only admin can remove metadata");
 
-        env.storage().persistent().remove(&DataKey::Metadata(key.clone()));
+        Self::with_reentrancy_guard(
+            &env,
+            || (),
+            || {
+                Self::require_admin(&env, &admin);
 
-        env.events().publish(
-            (symbol_short!("meta"), symbol_short!("del")),
-            key,
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::Metadata(key.clone()));
+
+                env.events()
+                    .publish((symbol_short!("meta"), symbol_short!("del")), key);
+            },
         );
     }
+
+    /// Pause or resume guarded state mutations. Admin-only.
+    pub fn set_emergency_pause(env: Env, admin: Address, paused: bool) {
+        admin.require_auth();
+
+        Self::with_reentrancy_lock(
+            &env,
+            || (),
+            || {
+                Self::require_admin(&env, &admin);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::EmergencyPaused, &paused);
+                env.events().publish(
+                    (symbol_short!("security"), symbol_short!("paused")),
+                    (admin, paused),
+                );
+            },
+        );
+    }
+
+    /// Return current guard and circuit-breaker state.
+    pub fn get_security_status(env: Env) -> SecurityStatus {
+        SecurityStatus {
+            paused: Self::is_paused(&env),
+            locked: Self::is_reentrancy_locked(&env),
+            reentrancy_incidents: Self::reentrancy_incidents(&env),
+        }
+    }
+
     /// Upgrade the contract WASM code. Admin-only.
     ///
     /// Uses Soroban's built-in upgrade mechanism which replaces the contract
@@ -453,14 +674,15 @@ impl AgenticPayContract {
     pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
         admin.require_auth();
 
-        let stored_admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Not initialized");
-        assert!(admin == stored_admin, "Only admin can upgrade");
-
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Self::with_reentrancy_lock(
+            &env,
+            || (),
+            || {
+                let stored_admin = Self::get_admin(&env);
+                assert!(admin == stored_admin, "Only admin can upgrade");
+                env.deployer().update_current_contract_wasm(new_wasm_hash);
+            },
+        );
     }
 
     /// Return the contract version for tracking upgrades.
@@ -468,6 +690,9 @@ impl AgenticPayContract {
         1
     }
 }
+
+#[cfg(test)]
+mod security_properties;
 
 #[cfg(test)]
 mod test {

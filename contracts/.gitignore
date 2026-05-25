@@ -1,5 +1,6 @@
 target/
 Cargo.lock
+test_snapshots/
 # Rust build outputs
 target/
 target_local/
