@@ -28,6 +28,8 @@ export interface RateLimitOptions {
   endpointConfig?: EndpointConfig;
   /** Redis client (ioredis-compatible). Falls back to in-memory when absent. */
   redisClient?: RedisClient | null;
+  /** Enable sandbox mode with relaxed rate limits */
+  sandboxMode?: boolean;
 }
 
 /** Minimal ioredis-compatible interface so we don't hard-depend on ioredis */
@@ -57,6 +59,13 @@ export const DEFAULT_TIER_CONFIGS: Record<UserTier, TokenBucketConfig> = {
   free:       { capacity: 60,   refillRate: 1,    burstAllowance: 10  },
   pro:        { capacity: 300,  refillRate: 5,    burstAllowance: 50  },
   enterprise: { capacity: 1200, refillRate: 20,   burstAllowance: 200 },
+};
+
+// Sandbox-specific relaxed rate limits for testing
+export const SANDBOX_TIER_CONFIGS: Record<UserTier, TokenBucketConfig> = {
+  free:       { capacity: 1000,  refillRate: 20,   burstAllowance: 200  },
+  pro:        { capacity: 5000,  refillRate: 100,  burstAllowance: 1000 },
+  enterprise: { capacity: 20000, refillRate: 400,  burstAllowance: 4000 },
 };
 
 /** Per-endpoint overrides (stricter for sensitive paths) */
@@ -248,11 +257,22 @@ export function resolveClientKey(req: Request): string {
   return req.ip ?? 'unknown';
 }
 
-function resolveEndpointConfig(path: string, tier: UserTier): TokenBucketConfig {
+function resolveEndpointConfig(path: string, tier: UserTier, sandboxMode: boolean = false): TokenBucketConfig {
   for (const [prefix, cfg] of Object.entries(ENDPOINT_CONFIGS)) {
-    if (path.startsWith(prefix)) return cfg[tier];
+    if (path.startsWith(prefix)) {
+      if (sandboxMode) {
+        // Apply sandbox multiplier to endpoint configs
+        const sandboxCfg = cfg[tier];
+        return {
+          capacity: sandboxCfg.capacity * 10,
+          refillRate: sandboxCfg.refillRate * 10,
+          burstAllowance: sandboxCfg.burstAllowance * 10,
+        };
+      }
+      return cfg[tier];
+    }
   }
-  return DEFAULT_TIER_CONFIGS[tier];
+  return sandboxMode ? SANDBOX_TIER_CONFIGS[tier] : DEFAULT_TIER_CONFIGS[tier];
 }
 
 function matchEndpointLabel(path: string): string {
@@ -267,14 +287,19 @@ function matchEndpointLabel(path: string): string {
 // ---------------------------------------------------------------------------
 
 export function tokenBucketRateLimit(opts: RateLimitOptions = {}) {
-  const { keyPrefix = 'rl', redisClient = null } = opts;
+  const { keyPrefix = 'rl', redisClient = null, sandboxMode = false } = opts;
 
   return async function rateLimitMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
     const tier = resolveUserTier(req);
     const clientKey = resolveClientKey(req);
-    const cfg = opts.endpointConfig ? opts.endpointConfig[tier] : resolveEndpointConfig(req.path, tier);
+    const cfg = opts.endpointConfig ? opts.endpointConfig[tier] : resolveEndpointConfig(req.path, tier, sandboxMode);
     const bucketKey = `${keyPrefix}:${tier}:${clientKey}:${matchEndpointLabel(req.path)}`;
     const nowMs = Date.now();
+
+    // Add sandbox header if in sandbox mode
+    if (sandboxMode) {
+      res.setHeader('X-Sandbox-Rate-Limit', 'relaxed');
+    }
 
     let result: { allowed: boolean; tokensAfter: number; retryAfterMs: number };
 

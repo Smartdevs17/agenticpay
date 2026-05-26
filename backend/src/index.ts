@@ -95,10 +95,20 @@ import { stripeRouter } from './routes/stripe.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
 import { signaturesRouter } from './routes/signatures.js';
+import { createSandboxRouter } from './routes/sandbox.js';
+import SandboxManager from './services/sandbox.js';
+import MockPaymentProcessor from './services/mock-payments.js';
+import TestDataSeeder from './services/test-data-seeder.js';
+import { emailV2Router } from './routes/email-v2.js';
 
 // Validate environment variables at startup
 validateEnv();
 const env = getConfig();
+
+// Initialize sandbox services
+const sandboxManager = new SandboxManager(env.NODE_ENV || 'development');
+const mockPaymentProcessor = new MockPaymentProcessor();
+const testDataSeeder = new TestDataSeeder();
 
 // Initialize IP allowlist from environment
 if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
@@ -219,6 +229,12 @@ import { versionMiddleware } from './middleware/versioning.js';
 
 app.use('/api/', apiRateLimiter);
 
+// Apply sandbox-aware rate limiting for sandbox endpoints
+const sandboxRateLimiter = tokenBucketRateLimit({ 
+  keyPrefix: 'rl:sandbox',
+  sandboxMode: env.NODE_ENV === 'sandbox' || env.NODE_ENV === 'development'
+});
+
 app.use('/api/', versionMiddleware);
 
 const apiV1Router = express.Router();
@@ -286,6 +302,13 @@ app.use('/api/v1/payment-links', paymentLinksRouter);
 
 // Project + milestone delivery approval workflow
 app.use('/api/v1/projects', projectsRouter);
+
+// Sandbox environment for testing (with relaxed rate limits)
+const sandboxRouter = createSandboxRouter(sandboxManager, mockPaymentProcessor, testDataSeeder);
+app.use('/api/v1/sandbox', sandboxRateLimiter, sandboxRouter);
+
+// Email system v2 with templates, analytics, and localization
+app.use('/api/v2/email', emailV2Router);
 
 // GraphQL gateway with federation-ready schema and subscriptions stream
 app.use('/graphql', graphQLRouter);

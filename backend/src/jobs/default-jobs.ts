@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import type { JobDefinition } from './types.js';
 import { SubscriptionProcessor } from './subscription-processor';
 import { SubscriptionService } from './subscription.service.js';
+import { sandboxCleanupJobs } from './sandbox-cleanup.js';
 
 export const defaultJobs: JobDefinition[] = [
   {
@@ -37,4 +38,5 @@ export const defaultJobs: JobDefinition[] = [
       await processor.processPendingRenewals();
     },
   },
+  ...sandboxCleanupJobs,
 ];

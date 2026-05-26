@@ -260,3 +260,220 @@ model GasEstimate {
   @@index([network, recordedAt])
   @@map("gas_estimates")
 }
+
+// ─── Sandbox Models ───────────────────────────────────────────────────────────
+
+model SandboxAccount {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  userId          String?  @map("user_id")
+  name            String
+  email           String
+  walletAddress   String   @unique @map("wallet_address")
+  fakeBalance     Decimal  @map("fake_balance") @db.Decimal(20, 8)
+  currency        String   @default("XLM")
+  isActive        Boolean  @default(true) @map("is_active")
+  expiresAt       DateTime? @map("expires_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  transactions    SandboxTransaction[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([walletAddress])
+  @@index([isActive])
+  @@map("sandbox_accounts")
+}
+
+model SandboxTransaction {
+  id                String   @id @default(uuid())
+  accountId         String   @map("account_id")
+  txHash            String   @unique @map("tx_hash")
+  amount            Decimal  @db.Decimal(20, 8)
+  currency          String   @default("XLM")
+  fromAddress       String   @map("from_address")
+  toAddress         String   @map("to_address")
+  status            String   @default("pending")
+  type              String   @default("payment")
+  mockData          Json?    @map("mock_data")
+  confirmedAt       DateTime? @map("confirmed_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  account           SandboxAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([txHash])
+  @@index([status])
+  @@index([createdAt])
+  @@map("sandbox_transactions")
+}
+
+model SandboxMigration {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  sourceAccountId String   @map("source_account_id")
+  targetAccountId String?  @map("target_account_id")
+  status          String   @default("pending")
+  steps           Json?
+  error           String?
+  startedAt       DateTime @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("sandbox_migrations")
+}
+
+// ─── Email System Models ───────────────────────────────────────────────────────
+
+enum EmailCategory {
+  payment_receipt
+  payment_confirmation
+  refund_notification
+  dispute_update
+  weekly_summary
+  marketing
+  security_alert
+  onboarding
+}
+
+enum EmailStatus {
+  pending
+  queued
+  sent
+  delivered
+  opened
+  clicked
+  bounced
+  failed
+}
+
+enum DeliveryProvider {
+  smtp
+  sendgrid
+}
+
+model EmailTemplate {
+  id          String        @id @default(uuid())
+  tenantId    String        @map("tenant_id")
+  name        String
+  category    EmailCategory
+  subject     String
+  htmlBody    String        @map("html_body")
+  textBody    String?       @map("text_body")
+  variables   String[]
+  isActive    Boolean       @default(true) @map("is_active")
+  locale      String        @default("en")
+  version     Int           @default(1)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+
+  @@unique([tenantId, name, locale])
+  @@index([tenantId])
+  @@index([category])
+  @@index([locale])
+  @@index([isActive])
+  @@map("email_templates")
+}
+
+model EmailTemplateLocalization {
+  id           String   @id @default(uuid())
+  templateId   String   @map("template_id")
+  locale       String
+  subject      String
+  htmlBody     String   @map("html_body")
+  textBody     String?  @map("text_body")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([templateId, locale])
+  @@index([templateId])
+  @@index([locale])
+  @@map("email_template_localizations")
+}
+
+model EmailDelivery {
+  id              String          @id @default(uuid())
+  tenantId        String          @map("tenant_id")
+  templateId      String?         @map("template_id")
+  recipientEmail  String          @map("recipient_email")
+  recipientName   String?         @map("recipient_name")
+  subject         String
+  htmlBody        String          @map("html_body")
+  textBody        String?         @map("text_body")
+  status          EmailStatus     @default(pending)
+  provider        DeliveryProvider @default(smtp)
+  providerId      String?         @map("provider_id") // SendGrid message ID or SMTP ID
+  sentAt          DateTime?       @map("sent_at")
+  deliveredAt     DateTime?       @map("delivered_at")
+  openedAt        DateTime?       @map("opened_at")
+  clickedAt       DateTime?       @map("clicked_at")
+  bouncedAt       DateTime?       @map("bounced_at")
+  bounceReason    String?         @map("bounce_reason")
+  retryCount      Int             @default(0) @map("retry_count")
+  error           String?
+  metadata        Json?
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([recipientEmail])
+  @@index([status])
+  @@index([templateId])
+  @@index([sentAt])
+  @@index([providerId])
+  @@map("email_deliveries")
+}
+
+model EmailPreference {
+  id                String        @id @default(uuid())
+  tenantId          String        @map("tenant_id")
+  userId            String?       @map("user_id")
+  email             String
+  paymentReceipts   Boolean       @default(true) @map("payment_receipts")
+  paymentConfirmations Boolean    @default(true) @map("payment_confirmations")
+  refundNotifications Boolean     @default(true) @map("refund_notifications")
+  disputeUpdates    Boolean       @default(true) @map("dispute_updates")
+  weeklySummaries   Boolean       @default(true) @map("weekly_summaries")
+  marketing         Boolean       @default(false)
+  securityAlerts    Boolean       @default(true) @map("security_alerts")
+  onboarding        Boolean       @default(true)
+  locale            String        @default("en")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  @@unique([tenantId, email])
+  @@unique([userId])
+  @@index([tenantId])
+  @@index([email])
+  @@map("email_preferences")
+}
+
+model EmailAnalytics {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  templateId      String?  @map("template_id")
+  category        EmailCategory
+  sentCount       Int      @default(0) @map("sent_count")
+  deliveredCount  Int      @default(0) @map("delivered_count")
+  openedCount     Int      @default(0) @map("opened_count")
+  clickedCount    Int      @default(0) @map("clicked_count")
+  bouncedCount    Int      @default(0) @map("bounced_count")
+  failedCount     Int      @default(0) @map("failed_count")
+  date            DateTime @default(now()) @db.Date
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, category, date])
+  @@index([tenantId])
+  @@index([category])
+  @@index([date])
+  @@map("email_analytics")
+}
