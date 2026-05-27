@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../config/env.js';
+import { withQueryProfiling } from '../config/database.js';
 
 let openaiClient: OpenAI | null = null;
 

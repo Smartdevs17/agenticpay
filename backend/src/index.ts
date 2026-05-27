@@ -17,6 +17,9 @@ import { legacyRouter } from './routes/legacy.js';
 import { splitsRouter } from './routes/splits.js';
 import { refundsRouter } from './routes/refunds.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
+import { batchProcessor } from './services/batch.js';
+import { featureFlags } from './config/featureFlags.js';
+import { getRedisCache } from './middleware/cache.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
@@ -29,6 +32,7 @@ import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
 import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
+import { cacheRouter } from './routes/cache.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 
 // Validate environment variables at startup
@@ -241,6 +245,8 @@ apiV1Router.use('/backup', backupRouter);
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 // Push notifications
 apiV1Router.use('/push', pushRouter);
+// Cache management
+apiV1Router.use('/cache', cacheRouter);
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
@@ -268,6 +274,17 @@ if (config.queue.enabled) {
   messageQueue.start();
 }
 
+if (featureFlags.evaluate('batch-operations')) {
+  batchProcessor.start();
+  console.log('[BatchProcessor] Started');
+}
+
+getRedisCache().connect().then(() => {
+  console.log('[RedisCache] Connection initialized');
+}).catch(() => {
+  console.log('[RedisCache] Not available, using in-memory cache only');
+});
+
 const server = app.listen(config.server.port, () => {
   console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
 });
@@ -293,6 +310,13 @@ const shutdown = (signal: string) => {
       console.log('Message queue stopped.');
     } catch (err) {
       console.error('Error stopping message queue:', err);
+    }
+
+    try {
+      batchProcessor.stop();
+      console.log('Batch processor stopped.');
+    } catch (err) {
+      console.error('Error stopping batch processor:', err);
     }
 
     console.log('Graceful shutdown complete. Exiting.');
