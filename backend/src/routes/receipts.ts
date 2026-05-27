@@ -13,8 +13,14 @@ import {
   getReceiptByTxHash,
   getReceiptsByWallet,
   getAllReceipts,
+  verifyReceiptProof,
+  getReceiptByMerkleRoot,
+  searchReceipts,
+  archiveReceipts,
+  generateReceiptPdf,
 } from '../services/receipts.js';
 import {
+  archiveReceiptSchema,
   mintReceiptSchema,
   batchMintReceiptSchema,
   transferReceiptSchema,
@@ -73,6 +79,31 @@ receiptsRouter.delete(
 );
 
 receiptsRouter.get(
+  '/search',
+  cacheControl({ maxAge: CacheTTL.SHORT }),
+  asyncHandler(async (req, res) => {
+    res.json(searchReceipts({
+      paymentId: req.query.paymentId as string | undefined,
+      txHash: req.query.txHash as string | undefined,
+      wallet: req.query.wallet as string | undefined,
+      currency: req.query.currency as string | undefined,
+      from: req.query.from as string | undefined,
+      to: req.query.to as string | undefined,
+      includeArchived: req.query.includeArchived === 'true',
+    }));
+  })
+);
+
+receiptsRouter.post(
+  '/archive',
+  validate(archiveReceiptSchema),
+  asyncHandler(async (req, res) => {
+    const archived = archiveReceipts(req.body.retentionBefore);
+    res.json({ archived, count: archived.length });
+  })
+);
+
+receiptsRouter.get(
   '/',
   cacheControl({ maxAge: CacheTTL.SHORT }),
   asyncHandler(async (req, res) => {
@@ -86,6 +117,16 @@ receiptsRouter.get(
   cacheControl({ maxAge: CacheTTL.SHORT }),
   asyncHandler(async (req, res) => {
     const receipt = getReceiptByPaymentId(req.params.paymentId);
+    if (!receipt) throw new AppError(404, 'Receipt not found', 'NOT_FOUND');
+    res.json(receipt);
+  })
+);
+
+receiptsRouter.get(
+  '/by-root/:root',
+  cacheControl({ maxAge: CacheTTL.SHORT }),
+  asyncHandler(async (req, res) => {
+    const receipt = getReceiptByMerkleRoot(req.params.root);
     if (!receipt) throw new AppError(404, 'Receipt not found', 'NOT_FOUND');
     res.json(receipt);
   })
@@ -116,6 +157,34 @@ receiptsRouter.get(
     const receipt = getReceiptByTokenId(req.params.tokenId);
     if (!receipt) throw new AppError(404, 'Receipt not found', 'NOT_FOUND');
     res.json(receipt);
+  })
+);
+
+receiptsRouter.get(
+  '/:tokenId/verify',
+  cacheControl({ maxAge: CacheTTL.SHORT }),
+  asyncHandler(async (req, res) => {
+    const receipt = getReceiptByTokenId(req.params.tokenId);
+    if (!receipt) throw new AppError(404, 'Receipt not found', 'NOT_FOUND');
+    res.json({
+      tokenId: receipt.tokenId,
+      merkleRoot: receipt.merkleRoot,
+      valid: verifyReceiptProof(receipt),
+      proof: receipt.merkleProof,
+    });
+  })
+);
+
+receiptsRouter.get(
+  '/:tokenId/pdf',
+  cacheControl({ maxAge: CacheTTL.LONG }),
+  asyncHandler(async (req, res) => {
+    const receipt = getReceiptByTokenId(req.params.tokenId);
+    if (!receipt) throw new AppError(404, 'Receipt not found', 'NOT_FOUND');
+    const pdf = generateReceiptPdf(receipt);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${receipt.tokenId}.pdf"`);
+    res.send(pdf);
   })
 );
 
