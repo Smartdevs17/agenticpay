@@ -1,0 +1,83 @@
+name: Formal Verification
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/formal-verification.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/formal-verification.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  certora:
+    name: Certora Prover
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CERTORAKEY: ${{ secrets.CERTORAKEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Certora CLI
+        run: pip install certora-cli
+
+      - name: Validate Certora secret
+        run: |
+          if [ -z "$CERTORAKEY" ]; then
+            echo "::error title=CERTORAKEY missing::Formal verification requires repository secret CERTORAKEY."
+            exit 1
+          fi
+
+      - name: Run Certora specifications
+        run: |
+          for conf in contracts/certora/conf/*.conf; do
+            echo "Running $conf"
+            certoraRun "$conf"
+          done
+
+  soroban-properties:
+    name: Soroban Security Properties
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
+      - name: Run property tests
+        working-directory: contracts
+        run: cargo test security_properties --locked
+
+  deployment-gate:
+    name: Deployment Gate
+    runs-on: ubuntu-latest
+    needs: [certora, soroban-properties]
+    if: ${{ always() }}
+    steps:
+      - name: Block deployment on verification failure
+        run: |
+          if [ "${{ needs.certora.result }}" != "success" ] || [ "${{ needs.soroban-properties.result }}" != "success" ]; then
+            echo "::error title=Formal verification failed::Deployment is blocked until Certora and Soroban properties pass."
+            exit 1
+          fi
+          echo "Formal verification passed."
