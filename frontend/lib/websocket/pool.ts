@@ -1,5 +1,7 @@
 export type WebSocketPoolOptions = {
   url: string;
+  channels?: string[];
+  authExpiresAt?: string;
   maxBufferedAmountBytes?: number;
   maxQueueSize?: number;
   reconnect?: {
@@ -15,9 +17,19 @@ type PoolState = {
   connected: boolean;
   reconnecting: boolean;
   lastError?: string;
+  lastSequence?: number;
+  droppedMessages?: number;
 };
 
 type OutboundItem = { data: string; priority: "high" | "normal" };
+type WireMessage = {
+  type: string;
+  channel?: string;
+  sequence?: number;
+  sessionId?: string;
+  emittedAt?: string;
+  payload?: unknown;
+};
 
 export class WebSocketPool {
   private readonly options: Required<WebSocketPoolOptions>;
@@ -30,13 +42,17 @@ export class WebSocketPool {
 
   private readonly queueHigh: OutboundItem[] = [];
   private readonly queueNormal: OutboundItem[] = [];
+  private readonly pendingBySequence = new Map<number, string>();
   private reconnectAttempt = 0;
+  private expectedSequence = 1;
   private reconnectTimer: number | null = null;
   private flushTimer: number | null = null;
 
   constructor(options: WebSocketPoolOptions) {
     this.options = {
       url: options.url,
+      channels: options.channels ?? ["payment.events", "dispute.updates"],
+      authExpiresAt: options.authExpiresAt ?? "",
       maxBufferedAmountBytes: options.maxBufferedAmountBytes ?? 512 * 1024,
       maxQueueSize: options.maxQueueSize ?? 500,
       reconnect: options.reconnect ?? { initialDelayMs: 250, maxDelayMs: 10_000, jitterRatio: 0.25 },
@@ -64,13 +80,16 @@ export class WebSocketPool {
 
     ws.onopen = () => {
       this.reconnectAttempt = 0;
+      this.expectedSequence = 1;
+      this.pendingBySequence.clear();
       this.setState({ connected: true, reconnecting: false });
+      this.sendControl({ type: "subscribe", channels: this.options.channels });
       this.startFlushLoop();
     };
 
     ws.onmessage = (event) => {
       const data = typeof event.data === "string" ? event.data : "";
-      for (const listener of this.messageListeners) listener(data);
+      this.deliverOrdered(data);
     };
 
     ws.onerror = () => {
@@ -95,6 +114,18 @@ export class WebSocketPool {
 
     this.flushOnce();
     return { accepted: true };
+  }
+
+  subscribe(channels: string[]): void {
+    this.sendControl({ type: "subscribe", channels });
+  }
+
+  unsubscribe(channels: string[]): void {
+    this.sendControl({ type: "unsubscribe", channels });
+  }
+
+  refreshAuth(expiresAt: string): void {
+    this.sendControl({ type: "auth.refresh", expiresAt });
   }
 
   destroy(): void {
@@ -129,6 +160,49 @@ export class WebSocketPool {
     ws.send(next.data);
   }
 
+  private sendControl(message: unknown): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(message));
+  }
+
+  private deliverOrdered(data: string): void {
+    const messages = parseWireMessages(data);
+    for (const message of messages) {
+      if (typeof message.sequence !== "number") {
+        this.emitMessage(JSON.stringify(message));
+        continue;
+      }
+
+      this.pendingBySequence.set(message.sequence, JSON.stringify(message));
+    }
+
+    let delivered = false;
+    while (this.pendingBySequence.has(this.expectedSequence)) {
+      const next = this.pendingBySequence.get(this.expectedSequence)!;
+      this.pendingBySequence.delete(this.expectedSequence);
+      this.emitMessage(next);
+      this.expectedSequence += 1;
+      delivered = true;
+    }
+
+    if (!delivered && this.pendingBySequence.size > 100) {
+      const nextSequence = Math.min(...this.pendingBySequence.keys());
+      this.expectedSequence = nextSequence;
+      this.setState({
+        ...this.state,
+        droppedMessages: (this.state.droppedMessages ?? 0) + 1,
+      });
+      this.deliverOrdered("[]");
+    }
+
+    this.setState({ ...this.state, lastSequence: this.expectedSequence - 1 });
+  }
+
+  private emitMessage(data: string): void {
+    for (const listener of this.messageListeners) listener(data);
+  }
+
   private scheduleReconnect(): void {
     if (this.destroyed) return;
     if (this.reconnectTimer) return;
@@ -153,6 +227,15 @@ export class WebSocketPool {
   }
 }
 
+function parseWireMessages(data: string): WireMessage[] {
+  try {
+    const parsed = JSON.parse(data) as WireMessage | WireMessage[];
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [{ type: "raw", payload: data }];
+  }
+}
+
 const poolByUrl = new Map<string, WebSocketPool>();
 
 export function getWebSocketPool(options: WebSocketPoolOptions): WebSocketPool {
@@ -162,4 +245,3 @@ export function getWebSocketPool(options: WebSocketPoolOptions): WebSocketPool {
   poolByUrl.set(options.url, created);
   return created;
 }
-
