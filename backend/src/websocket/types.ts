@@ -1,9 +1,23 @@
 export type WebSocketEventPriority = 'high' | 'normal';
+export type WebSocketChannel = 'payment.events' | 'dispute.updates' | 'analytics.updates' | string;
 
 export type WebSocketOutboundMessage = {
   type: string;
+  channel?: WebSocketChannel;
   payload?: unknown;
   priority?: WebSocketEventPriority;
+};
+
+export type WebSocketClientMessage =
+  | { type: 'subscribe'; channels: WebSocketChannel[] }
+  | { type: 'unsubscribe'; channels: WebSocketChannel[] }
+  | { type: 'auth.refresh'; expiresAt?: string }
+  | { type: 'ping' };
+
+export type WebSocketWireMessage = Omit<WebSocketOutboundMessage, 'priority'> & {
+  sequence: number;
+  sessionId: string;
+  emittedAt: string;
 };
 
 export type WebSocketServerMetrics = {
@@ -14,6 +28,7 @@ export type WebSocketServerMetrics = {
   enqueuedMessages: number;
   droppedMessages: number;
   sentMessages: number;
+  subscribedChannels: Record<string, number>;
   lastOverloadAtMs?: number;
 };
 
@@ -26,5 +41,6 @@ export type WebSocketServerOptions = {
   maxBatchSize: number;
   pingIntervalMs: number;
   pongTimeoutMs: number;
+  defaultChannels: WebSocketChannel[];
+  maxAuthAgeMs: number;
 };
-

@@ -2,12 +2,20 @@ import type http from 'node:http';
 import { WebSocketServer } from 'ws';
 import type WebSocket from 'ws';
 import { ManagedConnection } from './managedConnection.js';
-import type { WebSocketOutboundMessage, WebSocketServerMetrics, WebSocketServerOptions } from './types.js';
+import type {
+  WebSocketChannel,
+  WebSocketClientMessage,
+  WebSocketOutboundMessage,
+  WebSocketServerMetrics,
+  WebSocketServerOptions,
+} from './types.js';
+import type { WebSocketScalingAdapter } from './scaling.js';
 
 export type AgenticPayWebSocketServer = {
   wss: WebSocketServer;
   metrics: WebSocketServerMetrics;
   broadcast: (message: WebSocketOutboundMessage) => void;
+  broadcastToChannel: (channel: WebSocketChannel, message: Omit<WebSocketOutboundMessage, 'channel'>) => void;
   close: () => Promise<void>;
 };
 
@@ -20,12 +28,32 @@ function createMetrics(): WebSocketServerMetrics {
     enqueuedMessages: 0,
     droppedMessages: 0,
     sentMessages: 0,
+    subscribedChannels: {},
   };
+}
+
+function parseAuthExpiry(value: string | null, maxAuthAgeMs: number): number {
+  if (!value) return Date.now() + maxAuthAgeMs;
+  const parsed = Number(value);
+  if (Number.isFinite(parsed)) return parsed < 10_000_000_000 ? parsed * 1000 : parsed;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : Date.now() + maxAuthAgeMs;
+}
+
+function parseClientMessage(raw: WebSocket.RawData): WebSocketClientMessage | null {
+  try {
+    const value = JSON.parse(raw.toString()) as WebSocketClientMessage;
+    if (value && typeof value.type === 'string') return value;
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export function attachWebSocketServer(params: {
   server: http.Server;
   options?: Partial<WebSocketServerOptions>;
+  scaling?: WebSocketScalingAdapter;
 }): AgenticPayWebSocketServer {
   const options: WebSocketServerOptions = {
     path: '/ws',
@@ -36,6 +64,8 @@ export function attachWebSocketServer(params: {
     maxBatchSize: 50,
     pingIntervalMs: 30_000,
     pongTimeoutMs: 10_000,
+    defaultChannels: ['payment.events', 'dispute.updates', 'analytics.updates'],
+    maxAuthAgeMs: 60 * 60 * 1000,
     ...params.options,
   };
 
@@ -43,6 +73,7 @@ export function attachWebSocketServer(params: {
   const wss = new WebSocketServer({ noServer: true });
   const connections = new Map<WebSocket, ManagedConnection>();
   const lastPongAt = new Map<WebSocket, number>();
+  let unsubscribeScaling: (() => void) | undefined;
 
   params.server.on('upgrade', (req, socket, head) => {
     try {
@@ -65,9 +96,10 @@ export function attachWebSocketServer(params: {
     }
   });
 
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', (ws: WebSocket, req) => {
     metrics.activeConnections += 1;
     metrics.acceptedConnections += 1;
+    const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
 
     const managed = new ManagedConnection({
       ws,
@@ -75,6 +107,8 @@ export function attachWebSocketServer(params: {
       maxQueueSize: options.maxQueueSizePerConnection,
       maxBufferedAmountBytes: options.maxBufferedAmountBytes,
       maxBatchSize: options.maxBatchSize,
+      defaultChannels: options.defaultChannels,
+      authExpiresAtMs: parseAuthExpiry(url.searchParams.get('expiresAt'), options.maxAuthAgeMs),
     });
 
     connections.set(ws, managed);
@@ -82,12 +116,26 @@ export function attachWebSocketServer(params: {
 
     ws.on('pong', () => lastPongAt.set(ws, Date.now()));
 
-    ws.on('message', () => {
-      // Reserved for future client->server messages (e.g. subscriptions / acks).
-      // Intentionally a no-op to avoid unbounded per-message CPU for now.
+    ws.on('message', (raw) => {
+      const message = parseClientMessage(raw);
+      if (!message) return;
+
+      if (message.type === 'subscribe') {
+        for (const channel of message.channels.slice(0, 25)) managed.subscribe(channel);
+        managed.enqueue({ type: 'subscription.updated', payload: { channels: message.channels }, priority: 'high' });
+      } else if (message.type === 'unsubscribe') {
+        for (const channel of message.channels) managed.unsubscribe(channel);
+        managed.enqueue({ type: 'subscription.updated', payload: { channels: message.channels }, priority: 'high' });
+      } else if (message.type === 'auth.refresh') {
+        managed.refreshAuth(parseAuthExpiry(message.expiresAt ?? null, options.maxAuthAgeMs));
+        managed.enqueue({ type: 'auth.refreshed', priority: 'high' });
+      } else if (message.type === 'ping') {
+        managed.enqueue({ type: 'pong', priority: 'high' });
+      }
     });
 
     ws.on('close', () => {
+      managed.close();
       connections.delete(ws);
       lastPongAt.delete(ws);
       metrics.activeConnections = Math.max(0, metrics.activeConnections - 1);
@@ -110,22 +158,48 @@ export function attachWebSocketServer(params: {
         ws.terminate();
         continue;
       }
+      const managed = connections.get(ws);
+      if (managed?.isAuthExpired(now)) {
+        managed.enqueue({ type: 'auth.expired', priority: 'high' });
+        ws.close(4001, 'Auth token expired');
+        continue;
+      }
       ws.ping();
     }
   }, options.pingIntervalMs);
 
-  const broadcast = (message: WebSocketOutboundMessage) => {
+  const broadcastLocal = (message: WebSocketOutboundMessage) => {
     for (const managed of connections.values()) {
       managed.enqueue(message);
     }
   };
 
+  const broadcast = (message: WebSocketOutboundMessage) => {
+    broadcastLocal(message);
+    void params.scaling?.publish(message);
+  };
+
+  const broadcastToChannel = (
+    channel: WebSocketChannel,
+    message: Omit<WebSocketOutboundMessage, 'channel'>
+  ) => broadcast({ ...message, channel });
+
+  if (params.scaling) {
+    Promise.resolve(params.scaling.subscribe((message) => broadcastLocal(message)))
+      .then((unsubscribe) => {
+        unsubscribeScaling = unsubscribe;
+      })
+      .catch(() => {
+        metrics.lastOverloadAtMs = Date.now();
+      });
+  }
+
   const close = async () => {
     clearInterval(flushTimer);
     clearInterval(pingTimer);
+    unsubscribeScaling?.();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
   };
 
-  return { wss, metrics, broadcast, close };
+  return { wss, metrics, broadcast, broadcastToChannel, close };
 }
-
