@@ -73,6 +73,7 @@ import { disputeService } from './disputes/disputeService.js';
 import http from 'node:http';
 import { attachWebSocketServer } from './websocket/server.js';
 import { createWebSocketRouter } from './routes/websocket.js';
+import { bindWebSocketServer } from './events/event-bus.js';
 import { receiptsRouter } from './routes/receipts.js';
 import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
@@ -358,12 +359,13 @@ setInterval(async () => {
 
 const server = http.createServer(app);
 const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
+bindWebSocketServer(wsServer);
 app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
 app.use('/api/v1/analytics', createAnalyticsRouter(wsServer));
 
 // Broadcast analytics snapshot every 30 seconds to all connected WebSocket clients
 const analyticsInterval = setInterval(() => {
-  wsServer.broadcast({ type: 'analytics:update', payload: analyticsService.snapshot() });
+  wsServer.broadcastToChannel('analytics.updates', { type: 'analytics:update', payload: analyticsService.snapshot() });
 }, 30_000);
 
 server.listen(config.server.port, () => {
