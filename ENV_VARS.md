@@ -9,6 +9,7 @@
 | JOBS_ENABLED         | Enable/disable background jobs      | true    | No       |
 | STELLAR_NETWORK      | Stellar network (testnet or public) | testnet | No       |
 | OPENAI_API_KEY       | OpenAI API key for AI services      | -       | **Yes**  |
+| AGENTICPAY_ALLOWED_SIGNATURE_ORIGINS | Allowed origins for EIP-712 signature verification | https://agenticpay.com,http://localhost:3000 | No |
 
 ## Frontend
 
@@ -25,6 +26,7 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000
 JOBS_ENABLED=true
 STELLAR_NETWORK=testnet
 OPENAI_API_KEY=sk-your-openai-api-key
+AGENTICPAY_ALLOWED_SIGNATURE_ORIGINS=https://agenticpay.com,http://localhost:3000
 
 - `.env.development` — local development
 - `.env.staging` — staging environment

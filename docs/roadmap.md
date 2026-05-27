@@ -16,6 +16,7 @@ The team is focused on stabilizing the existing feature set and making the platf
 - **Advanced invoice editing** — Full CRUD editing for generated invoices, including line items, tax fields, and custom metadata (PR #167)
 - **Backend environment validation** — Zod-based schema validation for all environment variables at startup, preventing misconfigured deployments from silently failing
 - **Transaction failure recovery** — Retry logic and user-facing error recovery flows for failed Stellar transactions, including fee-bump support
+- **Recurring Payment Engine** — Implementation of the SubscriptionManager for automated periodic payments (Completed v0.4 addition)
 - **Response caching with ETags** — Per-route TTL caching with `ETag` / `If-None-Match` support across the Express API, reducing redundant blockchain lookups
 - **Infrastructure as code** — Terraform modules for dev/staging/prod environments with cost tagging, auto-scaling, and automated rollback scripts
 - **Tiered rate limiting** — Separate limits for free, pro, and enterprise API consumers, backed by a configurable custom store

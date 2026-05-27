@@ -10,6 +10,7 @@ import {
   resolveManualReview,
   upsertRefundPolicy,
 } from '../services/refunds.js';
+import { paginateArray } from '../utils/pagination.js';
 
 export const refundsRouter = Router();
 const firstParam = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] ?? '' : value ?? '');
@@ -46,7 +47,19 @@ refundsRouter.get(
   '/manual-review',
   asyncHandler(async (req, res) => {
     const merchantId = typeof req.query.merchantId === 'string' ? req.query.merchantId : undefined;
-    res.json({ items: listManualReviews(merchantId) });
+    const reviews = listManualReviews(merchantId);
+
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
+
+    const paginated = paginateArray(reviews, { limit, offset });
+
+    res.json({
+      items: paginated.data,
+      total: paginated.total,
+      limit: paginated.limit,
+      offset: paginated.offset,
+    });
   })
 );
 

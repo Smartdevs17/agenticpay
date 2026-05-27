@@ -43,6 +43,37 @@ const tokenAddressSchema = z
   .trim()
   .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid token address');
 
+// File validation configuration
+const FILE_CONFIG = {
+  maxSize: 10 * 1024 * 1024, // 10MB
+  allowedTypes: [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'application/zip',
+    'application/x-zip-compressed'
+  ],
+  allowedExtensions: ['.pdf', '.doc', '.docx', '.txt', '.jpg', '.jpeg', '.png', '.gif', '.zip']
+};
+
+const validateFile = (file: File | null): string | null => {
+  if (!file) return null;
+
+  if (file.size > FILE_CONFIG.maxSize) {
+    return `File size must be less than ${FILE_CONFIG.maxSize / (1024 * 1024)}MB`;
+  }
+
+  if (!FILE_CONFIG.allowedTypes.includes(file.type)) {
+    return `File type not allowed. Allowed types: ${FILE_CONFIG.allowedExtensions.join(', ')}`;
+  }
+
+  return null;
+};
+
 const isFutureDate = (value: string) => {
   const selectedDate = new Date(`${value}T00:00:00`);
 
@@ -100,6 +131,8 @@ export default function CreateProjectPage() {
   const { address } = useAccount();
   const { prepareTransaction, isPending, isConfirming, isConfirmed, error } = useAgenticPay();
   const [pendingTransaction, setPendingTransaction] = useState<PendingTransaction | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const {
     register,
@@ -141,6 +174,16 @@ export default function CreateProjectPage() {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       toast.error('You are offline. Reconnect before creating an on-chain project.');
       return;
+    }
+
+    // Validate file if selected
+    if (selectedFile) {
+      const error = validateFile(selectedFile);
+      if (error) {
+        setFileError(error);
+        toast.error(error);
+        return;
+      }
     }
 
     try {
@@ -301,10 +344,33 @@ export default function CreateProjectPage() {
                   <p className="text-sm text-red-600 mt-1">{errors.githubRepo.message}</p>
                 )}
               </div>
+
+              <div>
+                <Label htmlFor="projectFile">Project File (Optional)</Label>
+                <Input
+                  id="projectFile"
+                  type="file"
+                  accept={FILE_CONFIG.allowedExtensions.join(',')}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setSelectedFile(file);
+                    const error = validateFile(file);
+                    setFileError(error);
+                  }}
+                />
+                {fileError && (
+                  <p className="text-sm text-red-600 mt-1">{fileError}</p>
+                )}
+                {selectedFile && !fileError && (
+                  <p className="text-sm text-green-600 mt-1">
+                    Selected: {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="flex gap-3 pt-4">
-              <Button type="submit" disabled={isPending || isConfirming} className="flex-1">
+              <Button type="submit" disabled={isPending || isConfirming || !!fileError} className="flex-1">
                 {(isPending || isConfirming) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {isPending ? 'Confirm in Wallet...' : isConfirming ? 'Processing...' : 'Create Project'}
               </Button>

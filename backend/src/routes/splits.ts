@@ -12,6 +12,7 @@ import {
   listMerchantSplits,
   updateSplitConfig,
 } from '../services/splits.js';
+import { paginateArray } from '../utils/pagination.js';
 
 export const splitsRouter = Router();
 const firstParam = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] ?? '' : value ?? '');
@@ -32,7 +33,19 @@ splitsRouter.get(
     if (!merchantId) {
       throw new AppError(400, 'Merchant id is required', 'VALIDATION_ERROR');
     }
-    res.json({ items: listMerchantSplits(merchantId) });
+    const splits = listMerchantSplits(merchantId);
+
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
+
+    const paginated = paginateArray(splits, { limit, offset });
+
+    res.json({
+      items: paginated.data,
+      total: paginated.total,
+      limit: paginated.limit,
+      offset: paginated.offset,
+    });
   })
 );
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Folder, FileText, Wallet, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Folder, FileText, Wallet, Menu, X, Lock, Users, Receipt } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -11,6 +11,9 @@ const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Projects', href: '/dashboard/projects', icon: Folder },
   { name: 'Invoices', href: '/dashboard/invoices', icon: FileText },
+  { name: 'Tax Reports', href: '/dashboard/tax-reports', icon: Receipt },
+  { name: 'Escrow', href: '/dashboard/escrow', icon: Lock },
+  { name: 'Multisig', href: '/dashboard/multisig', icon: Users },
   { name: 'Payments', href: '/dashboard/payments', icon: Wallet },
 ];
 

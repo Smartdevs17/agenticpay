@@ -1,0 +1,80 @@
+name: Contracts (EVM)
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      evm: ${{ steps.filter.outputs.evm }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            evm:
+              - 'contracts/evm/**'
+              - '.github/workflows/contracts-evm.yml'
+
+  test:
+    needs: changes
+    if: ${{ needs.changes.outputs.evm == 'true' }}
+    name: Compile, test & coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: contracts/evm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: contracts/evm/package-lock.json
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: contracts/evm/node_modules
+          key: ${{ runner.os }}-evm-modules-${{ hashFiles('contracts/evm/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-evm-modules-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      - name: Type-check scripts & tests
+        run: npm run lint
+
+      - name: Run Hardhat tests
+        run: npx hardhat test
+
+      - name: Run coverage
+        run: npx hardhat coverage
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Upload coverage artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: evm-coverage
+          path: contracts/evm/coverage
+          retention-days: 14

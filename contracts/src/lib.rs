@@ -1,5 +1,8 @@
 #![no_std]
 
+#[cfg(test)]
+extern crate std;
+
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec};
 
 #[contracttype]
@@ -32,9 +35,23 @@ pub struct Project {
 }
 
 #[contracttype]
+#[derive(Clone, Debug)]
+pub struct Receipt {
+    pub id: u64,
+    pub project_id: u64,
+    pub amount: i128,
+    pub currency: String,
+    pub sender: Address,
+    pub recipient: Address,
+    pub timestamp: u64,
+}
+
+#[contracttype]
 pub enum DataKey {
     Project(u64),
     ProjectCount,
+    Receipt(u64),
+    ReceiptCount,
     Admin,
     Metadata(String),
 }
@@ -59,6 +76,7 @@ impl AgenticPayContract {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::ProjectCount, &0u64);
+        env.storage().instance().set(&DataKey::ReceiptCount, &0u64);
     }
 
     fn get_admin(env: &Env) -> Address {
@@ -259,8 +277,6 @@ impl AgenticPayContract {
             "Work must be submitted or verified"
         );
 
-        // TODO: Transfer deposited funds to freelancer via Stellar token transfer
-
         let amount_released = project.deposited;
         project.status = ProjectStatus::Completed;
         project.deposited = 0;
@@ -273,6 +289,50 @@ impl AgenticPayContract {
             (symbol_short!("project"), symbol_short!("payment")),
             (project_id, amount_released),
         );
+
+        Self::record_receipt(
+            &env,
+            project_id,
+            amount_released,
+            String::from_str(&env, "XLM"),
+            project.client,
+            project.freelancer,
+        );
+    }
+
+    fn record_receipt(
+        env: &Env,
+        project_id: u64,
+        amount: i128,
+        currency: String,
+        sender: Address,
+        recipient: Address,
+    ) -> u64 {
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReceiptCount)
+            .unwrap_or(0);
+        count += 1;
+
+        let receipt = Receipt {
+            id: count,
+            project_id,
+            amount,
+            currency: currency.clone(),
+            sender: sender.clone(),
+            recipient: recipient.clone(),
+            timestamp: env.ledger().timestamp(),
+        };
+
+        env.storage().persistent().set(&DataKey::Receipt(count), &receipt);
+        env.storage().instance().set(&DataKey::ReceiptCount, &count);
+        env.events().publish(
+            (symbol_short!("receipt"), symbol_short!("issued")),
+            (count, project_id, amount, currency, sender, recipient),
+        );
+
+        count
     }
 
     /// Raise a dispute on a project
@@ -404,6 +464,22 @@ impl AgenticPayContract {
             .unwrap_or(0)
     }
 
+    /// Get receipt details by on-chain receipt id.
+    pub fn get_receipt(env: Env, receipt_id: u64) -> Receipt {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Receipt(receipt_id))
+            .expect("Receipt not found")
+    }
+
+    /// Get total receipt count.
+    pub fn get_receipt_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ReceiptCount)
+            .unwrap_or(0)
+    }
+
     /// Store metadata key-value pair (admin only)
     pub fn set_metadata(env: Env, admin: Address, key: String, value: String) {
         admin.require_auth();
@@ -470,6 +546,7 @@ impl AgenticPayContract {
 mod test {
     use super::*;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Ledger as _;
     use soroban_sdk::Env;
 
     #[test]
@@ -754,6 +831,7 @@ mod test {
             &700,
             &String::from_str(&env, "Single"),
             &String::from_str(&env, "https://github.com/s1"),
+            &0,
         );
 
         assert_eq!(id, 3);

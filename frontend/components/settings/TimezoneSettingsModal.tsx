@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Clock3, LocateFixed } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -43,12 +43,6 @@ export function TimezoneSettingsModal({ open, onClose }: TimezoneSettingsModalPr
   const browserTimeZone = getBrowserTimeZone();
   const [localTimeZone, setLocalTimeZone] = useState<string>(resolveTimeZone(storedTimeZone));
 
-  useEffect(() => {
-    if (open) {
-      setLocalTimeZone(resolveTimeZone(storedTimeZone));
-    }
-  }, [open, storedTimeZone]);
-
   const supportedTimeZones = useMemo(() => getSupportedTimeZones(), []);
   const previewTimeZone = resolveTimeZone(localTimeZone);
 
@@ -70,7 +64,7 @@ export function TimezoneSettingsModal({ open, onClose }: TimezoneSettingsModalPr
   };
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen: boolean) => !nextOpen && onClose()}>
+    <Dialog key={`tz-${open}`} open={open} onOpenChange={(nextOpen: boolean) => !nextOpen && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

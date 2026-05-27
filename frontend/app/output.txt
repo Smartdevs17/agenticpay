@@ -1,0 +1,14 @@
+C:\Users\USER\Desktop\KING\Clones\agenticpay\frontend\app
+├── accessibility
+├── auth
+├── dashboard
+├── favicon.ico
+├── globals.css
+├── layout.tsx
+├── manifest.ts
+├── output.txt
+├── page.tsx
+└── service-worker.js
+
+directory: 4 file: 6
+

@@ -1,0 +1,16 @@
+{
+  "name": "@agenticpay/contracts",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "echo 'No lint yet'"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@agenticpay/typescript-config": "*",
+    "@agenticpay/eslint-config": "*",
+    "typescript": "^5.6.0"
+  }
+}

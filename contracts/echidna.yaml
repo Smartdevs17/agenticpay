@@ -1,0 +1,34 @@
+# Echidna configuration for AgenticPay smart contract fuzzing
+
+# Contract to test
+contract: "src/lib.rs:AgenticPayContract"
+
+# Test configuration
+testLimit: 50000
+shrinkLimit: 5000
+seqLen: 100
+gasLimit: 8000000
+coverage: true
+timeout: 120
+
+# Fuzzing configuration
+dictionary: "echidna-dictionary.txt"
+corpusDir: "echidna-corpus"
+cryticArgs: ["--solc", "solc"]
+
+# Output configuration
+format: "text"
+output: "echidna-results.txt"
+
+# Property testing settings
+testMode: "property"
+filterFunctions: []
+deployContract: true
+
+# Seed for reproducibility
+seed: 123456789
+
+# Additional configuration
+allContracts: false
+multi-abi: false
+workers: 1

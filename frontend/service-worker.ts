@@ -16,6 +16,20 @@ const PRECACHE_URLS = [
 
 declare const self: ServiceWorkerGlobalScope;
 
+interface BackgroundSyncEvent extends ExtendableEvent {
+  readonly tag: string;
+}
+
+interface BackgroundPeriodicSyncEvent extends ExtendableEvent {
+  readonly tag: string;
+}
+
+interface SyncCapableServiceWorkerRegistration extends ServiceWorkerRegistration {
+  sync?: {
+    register(tag: string): Promise<void>;
+  };
+}
+
 interface PaymentRequest {
   id: string;
   to: string;
@@ -249,19 +263,21 @@ self.addEventListener('fetch', (event: FetchEvent) => {
   event.respondWith(networkFirst(request));
 });
 
-self.addEventListener('sync', (event: SyncEvent) => {
-  if (event.tag === 'sync-payments') {
-    event.waitUntil(syncPayments());
+self.addEventListener('sync', ((event: Event) => {
+  const syncEvent = event as BackgroundSyncEvent;
+  if (syncEvent.tag === 'sync-payments') {
+    syncEvent.waitUntil(syncPayments());
   }
-});
+}) as EventListener);
 
-self.addEventListener('periodicsync', (event: PeriodicSyncEvent) => {
-  if (event.tag === 'health-check') {
-    event.waitUntil(
-      fetch('/api/v1/health').catch(() => {}),
+self.addEventListener('periodicsync', ((event: Event) => {
+  const periodicEvent = event as BackgroundPeriodicSyncEvent;
+  if (periodicEvent.tag === 'health-check') {
+    periodicEvent.waitUntil(
+      fetch('/api/v1/health').catch(() => {})
     );
   }
-});
+}) as EventListener);
 
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   const { type, payload } = event.data || {};
@@ -275,8 +291,9 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
         status: 'pending',
         retryCount: 0,
       }).then(() => {
-        if (self.registration.sync) {
-          self.registration.sync.register('sync-payments');
+        const registration = self.registration as SyncCapableServiceWorkerRegistration;
+        if (registration.sync) {
+          registration.sync.register('sync-payments');
         }
       }),
     );
