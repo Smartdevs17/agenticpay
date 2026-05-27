@@ -31,8 +31,14 @@ export const defaultJobs: JobDefinition[] = [
       const provider = new ethers.JsonRpcProvider(rpcUrl);
       const signer = new ethers.Wallet(privateKey, provider);
       
-      // Minimal ABI for the processor to execute payments
-      const abi = ["function executePayment(address customer, uint256 planId) external"];
+      const abi = [
+        'function executePayment(address customer, uint256 planId) external',
+        'function recordDunningFailure(address customer, uint256 planId) external',
+        'function pauseSubscription(uint256 planId) external',
+        'function resumeSubscription(uint256 planId) external',
+        'function subscriptions(address customer, uint256 planId) view returns (uint256 planId, uint256 lastPayment, uint256 nextPayment, uint8 retryCount, uint8 status)',
+        'function plans(uint256 planId) view returns (address merchant, uint256 amount, uint256 interval, bool active, uint256 downgradePlanId, string metadata)',
+      ];
       const service = new SubscriptionService(contractAddress, abi, signer);
       const processor = new SubscriptionProcessor(service); 
       await processor.processPendingRenewals();
