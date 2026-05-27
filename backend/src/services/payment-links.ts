@@ -1,6 +1,11 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 
 type Recurrence = 'one_time' | 'weekly' | 'monthly';
+
+/** Failed password attempts before a protected link is temporarily locked. */
+const MAX_PASSWORD_ATTEMPTS = 5;
+/** How long a protected link stays locked after exhausting its attempts. */
+const PASSWORD_LOCKOUT_MS = 15 * 60 * 1000;
 
 export type PaymentLinkRecord = {
   id: string;
@@ -20,6 +25,10 @@ export type PaymentLinkRecord = {
     logoUrl?: string;
     redirectUrl?: string;
   };
+  /** True when the link is password protected. The password itself is never stored. */
+  requiresPassword: boolean;
+  /** Maximum number of completions allowed before the link auto-disables. `null` = unlimited. */
+  maxUses: number | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -30,6 +39,14 @@ export type PaymentLinkRecord = {
     lastViewedAt: string | null;
     lastCompletedAt: string | null;
   };
+};
+
+/** Internal-only secret material kept out of the public record/JSON responses. */
+type PaymentLinkSecret = {
+  passwordHash: Buffer;
+  passwordSalt: Buffer;
+  failedAttempts: number;
+  lockedUntil: number | null;
 };
 
 type CreatePaymentLinkInput = {
@@ -48,14 +65,29 @@ type CreatePaymentLinkInput = {
     logoUrl?: string;
     redirectUrl?: string;
   };
+  /** Optional password; when set, payers must supply it to view/complete the link. */
+  password?: string;
+  /** Optional cap on completions; omit for unlimited. */
+  maxUses?: number;
 };
+
+export type PasswordCheckResult =
+  | { ok: true }
+  | { ok: false; reason: 'no_password_required' | 'invalid_password' | 'locked'; lockedUntil?: number };
 
 export class PaymentLinksService {
   private links = new Map<string, PaymentLinkRecord>();
   private bySlug = new Map<string, string>();
+  private secrets = new Map<string, PaymentLinkSecret>();
 
   private nowIso(): string {
     return new Date().toISOString();
+  }
+
+  private hashPassword(password: string, salt: Buffer): Buffer {
+    // scrypt is deliberately slow and memory-hard, which blunts offline
+    // brute force if the hashes ever leak.
+    return scryptSync(password, salt, 32);
   }
 
   private generateSlug(): string {
@@ -86,6 +118,8 @@ export class PaymentLinksService {
       category: input.category,
       metadata: input.metadata,
       brand: input.brand,
+      requiresPassword: typeof input.password === 'string' && input.password.length > 0,
+      maxUses: typeof input.maxUses === 'number' ? input.maxUses : null,
       isActive: true,
       createdAt: now,
       updatedAt: now,
@@ -100,7 +134,64 @@ export class PaymentLinksService {
 
     this.links.set(id, link);
     this.bySlug.set(slug, id);
+
+    if (link.requiresPassword) {
+      const salt = randomBytes(16);
+      this.secrets.set(id, {
+        passwordHash: this.hashPassword(input.password as string, salt),
+        passwordSalt: salt,
+        failedAttempts: 0,
+        lockedUntil: null,
+      });
+    }
+
     return link;
+  }
+
+  /**
+   * Verify a payer-supplied password for a protected link. Tracks failed
+   * attempts per link and locks the link after MAX_PASSWORD_ATTEMPTS to blunt
+   * brute-force guessing; a correct password resets the counter.
+   */
+  verifyPassword(slug: string, password: string): PasswordCheckResult {
+    const link = this.getBySlug(slug);
+    if (!link || !link.requiresPassword) {
+      return { ok: false, reason: 'no_password_required' };
+    }
+
+    const secret = this.secrets.get(link.id);
+    if (!secret) {
+      return { ok: false, reason: 'no_password_required' };
+    }
+
+    const now = Date.now();
+    if (secret.lockedUntil && secret.lockedUntil > now) {
+      return { ok: false, reason: 'locked', lockedUntil: secret.lockedUntil };
+    }
+
+    const candidate = this.hashPassword(password, secret.passwordSalt);
+    const matches =
+      candidate.length === secret.passwordHash.length &&
+      timingSafeEqual(candidate, secret.passwordHash);
+
+    if (!matches) {
+      secret.failedAttempts += 1;
+      if (secret.failedAttempts >= MAX_PASSWORD_ATTEMPTS) {
+        secret.lockedUntil = now + PASSWORD_LOCKOUT_MS;
+        secret.failedAttempts = 0;
+        return { ok: false, reason: 'locked', lockedUntil: secret.lockedUntil };
+      }
+      return { ok: false, reason: 'invalid_password' };
+    }
+
+    secret.failedAttempts = 0;
+    secret.lockedUntil = null;
+    return { ok: true };
+  }
+
+  /** Whether the link has reached its configured completion cap. */
+  hasReachedUsageLimit(link: PaymentLinkRecord): boolean {
+    return link.maxUses !== null && link.analytics.completions >= link.maxUses;
   }
 
   bulkCreate(merchantId: string, links: Omit<CreatePaymentLinkInput, 'merchantId'>[]): PaymentLinkRecord[] {
@@ -197,7 +288,8 @@ export class PaymentLinksService {
     link.analytics.lastCompletedAt = this.nowIso();
     link.analytics.bySource[source] = (link.analytics.bySource[source] || 0) + 1;
 
-    if (link.recurrence === 'one_time') {
+    // Disable once it is a single-use link or has hit its usage cap.
+    if (link.recurrence === 'one_time' || this.hasReachedUsageLimit(link)) {
       link.isActive = false;
     }
 
@@ -208,6 +300,9 @@ export class PaymentLinksService {
 
   isUsable(link: PaymentLinkRecord): boolean {
     if (!link.isActive) {
+      return false;
+    }
+    if (this.hasReachedUsageLimit(link)) {
       return false;
     }
     return new Date(link.expiresAt).getTime() > Date.now();
@@ -231,6 +326,7 @@ export class PaymentLinksService {
   resetForTests(): void {
     this.links.clear();
     this.bySlug.clear();
+    this.secrets.clear();
   }
 }
 

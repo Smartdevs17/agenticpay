@@ -146,20 +146,46 @@ paymentLinksRouter.get(
   })
 );
 
+function enforcePassword(slug: string, link: { requiresPassword: boolean }, password: unknown): void {
+  if (!link.requiresPassword) {
+    return;
+  }
+  const result = paymentLinksService.verifyPassword(slug, typeof password === 'string' ? password : '');
+  if (result.ok) {
+    return;
+  }
+  if (result.reason === 'locked') {
+    throw new AppError(
+      429,
+      'Too many incorrect password attempts. Try again later.',
+      'PAYMENT_LINK_LOCKED'
+    );
+  }
+  throw new AppError(401, 'A valid password is required for this link', 'PAYMENT_LINK_PASSWORD_REQUIRED');
+}
+
 paymentLinksRouter.get(
   '/r/:slug',
   redirectRateLimiter,
   asyncHandler(async (req, res) => {
     const slug = Array.isArray(req.params.slug) ? req.params.slug[0] : req.params.slug;
     const source = req.query.source ? String(req.query.source) : 'direct';
-    const link = paymentLinksService.trackView(slug, source);
 
-    if (!link) {
+    const existing = paymentLinksService.getBySlug(slug);
+    if (!existing) {
       throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
     }
-
-    if (!paymentLinksService.isUsable(link)) {
+    if (!paymentLinksService.isUsable(existing)) {
       throw new AppError(410, 'Payment link has expired or been disabled', 'PAYMENT_LINK_EXPIRED');
+    }
+
+    // Gate protected links before counting the view, so brute-force probes
+    // can't inflate analytics.
+    enforcePassword(slug, existing, req.query.password);
+
+    const link = paymentLinksService.trackView(slug, source);
+    if (!link) {
+      throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
     }
 
     const accentColor = link.brand?.accentColor || '#0B3A80';
@@ -201,6 +227,16 @@ paymentLinksRouter.post(
   asyncHandler(async (req, res) => {
     const slug = Array.isArray(req.params.slug) ? req.params.slug[0] : req.params.slug;
     const source = req.body.source || 'direct';
+
+    const existing = paymentLinksService.getBySlug(slug);
+    if (!existing) {
+      throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
+    }
+    if (!paymentLinksService.isUsable(existing)) {
+      throw new AppError(410, 'Payment link has expired, been disabled, or reached its usage limit', 'PAYMENT_LINK_EXPIRED');
+    }
+
+    enforcePassword(slug, existing, req.body.password);
 
     const completed = paymentLinksService.complete(slug, source);
     if (!completed) {

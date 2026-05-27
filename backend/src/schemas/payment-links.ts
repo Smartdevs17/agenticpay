@@ -18,6 +18,8 @@ export const createPaymentLinkSchema = z.object({
   category: z.string().min(1).max(64).optional(),
   metadata: z.record(z.string(), z.string()).optional(),
   brand: brandSchema.optional(),
+  password: z.string().min(4).max(128).optional(),
+  maxUses: z.number().int().positive().max(1_000_000).optional(),
 });
 
 export const bulkCreatePaymentLinkSchema = z.object({
@@ -37,4 +39,5 @@ export const updatePaymentLinkSchema = z.object({
 export const paymentLinkCompletionSchema = z.object({
   amountPaid: z.number().positive(),
   source: z.string().max(64).optional(),
+  password: z.string().max(128).optional(),
 });
