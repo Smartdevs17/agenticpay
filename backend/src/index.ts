@@ -1,5 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
@@ -48,6 +46,8 @@ import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
 import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
+import { traceMiddleware } from './middleware/trace.js';
+import { cacheControlNoStore } from './middleware/cache-control.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
 import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
@@ -118,7 +118,7 @@ if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
   console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
 }
 
-const traceStorage = new AsyncLocalStorage<string>();
+import { traceStorage } from './middleware/trace.js';
 
 const originalConsole = {
   log: console.log,
@@ -197,32 +197,10 @@ app.use(
 );
 
 app.use(requestIdMiddleware);
-
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const traceId = (req.headers['x-trace-id'] as string) || randomUUID();
-  res.setHeader('X-Trace-Id', traceId);
-
-  traceStorage.run(traceId, () => {
-    console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Started`);
-
-    res.on('finish', () => {
-      console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Finished with status ${res.statusCode}`);
-    });
-
-    next();
-  });
-});
-
+app.use(traceMiddleware);
 app.use(slaTrackingMiddleware);
 app.use(sessionMiddleware);
-
-app.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    res.setHeader('Cache-Control', 'no-store');
-  }
-  res.setHeader('Vary', 'Accept-Encoding');
-  next();
-});
+app.use(cacheControlNoStore);
 
 app.use(healthRouter);
 
