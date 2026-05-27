@@ -66,7 +66,7 @@ const MONTHLY_MULTIPLIER: Record<BillingInterval, number> = {
 };
 
 export class SubscriptionService {
-  private contract: ethers.Contract;
+  private contract: any;
 
   constructor(contractAddress: string, abi: any, provider: ethers.Provider | ethers.Signer) {
     this.contract = new ethers.Contract(contractAddress, abi, provider);

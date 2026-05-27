@@ -14,7 +14,7 @@ describe('SubscriptionService', () => {
       createPlan: vi.fn(),
     };
     // Create service with mock provider
-    service = new SubscriptionService('0xaddr', [], {} as any);
+    service = new SubscriptionService('0x0000000000000000000000000000000000000001', [], {} as any);
     // Inject mock contract instance
     (service as any).contract = mockContract;
   });
