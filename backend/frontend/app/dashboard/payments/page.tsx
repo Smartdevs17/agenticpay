@@ -3,7 +3,7 @@
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent } from '@/components/ui/card';
 import { CheckCircle2, Clock, XCircle, ExternalLink, Wallet } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { FadeIn } from '@/components/ui/fade-in';
 import { PaymentCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
 
@@ -48,12 +48,7 @@ export default function PaymentsPage() {
 
       <div className="space-y-4">
         {payments.map((payment, index) => (
-          <motion.div
-            key={payment.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.05 }}
-          >
+          <FadeIn key={payment.id} delay={index * 0.05}>
             <Card className="hover:shadow-lg transition-all">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
@@ -95,7 +90,7 @@ export default function PaymentsPage() {
                 )}
               </CardContent>
             </Card>
-          </motion.div>
+          </FadeIn>
         ))}
       </div>
 
