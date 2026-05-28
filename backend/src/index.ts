@@ -111,6 +111,9 @@ import { emailV2Router } from './routes/email-v2.js';
 import { createBullMQScheduler, getBullMQScheduler } from './services/bullmq-scheduler.js';
 import { getScheduledTasks } from './config/scheduled-tasks.js';
 import { bullMQMonitorRouter } from './routes/bullmq-monitor.js';
+import { fileUploadRouter } from './routes/file-upload.js';
+import { credentialRotationRouter } from './routes/credential-rotation.js';
+import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -302,6 +305,12 @@ app.use('/api/v1/events', eventsRouter);
 // Advanced threat detection with behavioral analysis
 app.use('/api/v1/threat-detection', threatDetectionRouter);
 
+// Secure file upload with MIME/magic-bytes validation and ClamAV scanning (Issue #401)
+app.use('/api/v1/uploads', fileUploadRouter);
+
+// Credential rotation management with dual-key overlap and audit trail (Issue #395)
+app.use('/api/v1/credentials', credentialRotationRouter);
+
 // Microservices service mesh — registry, discovery, circuit breakers
 app.use('/api/v1/service-mesh', serviceMeshRouter);
 
@@ -365,6 +374,10 @@ if (config.jobs.enabled) {
   });
 }
 
+// Start automated credential rotation scheduler (Issue #395)
+startScheduledRotation();
+console.log('[CredentialRotation] Scheduled rotation started');
+
 registerDefaultProcessors();
 if (config.queue.enabled) {
   messageQueue.start();
@@ -427,6 +440,13 @@ const shutdown = (signal: string) => {
       }
     } catch (err) {
       console.error('Error stopping BullMQ scheduler:', err);
+    }
+
+    try {
+      stopScheduledRotation();
+      console.log('Credential rotation scheduler stopped.');
+    } catch (err) {
+      console.error('Error stopping credential rotation:', err);
     }
 
     try {

@@ -8,12 +8,89 @@ import type {
   ThreatSeverity,
   ThreatStatus,
   UserBaseline,
+  IpBlock,
+  ThreatAlert,
+  IncidentPlaybook,
+  ThreatRuleType,
 } from '../types/threat-detection.js';
 
 const baselines = new Map<string, UserBaseline>();
 const behaviorHistory = new Map<string, BehaviorEvent[]>();
 const threats = new Map<string, ThreatEvent>();
 const lockedAccounts = new Set<string>();
+
+// ── IP blocking state (Issue #394) ───────────────────────────────────────────
+const ipBlocks = new Map<string, IpBlock>();
+const threatAlerts: ThreatAlert[] = [];
+const MAX_THREAT_ALERTS = 5000;
+
+// IP auto-block thresholds
+const IP_BLOCK_THRESHOLD_SCORE = 85;
+const IP_BLOCK_DEFAULT_DURATION_MS = 60 * 60 * 1000; // 1 hour
+
+// ── Incident response playbooks (Issue #394) ──────────────────────────────────
+const INCIDENT_PLAYBOOKS: IncidentPlaybook[] = [
+  {
+    ruleType: 'brute_force',
+    severity: 'high',
+    steps: [
+      'Lock the affected account immediately.',
+      'Block the source IP for at least 1 hour.',
+      'Notify the account owner via email/SMS.',
+      'Require password reset on next login.',
+      'Review authentication logs for the last 24 hours.',
+    ],
+  },
+  {
+    ruleType: 'credential_stuffing',
+    severity: 'critical',
+    steps: [
+      'Activate CAPTCHA challenge for the IP range.',
+      'Force re-authentication for all sessions from affected IPs.',
+      'Rotate affected API keys immediately.',
+      'Alert security team via PagerDuty.',
+      'Cross-reference failed logins with known breach databases.',
+    ],
+  },
+  {
+    ruleType: 'api_scraping',
+    severity: 'medium',
+    steps: [
+      'Rate-limit the offending IP to 1 req/s.',
+      'Inject honeypot responses to detect further scraping.',
+      'Review scraped endpoints for sensitive data exposure.',
+      'Consider serving degraded responses to the IP.',
+    ],
+  },
+  {
+    ruleType: 'anomaly',
+    severity: 'medium',
+    steps: [
+      'Flag the session for manual review.',
+      'Require step-up authentication for sensitive operations.',
+      'Log all requests from this session for audit.',
+    ],
+  },
+  {
+    ruleType: 'threat_intel',
+    severity: 'critical',
+    steps: [
+      'Block the IP immediately.',
+      'Alert the security team.',
+      'Review all recent requests from this IP.',
+      'Check for data exfiltration patterns.',
+    ],
+  },
+  {
+    ruleType: 'user_agent',
+    severity: 'high',
+    steps: [
+      'Block or challenge the request immediately.',
+      'Review endpoint logs for automated scanning patterns.',
+      'Add the user-agent pattern to WAF block rules.',
+    ],
+  },
+];
 
 const BASELINE_WINDOW_HOURS = 168; // 7 days
 const HIGH_SCORE_THRESHOLD = 75;
@@ -108,7 +185,7 @@ function computeAnomalyScore(event: BehaviorEvent, history: BehaviorEvent[]): An
   if (threatIntel.maliciousIps.has(event.ipAddress)) {
     const contribution = 40;
     score += contribution;
-    factors.push({ name: 'malicious_ip', contribution, details: `IP ${event.ipAddress} is in threat intel feed` });
+    factors.push({ name: 'malicious_ip', contribution, details: `IP ${event.ipAddress} is in threat intel feed`, ruleType: 'threat_intel' as ThreatRuleType });
   }
 
   // Suspicious user agent
@@ -116,9 +193,46 @@ function computeAnomalyScore(event: BehaviorEvent, history: BehaviorEvent[]): An
     if (pattern.test(event.userAgent)) {
       const contribution = 35;
       score += contribution;
-      factors.push({ name: 'suspicious_user_agent', contribution, details: `User agent matches suspicious pattern: ${event.userAgent}` });
+      factors.push({ name: 'suspicious_user_agent', contribution, details: `User agent matches suspicious pattern: ${event.userAgent}`, ruleType: 'user_agent' as ThreatRuleType });
       break;
     }
+  }
+
+  // Brute force: many failed auth attempts from the same IP in 10 minutes
+  const tenMinAgo = Date.now() - 10 * 60 * 1000;
+  const authActions = ['login', 'authenticate', 'auth', 'signin', 'token'];
+  const recentAuthFails = history.filter(
+    (e) =>
+      new Date(e.timestamp).getTime() >= tenMinAgo &&
+      e.ipAddress === event.ipAddress &&
+      authActions.some((a) => e.action.toLowerCase().includes(a)) &&
+      e.statusCode === 401,
+  );
+  if (recentAuthFails.length >= 5) {
+    const contribution = Math.min(30, recentAuthFails.length * 3);
+    score += contribution;
+    factors.push({ name: 'brute_force', contribution, details: `${recentAuthFails.length} failed auth attempts from ${event.ipAddress} in 10 min`, ruleType: 'brute_force' as ThreatRuleType });
+  }
+
+  // Credential stuffing: many unique user IDs failing auth from same IP
+  const recentIpHistory = history.filter(
+    (e) => new Date(e.timestamp).getTime() >= tenMinAgo && e.ipAddress === event.ipAddress && e.statusCode === 401,
+  );
+  const uniqueUsers = new Set(recentIpHistory.map((e) => e.userId)).size;
+  if (uniqueUsers >= 3 && recentIpHistory.length >= 10) {
+    const contribution = 25;
+    score += contribution;
+    factors.push({ name: 'credential_stuffing', contribution, details: `${uniqueUsers} distinct accounts targeted from ${event.ipAddress}`, ruleType: 'credential_stuffing' as ThreatRuleType });
+  }
+
+  // API scraping: rapid sequential requests to many different endpoints in 5 minutes
+  const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+  const recentEndpoints = history.filter((e) => new Date(e.timestamp).getTime() >= fiveMinAgo && e.ipAddress === event.ipAddress);
+  const uniqueEndpoints = new Set(recentEndpoints.map((e) => e.endpoint)).size;
+  if (uniqueEndpoints >= 15) {
+    const contribution = Math.min(25, uniqueEndpoints);
+    score += contribution;
+    factors.push({ name: 'api_scraping', contribution, details: `${uniqueEndpoints} distinct endpoints hit in 5 min from ${event.ipAddress}`, ruleType: 'api_scraping' as ThreatRuleType });
   }
 
   if (baseline) {
@@ -126,7 +240,7 @@ function computeAnomalyScore(event: BehaviorEvent, history: BehaviorEvent[]): An
     if (!baseline.commonIps.includes(event.ipAddress)) {
       const contribution = 15;
       score += contribution;
-      factors.push({ name: 'new_ip_address', contribution, details: `IP ${event.ipAddress} not in established baseline` });
+      factors.push({ name: 'new_ip_address', contribution, details: `IP ${event.ipAddress} not in established baseline`, ruleType: 'anomaly' as ThreatRuleType });
     }
 
     // Unusual hour
@@ -134,14 +248,14 @@ function computeAnomalyScore(event: BehaviorEvent, history: BehaviorEvent[]): An
     if (!baseline.typicalHours.includes(hour)) {
       const contribution = 10;
       score += contribution;
-      factors.push({ name: 'unusual_hour', contribution, details: `Activity at hour ${hour} outside typical pattern` });
+      factors.push({ name: 'unusual_hour', contribution, details: `Activity at hour ${hour} outside typical pattern`, ruleType: 'anomaly' as ThreatRuleType });
     }
 
     // Response time anomaly (4x slower than baseline may indicate heavy probing)
     if (event.durationMs > baseline.avgResponseTimeMs * 4 && baseline.avgResponseTimeMs > 0) {
       const contribution = 10;
       score += contribution;
-      factors.push({ name: 'response_time_anomaly', contribution, details: `Response time ${event.durationMs}ms is 4x above baseline` });
+      factors.push({ name: 'response_time_anomaly', contribution, details: `Response time ${event.durationMs}ms is 4x above baseline`, ruleType: 'anomaly' as ThreatRuleType });
     }
 
     // High request rate in last hour
@@ -150,7 +264,7 @@ function computeAnomalyScore(event: BehaviorEvent, history: BehaviorEvent[]): An
     if (recentCount > baseline.avgRequestsPerHour * 5) {
       const contribution = 20;
       score += contribution;
-      factors.push({ name: 'request_rate_spike', contribution, details: `${recentCount} requests in last hour vs baseline ${Math.round(baseline.avgRequestsPerHour)}` });
+      factors.push({ name: 'request_rate_spike', contribution, details: `${recentCount} requests in last hour vs baseline ${Math.round(baseline.avgRequestsPerHour)}`, ruleType: 'anomaly' as ThreatRuleType });
     }
   }
 
@@ -162,7 +276,7 @@ function computeAnomalyScore(event: BehaviorEvent, history: BehaviorEvent[]): An
   if (errorCount >= 10) {
     const contribution = Math.min(25, errorCount);
     score += contribution;
-    factors.push({ name: 'high_error_rate', contribution, details: `${errorCount} client errors in last 5 minutes` });
+    factors.push({ name: 'high_error_rate', contribution, details: `${errorCount} client errors in last 5 minutes`, ruleType: 'anomaly' as ThreatRuleType });
   }
 
   return {
@@ -180,6 +294,60 @@ function severityFromScore(score: number): ThreatSeverity {
   return 'low';
 }
 
+// ── Playbook lookup ───────────────────────────────────────────────────────────
+
+function getPlaybookSteps(factors: AnomalyFactor[], severity: ThreatSeverity): string[] {
+  const ruleTypes = [...new Set(factors.map((f) => f.ruleType).filter(Boolean) as ThreatRuleType[])];
+  const steps = new Set<string>();
+
+  for (const ruleType of ruleTypes) {
+    const playbook = INCIDENT_PLAYBOOKS.find((p) => p.ruleType === ruleType);
+    if (playbook) {
+      for (const step of playbook.steps) steps.add(step);
+    }
+  }
+
+  if (steps.size === 0) {
+    const fallback = INCIDENT_PLAYBOOKS.find((p) => p.ruleType === 'anomaly');
+    if (fallback) for (const step of fallback.steps) steps.add(step);
+  }
+
+  return Array.from(steps);
+}
+
+function emitThreatAlert(threat: ThreatEvent, factors: AnomalyFactor[], playbookSteps: string[]): void {
+  const ruleTypes = [...new Set(factors.map((f) => f.ruleType).filter(Boolean) as ThreatRuleType[])];
+  const primaryRule: ThreatRuleType = ruleTypes[0] ?? 'anomaly';
+
+  const alert: ThreatAlert = {
+    id: randomUUID(),
+    threatId: threat.id,
+    severity: threat.severity,
+    ruleType: primaryRule,
+    message: `Threat detected for user ${threat.userId} from ${threat.ipAddress} — score ${threat.anomalyScore} (${ruleTypes.join(', ')})`,
+    userId: threat.userId,
+    ipAddress: threat.ipAddress,
+    sentAt: new Date().toISOString(),
+    acknowledged: false,
+    playbookSteps,
+  };
+
+  threatAlerts.push(alert);
+  if (threatAlerts.length > MAX_THREAT_ALERTS) threatAlerts.shift();
+
+  // Fire-and-forget webhook
+  const webhookUrl = process.env.THREAT_ALERT_WEBHOOK_URL;
+  if (webhookUrl) {
+    void import('node-fetch').then(({ default: fetch }) =>
+      fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(alert),
+      }).catch(() => undefined),
+    );
+  }
+}
+
 function recordThreat(event: BehaviorEvent, score: AnomalyScore): ThreatEvent {
   const severity = severityFromScore(score.score);
   const shouldLock = severity === 'critical';
@@ -187,6 +355,22 @@ function recordThreat(event: BehaviorEvent, score: AnomalyScore): ThreatEvent {
   if (shouldLock) {
     lockedAccounts.add(event.userId);
   }
+
+  // Auto-block IP for high-severity threats
+  const shouldBlockIp = score.score >= IP_BLOCK_THRESHOLD_SCORE;
+  if (shouldBlockIp && !ipBlocks.has(event.ipAddress)) {
+    const blockEntry: IpBlock = {
+      ip: event.ipAddress,
+      blockedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + IP_BLOCK_DEFAULT_DURATION_MS).toISOString(),
+      reason: `Auto-blocked: anomaly score ${score.score}`,
+      autoBlocked: true,
+    };
+    ipBlocks.set(event.ipAddress, blockEntry);
+  }
+
+  const playbookSteps = getPlaybookSteps(score.factors, severity);
+  const ruleTypes = [...new Set(score.factors.map((f) => f.ruleType).filter(Boolean) as ThreatRuleType[])];
 
   const threat: ThreatEvent = {
     id: randomUUID(),
@@ -199,10 +383,71 @@ function recordThreat(event: BehaviorEvent, score: AnomalyScore): ThreatEvent {
     detectedAt: new Date().toISOString(),
     falsePositive: false,
     accountLocked: shouldLock,
+    ipBlocked: shouldBlockIp,
+    playbookSteps,
+    ruleTypes,
   };
 
   threats.set(threat.id, threat);
+  emitThreatAlert(threat, score.factors, playbookSteps);
   return threat;
+}
+
+// ── IP block management (Issue #394) ─────────────────────────────────────────
+
+export function blockIp(ip: string, opts: {
+  reason: string;
+  durationMs?: number;
+  autoBlocked?: boolean;
+} = { reason: 'manual block' }): IpBlock {
+  const block: IpBlock = {
+    ip,
+    blockedAt: new Date().toISOString(),
+    expiresAt: opts.durationMs ? new Date(Date.now() + opts.durationMs).toISOString() : undefined,
+    reason: opts.reason,
+    autoBlocked: opts.autoBlocked ?? false,
+  };
+  ipBlocks.set(ip, block);
+  return block;
+}
+
+export function unblockIp(ip: string): boolean {
+  return ipBlocks.delete(ip);
+}
+
+export function isIpBlocked(ip: string): boolean {
+  const block = ipBlocks.get(ip);
+  if (!block) return false;
+  if (block.expiresAt && new Date(block.expiresAt).getTime() < Date.now()) {
+    ipBlocks.delete(ip);
+    return false;
+  }
+  return true;
+}
+
+export function getIpBlocks(): IpBlock[] {
+  // Prune expired blocks
+  for (const [ip, block] of ipBlocks.entries()) {
+    if (block.expiresAt && new Date(block.expiresAt).getTime() < Date.now()) {
+      ipBlocks.delete(ip);
+    }
+  }
+  return Array.from(ipBlocks.values());
+}
+
+export function getThreatAlerts(unacknowledgedOnly = false): ThreatAlert[] {
+  return unacknowledgedOnly ? threatAlerts.filter((a) => !a.acknowledged) : [...threatAlerts];
+}
+
+export function acknowledgeThreatAlert(alertId: string): boolean {
+  const alert = threatAlerts.find((a) => a.id === alertId);
+  if (!alert) return false;
+  alert.acknowledged = true;
+  return true;
+}
+
+export function getIncidentPlaybooks(): IncidentPlaybook[] {
+  return [...INCIDENT_PLAYBOOKS];
 }
 
 export function getBaseline(userId: string): UserBaseline | undefined {

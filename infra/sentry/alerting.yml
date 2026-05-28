@@ -48,3 +48,187 @@ rules:
         service: "slack"
         targetType: "channel"
         targetIdentifier: "#alerts-regressions"
+
+  # ── Threat Detection Alerts (Issue #394) ──────────────────────────────────
+
+  - name: "Critical Threat Detected"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "all"
+    frequency: 5
+    conditions:
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "threat.severity"
+        match: "eq"
+        value: "critical"
+      - id: "sentry.rules.conditions.event_frequency.EventFrequencyCondition"
+        value: 1
+        interval: "1m"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-security"
+      - id: "sentry.integrations.pagerduty.notify_action.PagerDutyNotifyServiceAction"
+        service: "PagerDuty (High Urgency)"
+
+  - name: "Brute Force Attack Detected"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "all"
+    frequency: 10
+    conditions:
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "threat.ruleType"
+        match: "eq"
+        value: "brute_force"
+      - id: "sentry.rules.conditions.event_frequency.EventFrequencyCondition"
+        value: 3
+        interval: "5m"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-security"
+      - id: "sentry.integrations.pagerduty.notify_action.PagerDutyNotifyServiceAction"
+        service: "PagerDuty (High Urgency)"
+
+  - name: "Credential Stuffing Detected"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "all"
+    frequency: 5
+    conditions:
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "threat.ruleType"
+        match: "eq"
+        value: "credential_stuffing"
+      - id: "sentry.rules.conditions.event_frequency.EventFrequencyCondition"
+        value: 1
+        interval: "1m"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-security"
+      - id: "sentry.integrations.pagerduty.notify_action.PagerDutyNotifyServiceAction"
+        service: "PagerDuty (Critical)"
+
+  - name: "API Scraping Detected"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "all"
+    frequency: 15
+    conditions:
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "threat.ruleType"
+        match: "eq"
+        value: "api_scraping"
+      - id: "sentry.rules.conditions.event_frequency.EventFrequencyCondition"
+        value: 5
+        interval: "10m"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-security"
+
+  - name: "IP Auto-Block Triggered"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "all"
+    frequency: 5
+    conditions:
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "threat.ipBlocked"
+        match: "eq"
+        value: "true"
+      - id: "sentry.rules.conditions.event_frequency.EventFrequencyCondition"
+        value: 1
+        interval: "5m"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-security"
+
+  # ── Credential Rotation Alerts (Issue #395) ───────────────────────────────
+
+  - name: "Emergency Credential Revocation"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "any"
+    frequency: 5
+    conditions:
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "rotation.eventType"
+        match: "eq"
+        value: "emergency_revoke"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-security"
+      - id: "sentry.integrations.pagerduty.notify_action.PagerDutyNotifyServiceAction"
+        service: "PagerDuty (Critical)"
+
+  # ── Blockchain Transaction Alerts (Issue #402) ────────────────────────────
+
+  - name: "Stuck Blockchain Transaction"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "all"
+    frequency: 15
+    conditions:
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "tx.status"
+        match: "eq"
+        value: "stuck"
+      - id: "sentry.rules.conditions.event_frequency.EventFrequencyCondition"
+        value: 1
+        interval: "5m"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-blockchain"
+
+  - name: "Critical Blockchain Transaction Failure"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "all"
+    frequency: 5
+    conditions:
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "tx.status"
+        match: "eq"
+        value: "failed"
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "tx.severity"
+        match: "eq"
+        value: "critical"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-blockchain"
+      - id: "sentry.integrations.pagerduty.notify_action.PagerDutyNotifyServiceAction"
+        service: "PagerDuty (High Urgency)"
+
+  - name: "Chain Reorg Detected"
+    environment: "production"
+    project: "agenticpay-backend"
+    actionMatch: "any"
+    frequency: 5
+    conditions:
+      - id: "sentry.rules.conditions.tagged_event.TaggedEventCondition"
+        key: "tx.status"
+        match: "eq"
+        value: "reorged"
+    actions:
+      - id: "sentry.rules.actions.notify_event_service.NotifyEventServiceAction"
+        service: "slack"
+        targetType: "channel"
+        targetIdentifier: "#alerts-blockchain"
+      - id: "sentry.integrations.pagerduty.notify_action.PagerDutyNotifyServiceAction"
+        service: "PagerDuty (High Urgency)"
