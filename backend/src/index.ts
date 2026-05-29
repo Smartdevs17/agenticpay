@@ -257,6 +257,7 @@ apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
 apiV1Router.use('/flags', flagsRouter);
+apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
 apiV1Router.use('/kyb', kybRouter);
 apiV1Router.use('/batch', batchRouter);
 apiV1Router.use('/relayer', relayerRouter);
