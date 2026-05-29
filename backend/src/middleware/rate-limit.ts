@@ -1,4 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
+import { lookupApiKey, maskApiKey } from '../services/api-key-registry.js';
+import { getSharedRateLimitRedis } from '../config/rate-limit-redis.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,6 +32,8 @@ export interface RateLimitOptions {
   redisClient?: RedisClient | null;
   /** Enable sandbox mode with relaxed rate limits */
   sandboxMode?: boolean;
+  /** Count batched sub-requests (e.g. bulk endpoints) against the bucket */
+  batchCountHeader?: string;
 }
 
 /** Minimal ioredis-compatible interface so we don't hard-depend on ioredis */
@@ -55,10 +59,13 @@ const inMemoryStore = new Map<string, BucketState>();
 // Default tier configs
 // ---------------------------------------------------------------------------
 
+// Hourly tier limits: free 1000/h, pro 10000/h, enterprise custom
+const HOUR_SECONDS = 3600;
+
 export const DEFAULT_TIER_CONFIGS: Record<UserTier, TokenBucketConfig> = {
-  free:       { capacity: 60,   refillRate: 1,    burstAllowance: 10  },
-  pro:        { capacity: 300,  refillRate: 5,    burstAllowance: 50  },
-  enterprise: { capacity: 1200, refillRate: 20,   burstAllowance: 200 },
+  free:       { capacity: 1000,  refillRate: 1000 / HOUR_SECONDS,  burstAllowance: 100  },
+  pro:        { capacity: 10000, refillRate: 10000 / HOUR_SECONDS, burstAllowance: 1000 },
+  enterprise: { capacity: 50000, refillRate: 50000 / HOUR_SECONDS, burstAllowance: 5000 },
 };
 
 // Sandbox-specific relaxed rate limits for testing
@@ -243,6 +250,13 @@ async function consumeRedis(
 // ---------------------------------------------------------------------------
 
 export function resolveUserTier(req: Request): UserTier {
+  const apiKeyHeader = req.headers['x-api-key'];
+  const apiKey = typeof apiKeyHeader === 'string' ? apiKeyHeader : undefined;
+  if (apiKey) {
+    const record = lookupApiKey(apiKey);
+    if (record) return record.tier;
+  }
+
   const h = req.headers['x-user-tier'];
   const v = (Array.isArray(h) ? h[0] : h)?.toLowerCase();
   if (v === 'pro' || v === 'enterprise') return v;
@@ -250,11 +264,23 @@ export function resolveUserTier(req: Request): UserTier {
 }
 
 export function resolveClientKey(req: Request): string {
+  const apiKeyHeader = req.headers['x-api-key'];
+  if (typeof apiKeyHeader === 'string' && apiKeyHeader.trim()) {
+    const record = lookupApiKey(apiKeyHeader.trim());
+    return record?.label ?? maskApiKey(apiKeyHeader.trim());
+  }
+
   const auth = req.headers.authorization;
-  if (auth) return auth;
-  const apiKey = req.headers['x-api-key'];
-  if (typeof apiKey === 'string' && apiKey.trim()) return apiKey;
+  if (auth?.startsWith('Bearer ')) return maskApiKey(auth.slice(7));
+  if (auth) return maskApiKey(auth);
   return req.ip ?? 'unknown';
+}
+
+export function resolveCustomHourlyLimit(req: Request): number | null {
+  const apiKeyHeader = req.headers['x-api-key'];
+  if (typeof apiKeyHeader !== 'string') return null;
+  const record = lookupApiKey(apiKeyHeader.trim());
+  return record?.customHourlyLimit ?? null;
 }
 
 function resolveEndpointConfig(path: string, tier: UserTier, sandboxMode: boolean = false): TokenBucketConfig {
@@ -307,12 +333,24 @@ function isSustainedOveruse(clientKey: string): boolean {
 // ---------------------------------------------------------------------------
 
 export function tokenBucketRateLimit(opts: RateLimitOptions = {}) {
-  const { keyPrefix = 'rl', redisClient = null, sandboxMode = false } = opts;
+  const { keyPrefix = 'rl', redisClient = null, sandboxMode = false, batchCountHeader = 'x-batch-count' } = opts;
 
   return async function rateLimitMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
     const tier = resolveUserTier(req);
     const clientKey = resolveClientKey(req);
-    const cfg = opts.endpointConfig ? opts.endpointConfig[tier] : resolveEndpointConfig(req.path, tier, sandboxMode);
+    let cfg = opts.endpointConfig ? opts.endpointConfig[tier] : resolveEndpointConfig(req.path, tier, sandboxMode);
+
+    const customHourly = resolveCustomHourlyLimit(req);
+    if (customHourly && tier === 'enterprise') {
+      cfg = {
+        capacity: customHourly,
+        refillRate: customHourly / HOUR_SECONDS,
+        burstAllowance: Math.ceil(customHourly * 0.1),
+      };
+    }
+
+    const batchCountRaw = req.headers[batchCountHeader];
+    const batchCount = Math.max(1, Math.min(Number(batchCountRaw) || 1, 100));
     const bucketKey = `${keyPrefix}:${tier}:${clientKey}:${matchEndpointLabel(req.path)}`;
     const nowMs = Date.now();
 
@@ -324,11 +362,19 @@ export function tokenBucketRateLimit(opts: RateLimitOptions = {}) {
     let result: { allowed: boolean; tokensAfter: number; retryAfterMs: number };
 
     try {
-      if (redisClient) {
-        result = await consumeRedis(redisClient, bucketKey, cfg, nowMs);
-      } else {
-        result = consumeInMemory(bucketKey, cfg, nowMs);
+      const activeRedis = redisClient ?? (await getSharedRateLimitRedis());
+      let combined = { allowed: true, tokensAfter: cfg.capacity, retryAfterMs: 0 };
+
+      for (let i = 0; i < batchCount; i++) {
+        if (activeRedis) {
+          combined = await consumeRedis(activeRedis, bucketKey, cfg, nowMs);
+        } else {
+          combined = consumeInMemory(bucketKey, cfg, nowMs);
+        }
+        if (!combined.allowed) break;
       }
+
+      result = combined;
     } catch (err) {
       // Redis failure — fail open, log warning
       console.warn('[RateLimit] Redis error, failing open:', err);
@@ -342,7 +388,10 @@ export function tokenBucketRateLimit(opts: RateLimitOptions = {}) {
     res.setHeader('X-RateLimit-Limit', String(cfg.capacity));
     res.setHeader('X-RateLimit-Remaining', String(Math.floor(result.tokensAfter)));
     res.setHeader('X-RateLimit-Reset', String(Math.ceil(Date.now() / 1000) + resetSec));
-    res.setHeader('X-RateLimit-Policy', `capacity=${cfg.capacity};refill=${cfg.refillRate}/s;burst=${cfg.burstAllowance}`);
+    res.setHeader('X-RateLimit-Policy', `capacity=${cfg.capacity};refill=${cfg.refillRate.toFixed(4)}/s;burst=${cfg.burstAllowance};window=3600s`);
+    if (batchCount > 1) {
+      res.setHeader('X-RateLimit-Batch-Count', String(batchCount));
+    }
 
     recordAnalyticsEvent({
       ts: nowMs,
