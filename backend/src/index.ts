@@ -114,7 +114,7 @@ import { getScheduledTasks } from './config/scheduled-tasks.js';
 import { bullMQMonitorRouter } from './routes/bullmq-monitor.js';
 import { fileUploadRouter } from './routes/file-upload.js';
 import { credentialRotationRouter } from './routes/credential-rotation.js';
-import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
+import zkIdentityRouter from './routes/zk-identity.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -258,6 +258,7 @@ apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
 apiV1Router.use('/flags', flagsRouter);
 apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
+apiV1Router.use('/zk-identity', zkIdentityRouter);
 apiV1Router.use('/kyb', kybRouter);
 apiV1Router.use('/batch', batchRouter);
 apiV1Router.use('/relayer', relayerRouter);
