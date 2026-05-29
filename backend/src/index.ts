@@ -88,48 +88,9 @@ import { emailV2Router } from './routes/email-v2.js';
 import { createBullMQScheduler, getBullMQScheduler } from './services/bullmq-scheduler.js';
 import { getScheduledTasks } from './config/scheduled-tasks.js';
 import { bullMQMonitorRouter } from './routes/bullmq-monitor.js';
-import { coldStartMiddleware } from './middleware/cold-start.js';
-import { coldStartMonitorRouter } from './routes/cold-start-monitor.js';
-
-// ── Lazy Sentry initialization ────────────────────────────────────────────────
-// The profiling integration (@sentry/profiling-node) loads a native addon that
-// adds ~30-50ms to cold start. We initialize Sentry synchronously (required for
-// error capture) but defer the profiling integration until after the server is
-// already listening, so it does not block the critical path.
-//
-// Trace/profile sample rates are reduced from 1.0 in production to avoid
-// overhead on every request during the warm-up window.
-
-Sentry.init({
-  dsn: process.env.SENTRY_DSN || '',
-  integrations: [],          // profiling integration added lazily after listen()
-  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-  profilesSampleRate: 0,     // profiling enabled lazily after first request
-  environment: process.env.NODE_ENV || 'development',
-  beforeSend(event, hint) {
-    if (event.exception && hint.originalException) {
-      const error = hint.originalException as Error;
-      if (error && error.message && error.message.includes('Database connection timeout')) {
-        event.fingerprint = ['database-timeout'];
-      }
-    }
-    return event;
-  }
-});
-
-// Lazily add the profiling integration after the process is warm.
-// Called inside setImmediate() within server.listen() callback.
-let profilingIntegrationLoaded = false;
-function loadProfilingIntegration(): void {
-  if (profilingIntegrationLoaded) return;
-  profilingIntegrationLoaded = true;
-  import('@sentry/profiling-node').then(({ nodeProfilingIntegration }) => {
-    Sentry.addIntegration(nodeProfilingIntegration());
-    console.log('[sentry] Profiling integration loaded');
-  }).catch((err) => {
-    console.warn('[sentry] Could not load profiling integration:', err?.message);
-  });
-}
+import { fileUploadRouter } from './routes/file-upload.js';
+import { credentialRotationRouter } from './routes/credential-rotation.js';
+import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -341,6 +302,12 @@ app.use('/api/v1/events', eventsRouter);
 // Advanced threat detection with behavioral analysis
 app.use('/api/v1/threat-detection', threatDetectionRouter);
 
+// Secure file upload with MIME/magic-bytes validation and ClamAV scanning (Issue #401)
+app.use('/api/v1/uploads', fileUploadRouter);
+
+// Credential rotation management with dual-key overlap and audit trail (Issue #395)
+app.use('/api/v1/credentials', credentialRotationRouter);
+
 // Microservices service mesh — registry, discovery, circuit breakers
 app.use('/api/v1/service-mesh', serviceMeshRouter);
 
@@ -387,6 +354,50 @@ app.use(notFoundHandler);
 Sentry.setupExpressErrorHandler(app);
 
 app.use(errorHandler);
+
+if (config.jobs.enabled) {
+  startJobs();
+
+  // Start the BullMQ distributed scheduler when Redis is available.
+  // Falls back silently to the in-process node-cron scheduler if Redis is absent.
+  createBullMQScheduler(getScheduledTasks()).then((scheduler) => {
+    if (scheduler) {
+      console.log('[bullmq] Distributed scheduler active');
+    } else {
+      console.log('[scheduler] Using in-process node-cron (Redis not configured)');
+    }
+  }).catch((err) => {
+    console.error('[bullmq] Scheduler startup error:', err);
+  });
+}
+
+// Start automated credential rotation scheduler (Issue #395)
+startScheduledRotation();
+console.log('[CredentialRotation] Scheduled rotation started');
+
+registerDefaultProcessors();
+if (config.queue.enabled) {
+  messageQueue.start();
+  paymentQueue.start();
+}
+startWebhookWorker();
+
+// Auto-escalation cron
+setInterval(async () => {
+  const count = await disputeService.processEscalations();
+  if (count > 0) console.log(`Escalated ${count} disputes`);
+}, 5 * 60 * 1000);
+
+if (featureFlags.evaluate('batch-operations')) {
+  batchProcessor.start();
+  console.log('[BatchProcessor] Started');
+}
+
+getRedisCache().connect().then(() => {
+  console.log('[RedisCache] Connection initialized');
+}).catch(() => {
+  console.log('[RedisCache] Not available, using in-memory cache only');
+});
 
 const server = http.createServer(app);
 const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
@@ -479,6 +490,13 @@ const shutdown = (signal: string) => {
       }
     } catch (err) {
       console.error('Error stopping BullMQ scheduler:', err);
+    }
+
+    try {
+      stopScheduledRotation();
+      console.log('Credential rotation scheduler stopped.');
+    } catch (err) {
+      console.error('Error stopping credential rotation:', err);
     }
 
     try {

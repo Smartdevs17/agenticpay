@@ -7,7 +7,9 @@
     "build": "tsc",
     "lint": "echo 'No lint yet'"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@agenticpay/types": "*"
+  },
   "devDependencies": {
     "@agenticpay/typescript-config": "*",
     "@agenticpay/eslint-config": "*",

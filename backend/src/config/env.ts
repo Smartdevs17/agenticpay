@@ -32,6 +32,19 @@ const envSchema = z.object({
   CACHE_WARMING_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
   DB_QUERY_LOGGING_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
   DB_SLOW_QUERY_THRESHOLD_MS: z.coerce.number().default(100),
+  // Transaction monitor (Issue #402)
+  TX_MONITOR_POLL_MS: z.coerce.number().default(15_000),
+  TX_MONITOR_STUCK_THRESHOLD_MS: z.coerce.number().default(300_000),
+  TX_MONITOR_MAX_RETRIES: z.coerce.number().default(3),
+  ALERT_WEBHOOK_URL: z.string().default(''),
+  // File upload (Issue #401)
+  UPLOAD_DIR: z.string().default('./uploads'),
+  CLAMD_HOST: z.string().default(''),
+  CLAMD_PORT: z.coerce.number().default(3310),
+  // Credential rotation (Issue #395)
+  CREDENTIAL_ROTATION_CHECK_INTERVAL_MS: z.coerce.number().default(60 * 60 * 1000),
+  // Threat detection (Issue #394)
+  THREAT_ALERT_WEBHOOK_URL: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
