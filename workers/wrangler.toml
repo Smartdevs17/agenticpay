@@ -9,3 +9,10 @@ id = "YOUR_KV_NAMESPACE_ID"
 [[kv_namespaces]]
 binding = "EDGE_CACHE"
 id = "YOUR_KV_CACHE_ID"
+
+# Warm-up cron triggers — keep critical backend endpoints warm to avoid cold starts.
+# Runs every 5 minutes to prevent the backend from going idle.
+[triggers]
+crons = [
+  "*/5 * * * *",   # warm-up ping every 5 minutes
+]
