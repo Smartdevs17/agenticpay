@@ -101,6 +101,7 @@ import './events/projections.js';
 import { stripeRouter } from './routes/stripe.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { requestSizeLimit } from './middleware/request-size-limit.js';
 import { signaturesRouter } from './routes/signatures.js';
 import { createSandboxRouter } from './routes/sandbox.js';
 import { circuitBreakerRouter } from './routes/circuit-breaker.js';
@@ -158,6 +159,10 @@ console.warn = (...args) => originalConsole.warn(...formatMessage(args));
 console.error = (...args) => originalConsole.error(...formatMessage(args));
 
 const app = express();
+
+// Security stack: headers, sanitization, payload limits
+SecurityMiddleware.getInstance().applySecurity(app);
+app.use(requestSizeLimit());
 
 // Token-bucket rate limiter (replaces fixed-window tieredRateLimit)
 const apiRateLimiter = tokenBucketRateLimit({ keyPrefix: 'rl:api' });
