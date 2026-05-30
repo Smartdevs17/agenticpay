@@ -70,6 +70,15 @@ Express.js API server providing:
 
 ---
 
+## Devcontainer (recommended)
+
+For one-click setup with Node.js, Rust, Soroban CLI, Postgres, and Redis, see [docs/DEVCONTAINER.md](docs/DEVCONTAINER.md).
+
+```bash
+# Or start only backend services on the host:
+docker compose up -d
+```
+
 ## Prerequisites
 
 Before setting up the project locally, ensure you have the following installed:

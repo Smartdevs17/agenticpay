@@ -1,0 +1,77 @@
+{
+  "generatedAt": "2026-05-30T08:13:11.739Z",
+  "port": 3099,
+  "note": "Auto-established with 2.5x headroom",
+  "endpoints": [
+    {
+      "name": "health",
+      "path": "/health",
+      "latency": {
+        "p99": 1625
+      }
+    },
+    {
+      "name": "ready",
+      "path": "/ready",
+      "latency": {
+        "p99": 598
+      }
+    },
+    {
+      "name": "sandbox_status",
+      "path": "/api/v1/sandbox/status",
+      "latency": {
+        "p99": 1195
+      }
+    },
+    {
+      "name": "escrow_list",
+      "path": "/api/v1/escrow",
+      "latency": {
+        "p99": 2340
+      }
+    },
+    {
+      "name": "flags",
+      "path": "/api/v1/flags",
+      "latency": {
+        "p99": 0
+      }
+    },
+    {
+      "name": "compression_metrics",
+      "path": "/api/v1/compression/metrics",
+      "latency": {
+        "p99": 0
+      }
+    },
+    {
+      "name": "pool_metrics",
+      "path": "/api/v1/pool/metrics",
+      "latency": {
+        "p99": 1070
+      }
+    },
+    {
+      "name": "sandbox_payment_process",
+      "path": "/api/v1/sandbox/payments/process",
+      "latency": {
+        "p99": 1628
+      }
+    },
+    {
+      "name": "escrow_create",
+      "path": "/api/v1/escrow",
+      "latency": {
+        "p99": 2420
+      }
+    },
+    {
+      "name": "circuit_breaker",
+      "path": "/api/v1/circuit-breaker",
+      "latency": {
+        "p99": 1585
+      }
+    }
+  ]
+}

@@ -33,6 +33,7 @@ import { stellarRouter } from './routes/stellar.js';
 import { catalogRouter } from './routes/catalog.js';
 import { jobsRouter } from './routes/jobs.js';
 import { healthRouter } from './routes/health.js';
+import { docsRouter } from './routes/docs.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
@@ -232,6 +233,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 app.use(healthRouter);
+app.use('/docs', docsRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 

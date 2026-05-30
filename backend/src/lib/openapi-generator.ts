@@ -99,6 +99,21 @@ export class OpenAPIGenerator {
           },
         },
         responses: {
+          BadRequest: {
+            description: 'Validation failed',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'VALIDATION_FAILED' },
+                    message: { type: 'string' },
+                    details: { type: 'array', items: { type: 'object' } },
+                  },
+                },
+              },
+            },
+          },
           NotFound: {
             description: 'Resource not found',
             content: {
@@ -198,11 +213,15 @@ export class OpenAPIGenerator {
 
     return Object.entries(responses).reduce(
       (acc, [status, response]) => {
-        acc[status] = {
-          description: response.description,
-          content: response.content,
-          headers: response.headers,
-        };
+        if (response && typeof response === 'object' && '$ref' in response) {
+          acc[status] = response;
+        } else {
+          acc[status] = {
+            description: response.description,
+            content: response.content,
+            headers: response.headers,
+          };
+        }
         return acc;
       },
       {} as Record<string, any>

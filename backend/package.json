@@ -16,7 +16,12 @@
     "db:rollback": "npx tsx migrations/runner.ts rollback",
     "db:reset": "npx tsx migrations/runner.ts reset",
     "db:seed": "npx tsx migrations/runner.ts seed",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "openapi:generate": "tsx scripts/generate-openapi.ts",
+    "openapi:validate": "node -e \"require('fs').accessSync('docs/api/openapi/openapi.json')\"",
+    "benchmark": "tsx src/tests/benchmarks/run-benchmarks.ts",
+    "benchmark:baseline": "tsx src/tests/benchmarks/run-benchmarks.ts --write-baseline",
+    "benchmark:compare": "tsx src/tests/benchmarks/compare-baseline.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -74,6 +79,9 @@
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^4.1.1"
+    "vitest": "^4.1.1",
+    "autocannon": "^7.15.0",
+    "openapi-fetch": "^0.13.5",
+    "openapi-typescript": "^7.4.4"
   }
 }
