@@ -49,7 +49,7 @@ describe('httpLogger middleware', () => {
     );
 
     // X-Request-Id header must be set on the response
-    expect(res.setHeader).toHaveBeenCalledWith('X-Request-Id', (req as any).id);
+    expect(res.setHeader).toHaveBeenCalledWith('x-request-id', (req as any).id);
 
     expect(next).toHaveBeenCalledOnce();
   });
@@ -66,7 +66,7 @@ describe('httpLogger middleware', () => {
     httpLogger(req as any, res as any, next);
 
     expect((req as any).id).toBe(existingId);
-    expect(res.setHeader).toHaveBeenCalledWith('X-Request-Id', existingId);
+    expect(res.setHeader).toHaveBeenCalledWith('x-request-id', existingId);
   });
 
   it('calls next()', async () => {

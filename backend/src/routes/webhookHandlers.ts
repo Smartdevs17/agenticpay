@@ -1,109 +1,66 @@
 import { Router } from 'express';
-import { webhookVerifiers, rawBodyCapture } from '../middleware/webhookVerification.js';
+import { webhookVerifiers, webhookJsonParser } from '../middleware/webhookVerification.js';
 import { markWebhookProcessed } from '../services/webhooks/verification.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { createModuleLogger } from '../middleware/logger.js';
 
 export const webhookHandlersRouter = Router();
+const webhookLog = createModuleLogger('webhooks');
 
-// Apply raw body capture middleware first (before JSON parsing)
-webhookHandlersRouter.use(rawBodyCapture());
+webhookHandlersRouter.use(webhookJsonParser);
 
-// Stripe webhooks
 webhookHandlersRouter.post(
   '/stripe',
   webhookVerifiers.stripe,
   asyncHandler(async (req, res) => {
-    const event = req.body;
-    const verification = (req as any).webhookVerification;
-
-    console.log(`Verified Stripe webhook: ${event.type}`, {
-      eventId: event.id,
-      verified: verification.isValid,
-      timestamp: verification.timestamp,
-    });
-
-    // Process the webhook event
-    // In a real implementation, this would trigger business logic
-    // For now, just mark as processed
-    const eventId = `stripe_${event.id}`;
-    markWebhookProcessed(eventId);
-
+    const event = req.body as { id?: string; type?: string };
+    webhookLog.info(
+      { eventId: event.id, type: event.type, verified: req.webhookVerification?.isValid },
+      'Stripe webhook received',
+    );
+    if (event.id) markWebhookProcessed(`stripe_${event.id}`);
     res.json({ received: true, event: event.type });
   }),
 );
 
-// PayPal webhooks
 webhookHandlersRouter.post(
   '/paypal',
   webhookVerifiers.paypal,
   asyncHandler(async (req, res) => {
-    const event = req.body;
-    const verification = (req as any).webhookVerification;
-
-    console.log(`Verified PayPal webhook: ${event.event_type}`, {
-      eventId: event.id,
-      verified: verification.isValid,
-      timestamp: verification.timestamp,
-    });
-
-    // Process the webhook event
-    const eventId = `paypal_${event.id}`;
-    markWebhookProcessed(eventId);
-
+    const event = req.body as { id?: string; event_type?: string };
+    webhookLog.info({ eventId: event.id, type: event.event_type }, 'PayPal webhook received');
+    if (event.id) markWebhookProcessed(`paypal_${event.id}`);
     res.json({ received: true, event: event.event_type });
   }),
 );
 
-// GitHub webhooks
 webhookHandlersRouter.post(
   '/github',
   webhookVerifiers.github,
   asyncHandler(async (req, res) => {
-    const event = req.body;
     const eventType = req.headers['x-github-event'] as string;
-    const verification = (req as any).webhookVerification;
-
-    console.log(`Verified GitHub webhook: ${eventType}`, {
-      deliveryId: req.headers['x-github-delivery'],
-      verified: verification.isValid,
-      timestamp: verification.timestamp,
-    });
-
-    // Process the webhook event
     const deliveryId = req.headers['x-github-delivery'] as string;
-    const eventId = `github_${deliveryId}`;
-    markWebhookProcessed(eventId);
-
+    webhookLog.info({ deliveryId, eventType }, 'GitHub webhook received');
+    markWebhookProcessed(`github_${deliveryId}`);
     res.json({ received: true, event: eventType });
   }),
 );
 
-// Custom webhooks
 webhookHandlersRouter.post(
   '/custom',
   webhookVerifiers.custom,
   asyncHandler(async (req, res) => {
-    const event = req.body;
-    const verification = (req as any).webhookVerification;
-
-    console.log(`Verified custom webhook`, {
-      verified: verification.isValid,
-      timestamp: verification.timestamp,
-    });
-
-    // Process the webhook event
-    const eventId = `custom_${Date.now()}`;
+    webhookLog.info({ verified: req.webhookVerification?.isValid }, 'Custom webhook received');
+    const eventId = req.webhookVerification?.eventId ?? `custom_${Date.now()}`;
     markWebhookProcessed(eventId);
-
     res.json({ received: true });
   }),
 );
 
-// Test endpoint for webhook verification (no verification required)
 webhookHandlersRouter.post(
   '/test',
   asyncHandler(async (req, res) => {
-    console.log('Test webhook received:', req.body);
+    webhookLog.debug({ body: req.body }, 'Test webhook received');
     res.json({ received: true, test: true });
   }),
 );

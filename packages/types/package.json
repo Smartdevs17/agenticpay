@@ -5,12 +5,14 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "docs": "typedoc --options typedoc.json",
     "lint": "echo 'No lint yet'"
   },
   "dependencies": {},
   "devDependencies": {
     "@agenticpay/typescript-config": "*",
     "@agenticpay/eslint-config": "*",
+    "typedoc": "^0.28.0",
     "typescript": "^5.6.0"
   }
 }

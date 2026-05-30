@@ -1,68 +1,108 @@
-import { Request, Response, NextFunction } from 'express';
-import { verifyWebhookSignature, queueFailedWebhook, WebhookProvider } from '../services/webhooks/verification.js';
+import express, { Request, Response, NextFunction } from 'express';
+import {
+  queueFailedWebhook,
+  retryWebhook,
+  type WebhookProvider,
+} from '../services/webhooks/verification.js';
+import {
+  verifyStripeProviderWebhook,
+  verifyGithubProviderWebhook,
+  verifyPaypalProviderWebhook,
+  verifyCustomProviderWebhook,
+  type ProviderVerificationResult,
+} from '../services/webhooks/providers.js';
+import { isReplayEvent } from '../services/webhooks/replay.js';
+import { storeWebhookPayload } from '../services/webhooks/audit.js';
+import { createModuleLogger } from './logger.js';
 import { AppError } from './errorHandler.js';
 
-export interface WebhookVerificationConfig {
-  provider: WebhookProvider;
-  signatureHeader: string;
-  timestampHeader: string;
-  toleranceSeconds?: number;
-  maxRetries?: number;
+const webhookLog = createModuleLogger('webhooks');
+
+declare global {
+  namespace Express {
+    interface Request {
+      rawBody?: string;
+      webhookVerification?: ProviderVerificationResult;
+    }
+  }
 }
 
-/**
- * Middleware to verify webhook signatures
- */
-export function verifyWebhook(config: WebhookVerificationConfig) {
+export function captureRawBody(req: Request, _res: Response, buf: Buffer): void {
+  if (buf?.length) {
+    req.rawBody = buf.toString('utf8');
+  }
+}
+
+/** JSON parser that preserves raw body for HMAC verification */
+export const webhookJsonParser = express.json({
+  verify: captureRawBody,
+  limit: '2mb',
+});
+
+type ProviderVerifier = (req: Request, rawBody: string) => ProviderVerificationResult;
+
+const providerVerifiers: Record<WebhookProvider, ProviderVerifier> = {
+  stripe: verifyStripeProviderWebhook,
+  paypal: verifyPaypalProviderWebhook,
+  github: verifyGithubProviderWebhook,
+  custom: verifyCustomProviderWebhook,
+};
+
+export function verifyWebhookProvider(provider: WebhookProvider) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const signature = req.headers[config.signatureHeader.toLowerCase()] as string;
-      const timestamp = req.headers[config.timestampHeader.toLowerCase()] as string;
+      const rawBody = req.rawBody ?? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {}));
+      const verify = providerVerifiers[provider];
+      const result = verify(req, rawBody);
 
-      if (!signature) {
-        throw new AppError(400, `Missing ${config.signatureHeader} header`, 'WEBHOOK_VERIFICATION_FAILED');
-      }
-
-      if (!timestamp) {
-        throw new AppError(400, `Missing ${config.timestampHeader} header`, 'WEBHOOK_VERIFICATION_FAILED');
-      }
-
-      // Get raw body for signature verification
-      const body = req.rawBody || JSON.stringify(req.body);
-
-      const result = verifyWebhookSignature({
-        signature,
-        timestamp,
-        body,
-        provider: config.provider,
-        toleranceSeconds: config.toleranceSeconds || 300,
+      storeWebhookPayload({
+        provider,
+        eventId: result.eventId,
+        payload: result.payload ?? req.body,
+        signature: (req.headers['stripe-signature'] ||
+          req.headers['x-hub-signature-256'] ||
+          req.headers['x-signature'] ||
+          '') as string,
+        verified: result.isValid,
+        error: result.error,
       });
 
+      if (result.isValid && isReplayEvent(`${provider}:${result.eventId}`)) {
+        webhookLog.warn({ provider, eventId: result.eventId }, 'Webhook replay detected');
+        throw new AppError(409, 'Duplicate webhook delivery', 'WEBHOOK_REPLAY');
+      }
+
       if (!result.isValid) {
-        // Queue failed webhook for retry
         const event = queueFailedWebhook(
-          config.provider,
-          req.headers['x-webhook-event-type'] as string || 'unknown',
-          req.body,
-          signature,
-          timestamp,
-          result.error || 'Verification failed'
+          provider,
+          (req.headers['x-webhook-event-type'] as string) || 'unknown',
+          result.payload ?? req.body,
+          (req.headers['x-signature'] as string) || '',
+          result.timestamp.toISOString(),
+          result.error || 'Verification failed',
         );
 
-        // Log verification failure
-        console.warn(`Webhook verification failed for ${config.provider}:`, {
-          eventId: event.id,
-          error: result.error,
-          timestamp: result.timestamp,
-          provider: result.provider,
-        });
+        webhookLog.warn(
+          { provider, eventId: event.id, error: result.error },
+          'Webhook verification failed',
+        );
+
+        if (result.error?.includes('timeout') || result.error?.includes('network')) {
+          const retried = retryWebhook(event.id);
+          if (retried?.isValid) {
+            req.webhookVerification = { ...result, isValid: true };
+            req.body = result.payload ?? req.body;
+            return next();
+          }
+        }
 
         throw new AppError(401, `Webhook verification failed: ${result.error}`, 'WEBHOOK_VERIFICATION_FAILED');
       }
 
-      // Attach verification result to request for downstream handlers
-      (req as any).webhookVerification = result;
-
+      req.webhookVerification = result;
+      if (result.payload !== undefined) {
+        req.body = result.payload;
+      }
       next();
     } catch (error) {
       next(error);
@@ -70,59 +110,9 @@ export function verifyWebhook(config: WebhookVerificationConfig) {
   };
 }
 
-/**
- * Pre-built verification middleware for common providers
- */
 export const webhookVerifiers = {
-  stripe: verifyWebhook({
-    provider: 'stripe',
-    signatureHeader: 'stripe-signature',
-    timestampHeader: 'stripe-timestamp',
-    toleranceSeconds: 300,
-  }),
-
-  paypal: verifyWebhook({
-    provider: 'paypal',
-    signatureHeader: 'paypal-transmission-signature',
-    timestampHeader: 'paypal-transmission-time',
-    toleranceSeconds: 300,
-  }),
-
-  github: verifyWebhook({
-    provider: 'github',
-    signatureHeader: 'x-hub-signature-256',
-    timestampHeader: 'x-github-delivery', // GitHub doesn't use timestamp header, but we can use delivery ID
-    toleranceSeconds: 300,
-  }),
-
-  custom: verifyWebhook({
-    provider: 'custom',
-    signatureHeader: 'x-signature',
-    timestampHeader: 'x-timestamp',
-    toleranceSeconds: 300,
-  }),
+  stripe: verifyWebhookProvider('stripe'),
+  paypal: verifyWebhookProvider('paypal'),
+  github: verifyWebhookProvider('github'),
+  custom: verifyWebhookProvider('custom'),
 };
-
-/**
- * Middleware to capture raw body for webhook verification
- * Must be used before express.json() middleware
- */
-export function rawBodyCapture() {
-  return (req: Request, res: Response, next: NextFunction) => {
-    let data = '';
-
-    req.setEncoding('utf8');
-    req.on('data', (chunk) => {
-      data += chunk;
-    });
-
-    req.on('end', () => {
-      (req as any).rawBody = data;
-      next();
-    });
-
-    req.on('error', (err) => {
-      next(err);
-    });
-  };
-}

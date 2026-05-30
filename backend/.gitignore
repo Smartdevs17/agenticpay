@@ -2,4 +2,5 @@ node_modules/
 dist/
 .env
 *.log
+.migration-state.json
 backend/benchmarks/results.json

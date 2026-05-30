@@ -1,5 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
@@ -53,6 +51,7 @@ import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
 import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
+import { httpLogger, correlationMiddleware } from './middleware/logger.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
 import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
@@ -133,32 +132,6 @@ if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
   console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
 }
 
-const traceStorage = new AsyncLocalStorage<string>();
-
-const originalConsole = {
-  log: console.log,
-  info: console.info,
-  warn: console.warn,
-  error: console.error,
-};
-
-function formatMessage(args: any[]): any[] {
-  const traceId = traceStorage.getStore();
-  if (traceId) {
-    if (typeof args[0] === 'string') {
-      args[0] = `[TraceID: ${traceId}] ${args[0]}`;
-    } else {
-      args.unshift(`[TraceID: ${traceId}]`);
-    }
-  }
-  return args;
-}
-
-console.log = (...args) => originalConsole.log(...formatMessage(args));
-console.info = (...args) => originalConsole.info(...formatMessage(args));
-console.warn = (...args) => originalConsole.warn(...formatMessage(args));
-console.error = (...args) => originalConsole.error(...formatMessage(args));
-
 const app = express();
 
 // Security stack: headers, sanitization, payload limits
@@ -190,9 +163,20 @@ app.use(
       'API-Version',
       'X-API-Version',
       'Accept-Version',
+      'Stripe-Signature',
+      'X-Hub-Signature-256',
+      'X-Webhook-Key-Id',
     ],
   })
 );
+
+app.use(requestIdMiddleware);
+app.use(correlationMiddleware);
+app.use(httpLogger);
+
+// Incoming webhooks: raw body capture before global JSON parser (#393)
+app.use('/webhooks', webhookHandlersRouter);
+
 app.use(express.json());
 app.use(express.text({ type: ['text/csv', 'text/plain'] }));
 
@@ -203,23 +187,6 @@ app.use(
     minSizeBytes: 1024,
   })
 );
-
-app.use(requestIdMiddleware);
-
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const traceId = (req.headers['x-trace-id'] as string) || randomUUID();
-  res.setHeader('X-Trace-Id', traceId);
-
-  traceStorage.run(traceId, () => {
-    console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Started`);
-
-    res.on('finish', () => {
-      console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Finished with status ${res.statusCode}`);
-    });
-
-    next();
-  });
-});
 
 app.use(slaTrackingMiddleware);
 app.use(sessionMiddleware);
@@ -345,9 +312,6 @@ app.use('/api/v2/email', emailV2Router);
 // GraphQL gateway with federation-ready schema and subscriptions stream
 app.use('/graphql', graphQLRouter);
 app.use('/graphql/ws', graphQLWsRouter);
-
-// Webhook handlers (outside API versioning for direct access)
-app.use('/webhooks', webhookHandlersRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
