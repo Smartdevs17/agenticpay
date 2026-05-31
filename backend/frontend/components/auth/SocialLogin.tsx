@@ -1,9 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { web3auth } from '@/lib/web3auth';
-import { WALLET_ADAPTERS } from "@web3auth/base";
-
+import { getWeb3Auth } from '@/lib/web3auth';
 import { Button } from '@/components/ui/button';
 import { Mail, Chrome, Twitter } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -16,27 +14,29 @@ export function SocialLogin() {
   const setAuth = useAuthStore((state) => state.setAuth);
 
   const handleLogin = async (loginProvider: string) => {
-    if (!web3auth) {
-      toast.error('Web3Auth is not configured. Please add NEXT_PUBLIC_WEB3AUTH_CLIENT_ID to your .env.local file.');
-      return;
-    }
-
     try {
       setLoading(true);
 
-      await web3auth.initModal();
-      const web3authProvider = await web3auth.connectTo(WALLET_ADAPTERS.AUTH as any, {
+      // Dynamically load Web3Auth only when the user actually clicks login
+      const { WALLET_ADAPTERS } = await import('@web3auth/base');
+      const web3auth = await getWeb3Auth();
+
+      if (!web3auth) {
+        toast.error(
+          'Web3Auth is not configured. Please add NEXT_PUBLIC_WEB3AUTH_CLIENT_ID to your .env.local file.'
+        );
+        return;
+      }
+
+      await (web3auth as any).initModal();
+      const web3authProvider = await web3auth.connectTo((WALLET_ADAPTERS as any).AUTH, {
         loginProvider,
       });
 
       if (web3authProvider) {
-        // Get user info
         const user = await web3auth.getUserInfo();
-        const accounts = await web3authProvider.request({
-          method: 'eth_accounts',
-        });
+        const accounts = await web3authProvider.request({ method: 'eth_accounts' });
 
-        // Save to store
         setAuth({
           address: (accounts as string[])[0],
           email: user.email,
@@ -46,7 +46,6 @@ export function SocialLogin() {
         });
 
         toast.success('Login successful!');
-        // Redirect to dashboard
         router.push('/dashboard');
       }
     } catch (error) {
@@ -89,4 +88,3 @@ export function SocialLogin() {
     </div>
   );
 }
-

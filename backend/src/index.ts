@@ -22,7 +22,8 @@ Sentry.init({
 });
 import cors from 'cors';
 import { tokenBucketRateLimit } from './middleware/rate-limit.js';
-import compression from 'compression';
+import { compressionMiddleware, getCompressionMetrics } from './middleware/compression.js';
+import { poolMetrics } from './config/database.js';
 import { config } from './config.js';
 import { verificationRouter } from './routes/verification.js';
 import { invoiceRouter } from './routes/invoice.js';
@@ -30,6 +31,7 @@ import { stellarRouter } from './routes/stellar.js';
 import { catalogRouter } from './routes/catalog.js';
 import { jobsRouter } from './routes/jobs.js';
 import { healthRouter } from './routes/health.js';
+import { docsRouter } from './routes/docs.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
@@ -41,6 +43,9 @@ import { formsRouter } from './routes/forms.ts';
 import { webhooksRouter } from './routes/webhooks.js';
 import { webhookHandlersRouter } from './routes/webhookHandlers.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
+import { batchProcessor } from './services/batch.js';
+import { featureFlags } from './config/featureFlags.js';
+import { getRedisCache } from './middleware/cache.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
@@ -48,6 +53,7 @@ import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
 import { traceMiddleware } from './middleware/trace.js';
 import { cacheControlNoStore } from './middleware/cache-control.js';
+import { httpLogger, correlationMiddleware } from './middleware/logger.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
 import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
@@ -57,6 +63,7 @@ import { backupRouter } from './routes/backup.js';
 import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { nfcRouter } from './routes/nfc.js';
+import { cacheRouter } from './routes/cache.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { sessionMiddleware } from './middleware/session.js';
@@ -73,6 +80,7 @@ import { disputeService } from './disputes/disputeService.js';
 import http from 'node:http';
 import { attachWebSocketServer } from './websocket/server.js';
 import { createWebSocketRouter } from './routes/websocket.js';
+import { bindWebSocketServer } from './events/event-bus.js';
 import { receiptsRouter } from './routes/receipts.js';
 import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
@@ -95,12 +103,20 @@ import './events/projections.js';
 import { stripeRouter } from './routes/stripe.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { requestSizeLimit } from './middleware/request-size-limit.js';
 import { signaturesRouter } from './routes/signatures.js';
 import { createSandboxRouter } from './routes/sandbox.js';
+import { circuitBreakerRouter } from './routes/circuit-breaker.js';
 import SandboxManager from './services/sandbox.js';
 import MockPaymentProcessor from './services/mock-payments.js';
 import TestDataSeeder from './services/test-data-seeder.js';
 import { emailV2Router } from './routes/email-v2.js';
+import { createBullMQScheduler, getBullMQScheduler } from './services/bullmq-scheduler.js';
+import { getScheduledTasks } from './config/scheduled-tasks.js';
+import { bullMQMonitorRouter } from './routes/bullmq-monitor.js';
+import { fileUploadRouter } from './routes/file-upload.js';
+import { credentialRotationRouter } from './routes/credential-rotation.js';
+import zkIdentityRouter from './routes/zk-identity.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -118,33 +134,12 @@ if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
   console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
 }
 
-import { traceStorage } from './middleware/trace.js';
-
-const originalConsole = {
-  log: console.log,
-  info: console.info,
-  warn: console.warn,
-  error: console.error,
-};
-
-function formatMessage(args: any[]): any[] {
-  const traceId = traceStorage.getStore();
-  if (traceId) {
-    if (typeof args[0] === 'string') {
-      args[0] = `[TraceID: ${traceId}] ${args[0]}`;
-    } else {
-      args.unshift(`[TraceID: ${traceId}]`);
-    }
-  }
-  return args;
-}
-
-console.log = (...args) => originalConsole.log(...formatMessage(args));
-console.info = (...args) => originalConsole.info(...formatMessage(args));
-console.warn = (...args) => originalConsole.warn(...formatMessage(args));
-console.error = (...args) => originalConsole.error(...formatMessage(args));
 
 const app = express();
+
+// Security stack: headers, sanitization, payload limits
+SecurityMiddleware.getInstance().applySecurity(app);
+app.use(requestSizeLimit());
 
 // Token-bucket rate limiter (replaces fixed-window tieredRateLimit)
 const apiRateLimiter = tokenBucketRateLimit({ keyPrefix: 'rl:api' });
@@ -171,38 +166,38 @@ app.use(
       'API-Version',
       'X-API-Version',
       'Accept-Version',
+      'Stripe-Signature',
+      'X-Hub-Signature-256',
+      'X-Webhook-Key-Id',
     ],
-  })
-);
-app.use(express.json());
-app.use(express.text({ type: ['text/csv', 'text/plain'] }));
-
-app.use(
-  compression({
-    threshold: config.compression.threshold,
-    filter: (req, res) => {
-      if (req.headers['x-no-compression']) {
-        return false;
-      }
-      const contentType = res.getHeader('Content-Type');
-      if (typeof contentType === 'string' && contentType.includes('application/json')) {
-        return true;
-      }
-      if (Array.isArray(contentType) && contentType.some((ct) => ct.includes('application/json'))) {
-        return true;
-      }
-      return compression.filter(req, res);
-    },
   })
 );
 
 app.use(requestIdMiddleware);
 app.use(traceMiddleware);
+app.use(correlationMiddleware);
+app.use(httpLogger);
+
+// Incoming webhooks: raw body capture before global JSON parser (#393)
+app.use('/webhooks', webhookHandlersRouter);
+
+app.use(express.json());
+app.use(express.text({ type: ['text/csv', 'text/plain'] }));
+
+app.use(
+  compressionMiddleware({
+    brotliLevel: 5,
+    gzipLevel: 6,
+    minSizeBytes: 1024,
+  })
+);
+
 app.use(slaTrackingMiddleware);
 app.use(sessionMiddleware);
 app.use(cacheControlNoStore);
 
 app.use(healthRouter);
+app.use('/docs', docsRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 
@@ -223,10 +218,13 @@ apiV1Router.use('/stellar', stellarRouter);
 apiV1Router.use('/catalog', catalogRouter);
 apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
+apiV1Router.use('/queue', bullMQMonitorRouter);
 apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
 apiV1Router.use('/flags', flagsRouter);
+apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
+apiV1Router.use('/zk-identity', zkIdentityRouter);
 apiV1Router.use('/kyb', kybRouter);
 apiV1Router.use('/batch', batchRouter);
 apiV1Router.use('/relayer', relayerRouter);
@@ -246,6 +244,16 @@ apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
 // NFC / QR payment requests
 apiV1Router.use('/nfc', nfcRouter);
+// Cache management
+apiV1Router.use('/cache', cacheRouter);
+
+apiV1Router.use('/circuit-breaker', circuitBreakerRouter);
+apiV1Router.get('/compression/metrics', (_req, res) => {
+  res.json(getCompressionMetrics());
+});
+apiV1Router.get('/pool/metrics', (_req, res) => {
+  res.json(poolMetrics.snapshot());
+});
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
@@ -269,6 +277,12 @@ app.use('/api/v1/events', eventsRouter);
 
 // Advanced threat detection with behavioral analysis
 app.use('/api/v1/threat-detection', threatDetectionRouter);
+
+// Secure file upload with MIME/magic-bytes validation and ClamAV scanning (Issue #401)
+app.use('/api/v1/uploads', fileUploadRouter);
+
+// Credential rotation management with dual-key overlap and audit trail (Issue #395)
+app.use('/api/v1/credentials', credentialRotationRouter);
 
 // Microservices service mesh — registry, discovery, circuit breakers
 app.use('/api/v1/service-mesh', serviceMeshRouter);
@@ -296,9 +310,6 @@ app.use('/api/v2/email', emailV2Router);
 app.use('/graphql', graphQLRouter);
 app.use('/graphql/ws', graphQLWsRouter);
 
-// Webhook handlers (outside API versioning for direct access)
-app.use('/webhooks', webhookHandlersRouter);
-
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
     return next();
@@ -319,7 +330,23 @@ app.use(errorHandler);
 
 if (config.jobs.enabled) {
   startJobs();
+
+  // Start the BullMQ distributed scheduler when Redis is available.
+  // Falls back silently to the in-process node-cron scheduler if Redis is absent.
+  createBullMQScheduler(getScheduledTasks()).then((scheduler) => {
+    if (scheduler) {
+      console.log('[bullmq] Distributed scheduler active');
+    } else {
+      console.log('[scheduler] Using in-process node-cron (Redis not configured)');
+    }
+  }).catch((err) => {
+    console.error('[bullmq] Scheduler startup error:', err);
+  });
 }
+
+// Start automated credential rotation scheduler (Issue #395)
+startScheduledRotation();
+console.log('[CredentialRotation] Scheduled rotation started');
 
 registerDefaultProcessors();
 if (config.queue.enabled) {
@@ -334,14 +361,25 @@ setInterval(async () => {
   if (count > 0) console.log(`Escalated ${count} disputes`);
 }, 5 * 60 * 1000);
 
+if (featureFlags.evaluate('batch-operations')) {
+  batchProcessor.start();
+  console.log('[BatchProcessor] Started');
+}
+
+getRedisCache().connect().then(() => {
+  console.log('[RedisCache] Connection initialized');
+}).catch(() => {
+  console.log('[RedisCache] Not available, using in-memory cache only');
+});
+
 const server = http.createServer(app);
 const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
+bindWebSocketServer(wsServer);
 app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
 app.use('/api/v1/analytics', createAnalyticsRouter(wsServer));
 
-// Broadcast analytics snapshot every 30 seconds to all connected WebSocket clients
 const analyticsInterval = setInterval(() => {
-  wsServer.broadcast({ type: 'analytics:update', payload: analyticsService.snapshot() });
+  wsServer.broadcastToChannel('analytics.updates', { type: 'analytics:update', payload: analyticsService.snapshot() });
 }, 30_000);
 
 server.listen(config.server.port, () => {
@@ -366,12 +404,35 @@ const shutdown = (signal: string) => {
     }
 
     try {
+      const bullScheduler = getBullMQScheduler();
+      if (bullScheduler) {
+        bullScheduler.shutdown().then(() => console.log('BullMQ scheduler stopped.'));
+      }
+    } catch (err) {
+      console.error('Error stopping BullMQ scheduler:', err);
+    }
+
+    try {
+      stopScheduledRotation();
+      console.log('Credential rotation scheduler stopped.');
+    } catch (err) {
+      console.error('Error stopping credential rotation:', err);
+    }
+
+    try {
       messageQueue.stop();
       paymentQueue.stop();
       stopWebhookWorker();
       console.log('Message queue stopped.');
     } catch (err) {
       console.error('Error stopping message queue:', err);
+    }
+
+    try {
+      batchProcessor.stop();
+      console.log('Batch processor stopped.');
+    } catch (err) {
+      console.error('Error stopping batch processor:', err);
     }
 
     clearInterval(analyticsInterval);

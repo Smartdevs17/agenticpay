@@ -1,10 +1,11 @@
 /// <reference lib="webworker" />
 
-const SHELL_CACHE = 'agenticpay_shell_v1';
-const RUNTIME_CACHE = 'agenticpay_runtime_v1';
-const OFFLINE_QUEUE_NAME = 'offline_payment_queue';
+const CACHE_PREFIX = 'agenticpay';
+const SW_VERSION = 'v2';
+const PRECACHE_KEY = `${CACHE_PREFIX}-precache-${SW_VERSION}`;
+const RUNTIME_CACHE_KEY = `${CACHE_PREFIX}-runtime-${SW_VERSION}`;
 
-const APP_SHELL_URLS = [
+const PRECACHE_URLS = [
   '/',
   '/auth',
   '/dashboard',
@@ -41,16 +42,11 @@ interface PaymentRequest {
   error?: string;
 }
 
-interface SyncStatus {
-  isOnline: boolean;
-  lastSyncAt?: number;
-  pendingCount: number;
-  failedCount: number;
-}
+const OFFLINE_QUEUE_NAME = 'offline_payment_queue';
 
 async function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('agenticpay_offline', 1);
+    const request = indexedDB.open('agenticpay_offline', 2);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = () => {
@@ -109,7 +105,7 @@ async function removeFromQueue(id: string): Promise<void> {
 async function syncPayments(): Promise<{ success: number; failed: number }> {
   const queue = await getPaymentQueue();
   const pending = queue.filter(p => p.status === 'pending' || p.status === 'failed');
-  
+
   let success = 0;
   let failed = 0;
 
@@ -152,48 +148,78 @@ async function syncPayments(): Promise<{ success: number; failed: number }> {
   return { success, failed };
 }
 
-function cacheFirst(request: Request): Promise<Response> {
-  return caches.match(request).then(cached => {
-    if (cached) return cached;
-    return fetch(request).then(response => {
-      if (response.ok) {
-        caches.open(RUNTIME_CACHE).then(cache => cache.put(request, response.clone()));
-      }
-      return response;
-    });
-  });
-}
-
-function networkFirst(request: Request): Promise<Response> {
-  return fetch(request)
-    .then(response => {
-      if (response.ok) {
-        caches.open(RUNTIME_CACHE).then(cache => cache.put(request, response.clone()));
-      }
-      return response;
-    })
-    .catch(() => caches.match(request).then(cached => cached || new Response('Offline', { status: 503 })));
-}
-
 self.addEventListener('install', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE).then(cache => cache.addAll(APP_SHELL_URLS))
+    (async () => {
+      const cache = await caches.open(PRECACHE_KEY);
+      await cache.addAll(PRECACHE_URLS);
+    })(),
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(key => key !== SHELL_CACHE && key !== RUNTIME_CACHE)
-          .map(key => caches.delete(key))
-      )
-    )
+    (async () => {
+      const cacheKeys = await caches.keys();
+      await Promise.all(
+        cacheKeys
+          .filter(key => key !== PRECACHE_KEY && key !== RUNTIME_CACHE_KEY)
+          .map(key => caches.delete(key)),
+      );
+      await self.clients.claim();
+    })(),
   );
-  self.clients.claim();
 });
+
+async function cacheFirst(request: Request): Promise<Response> {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(RUNTIME_CACHE_KEY);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    return new Response('Offline', { status: 503 });
+  }
+}
+
+async function networkFirst(request: Request): Promise<Response> {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(RUNTIME_CACHE_KEY);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    return new Response('Offline', { status: 503 });
+  }
+}
+
+async function staleWhileRevalidate(request: Request): Promise<Response> {
+  const cache = await caches.open(RUNTIME_CACHE_KEY);
+  const cached = await cache.match(request);
+
+  const fetchPromise = fetch(request).then(response => {
+    if (response.ok) {
+      cache.put(request, response.clone());
+    }
+    return response;
+  });
+
+  return cached || fetchPromise;
+}
+
+async function networkOnly(request: Request): Promise<Response> {
+  return fetch(request);
+}
 
 self.addEventListener('fetch', (event: FetchEvent) => {
   const { request } = event;
@@ -201,31 +227,40 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 
   if (url.origin !== self.location.origin) return;
 
+  const pathname = url.pathname;
+
   if (request.method !== 'GET') {
     if (navigator.onLine) {
-      event.respondWith(networkFirst(request));
+      event.respondWith(networkOnly(request));
     } else {
       event.respondWith(
         new Response(JSON.stringify({ error: 'offline', queued: true }), {
           status: 202,
           headers: { 'Content-Type': 'application/json' },
-        })
+        }),
       );
     }
     return;
   }
 
-  if (request.mode === 'navigate') {
+  const requestDestination = request.destination;
+
+  if (requestDestination === 'document' || request.mode === 'navigate') {
     event.respondWith(networkFirst(request));
     return;
   }
 
-  if (
-    ['script', 'style', 'image', 'font'].includes(request.destination) ||
-    APP_SHELL_URLS.includes(url.pathname)
-  ) {
+  if (['script', 'style', 'image', 'font'].includes(requestDestination)) {
     event.respondWith(cacheFirst(request));
+    return;
   }
+
+  if (pathname.startsWith('/api/')) {
+    event.respondWith(staleWhileRevalidate(request));
+    return;
+  }
+
+  event.respondWith(networkFirst(request));
 });
 
 self.addEventListener('sync', ((event: Event) => {
@@ -260,7 +295,7 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
         if (registration.sync) {
           registration.sync.register('sync-payments');
         }
-      })
+      }),
     );
   }
 
@@ -274,6 +309,10 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
 
   if (type === 'SYNC_NOW') {
     event.waitUntil(syncPayments());
+  }
+
+  if (type === 'SKIP_WAITING') {
+    self.skipWaiting();
   }
 });
 

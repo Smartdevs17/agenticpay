@@ -1,21 +1,19 @@
 'use client';
 
-import { WagmiProvider } from 'wagmi';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { wagmiConfig } from '@/lib/wagmi';
-import { useState } from 'react';
+/**
+ * Root providers — intentionally minimal.
+ * Only Toaster lives here so it's available on every page (landing, auth, dashboard).
+ * WagmiProvider and QueryClientProvider are scoped to the dashboard layout
+ * via DashboardProviders to avoid loading wagmi/viem on the landing page.
+ */
+
 import { Toaster } from '@/components/ui/sonner';
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient());
-
   return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        {children}
-        <Toaster />
-      </QueryClientProvider>
-    </WagmiProvider>
+    <>
+      {children}
+      <Toaster />
+    </>
   );
 }
-

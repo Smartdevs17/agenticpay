@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, ExternalLink, CheckCircle2, Clock, Circle, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
+import { FadeIn } from '@/components/ui/fade-in';
 import { ProjectDetailSkeleton } from '@/components/ui/loading-skeletons';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
@@ -65,19 +65,6 @@ export default function ProjectDetailPage() {
       const paymentType = project.currency === 'ETH' ? 0 : 1;
       await fundProject(project.id, project.totalAmount, paymentType);
       toast.info('Funding transaction submitted...');
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleSubmitWork = async () => {
-    if (!repoLink) {
-      toast.error('Please enter a GitHub repository link');
-      return;
-    }
-    try {
-      await submitWork(project.id, repoLink);
-      toast.info('Submission transaction submitted...');
     } catch (e) {
       console.error(e);
     }
@@ -272,52 +259,49 @@ export default function ProjectDetailPage() {
         <CardContent>
           <div className="space-y-4">
             {project.milestones.map((milestone, index) => (
-              <motion.div
-                key={milestone.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.1 }}
-                className="p-4 border border-gray-200 rounded-lg"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-start gap-3 flex-1">
-                    {getStatusIcon(milestone.status)}
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900">{milestone.title}</h4>
-                      {milestone.description && (
-                        <p className="text-sm text-gray-600 mt-1">{milestone.description}</p>
+              <FadeIn key={milestone.id} delay={index * 0.1}>
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-start gap-3 flex-1">
+                      {getStatusIcon(milestone.status)}
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-gray-900">{milestone.title}</h4>
+                        {milestone.description && (
+                          <p className="text-sm text-gray-600 mt-1">{milestone.description}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-gray-900">
+                        {milestone.amount} {project.currency}
+                      </p>
+                      {milestone.dueDate && (
+                        <p className="text-xs text-gray-500">
+                          Due: {new Date(milestone.dueDate).toLocaleDateString()}
+                        </p>
                       )}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-gray-900">
-                      {milestone.amount} {project.currency}
-                    </p>
-                    {milestone.dueDate && (
-                      <p className="text-xs text-gray-500">
-                        Due: {new Date(milestone.dueDate).toLocaleDateString()}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Progress</span>
-                    <span>{milestone.completionPercentage}%</span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full transition-all ${milestone.status === 'completed'
-                        ? 'bg-green-600'
-                        : milestone.status === 'in_progress'
-                          ? 'bg-blue-600'
-                          : 'bg-gray-300'
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>Progress</span>
+                      <span>{milestone.completionPercentage}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full transition-all ${
+                          milestone.status === 'completed'
+                            ? 'bg-green-600'
+                            : milestone.status === 'in_progress'
+                              ? 'bg-blue-600'
+                              : 'bg-gray-300'
                         }`}
-                      style={{ width: `${milestone.completionPercentage}%` }}
-                    />
+                        style={{ width: `${milestone.completionPercentage}%` }}
+                      />
+                    </div>
                   </div>
                 </div>
-              </motion.div>
+              </FadeIn>
             ))}
           </div>
         </CardContent>

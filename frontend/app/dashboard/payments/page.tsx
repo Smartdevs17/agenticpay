@@ -6,19 +6,15 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  CheckCircle2,
-  Clock,
-  XCircle,
-  ExternalLink,
   Wallet,
   QrCode,
   Loader2,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { PaymentQRModal } from "@/components/payment/QRCode";
 import { PaymentCardSkeleton } from "@/components/ui/loading-skeletons";
 import { EmptyState } from "@/components/empty/EmptyState";
+import { TransactionList } from "@/components/transaction/TransactionList";
 import { formatDateTimeInTimeZone } from "@/lib/utils";
 
 export default function PaymentsPage() {
@@ -27,19 +23,6 @@ export default function PaymentsPage() {
   const address = useAuthStore((state) => state.address);
   const timezone = useAuthStore((state) => state.timezone);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "completed":
-        return <CheckCircle2 className="h-5 w-5 text-green-600" />;
-      case "pending":
-        return <Clock className="h-5 w-5 text-yellow-600" />;
-      case "failed":
-        return <XCircle className="h-5 w-5 text-red-600" />;
-      default:
-        return null;
-    }
-  };
 
   if (loading) {
     return (
@@ -99,54 +82,12 @@ export default function PaymentsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {payments.map((payment, index) => (
-            <motion.div
-              key={payment.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
-            >
-              <Card className="hover:shadow-lg transition-all h-full">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      {getStatusIcon(payment.status)}
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900 dark:text-gray-100">{payment.projectTitle}</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          {payment.type === "milestone_payment" ? "Milestone Payment" : "Full Payment"}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {formatDateTimeInTimeZone(payment.timestamp, timezone)}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="text-right">
-                      <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                        {payment.amount} {payment.currency}
-                      </p>
-
-                      {payment.transactionHash && (
-                        <a href={`https://testnet.cronoscan.com/tx/${payment.transactionHash}`} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-2 justify-end">
-                          View on Explorer
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                  {payment.transactionHash && (
-                    <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
-                      <p className="text-[10px] text-gray-400 font-mono truncate">{payment.transactionHash}</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+        <TransactionList
+          payments={payments}
+          timezone={timezone}
+          formatDateTime={formatDateTimeInTimeZone}
+          height={Math.min(720, Math.max(400, payments.length * 8))}
+        />
       )}
 
       {address && (

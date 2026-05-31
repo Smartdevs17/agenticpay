@@ -1,202 +1,94 @@
-import { Router } from 'express';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
-import { validate } from '../middleware/validate.js';
-import {
-  addMilestoneSchema,
-  approveDeliverableSchema,
-  createProjectSchema,
-  disputeDeliverableSchema,
-  scopeChangeSchema,
-  submitDeliverableSchema,
-  updateProjectSchema,
-} from '../schemas/projects.js';
-import { projectsService } from '../services/projects.js';
+/**
+ * projects.ts — Issue #366
+ *
+ * Project routes using controller-service-repository pattern
+ */
+
+import { Router } from "express";
+import { container } from "../di/container.js";
+import { requireEnhancedPermission } from "../middleware/permissions.js";
+import { attachResponseHelpers } from "../middleware/responseFormatter.js";
 
 export const projectsRouter = Router();
 
+// Attach response helpers
+projectsRouter.use(attachResponseHelpers);
+
+const projectController = container.getProjectController();
+
+// Create project
 projectsRouter.post(
-  '/',
-  validate(createProjectSchema),
-  asyncHandler(async (req, res) => {
-    const project = projectsService.createProject(req.body);
-    res.status(201).json({ data: project });
-  })
+  "/",
+  requireEnhancedPermission("projects", "write"),
+  projectController.createProject,
 );
 
+// List all projects
 projectsRouter.get(
-  '/',
-  asyncHandler(async (req, res) => {
-    const projects = projectsService.listProjects({
-      clientId: req.query.clientId ? String(req.query.clientId) : undefined,
-      ownerId: req.query.ownerId ? String(req.query.ownerId) : undefined,
-      includeArchived: String(req.query.includeArchived || 'false').toLowerCase() === 'true',
-    });
-    res.json({ data: projects, count: projects.length });
-  })
+  "/",
+  requireEnhancedPermission("projects", "read"),
+  projectController.listProjects,
 );
 
+// Get single project
 projectsRouter.get(
-  '/client/:clientId/review',
-  asyncHandler(async (req, res) => {
-    const clientId = Array.isArray(req.params.clientId) ? req.params.clientId[0] : req.params.clientId;
-    const review = projectsService.getClientReviewPortal(clientId);
-    res.json({ data: review, count: review.length });
-  })
+  "/:id",
+  requireEnhancedPermission("projects", "read"),
+  projectController.getProject,
 );
 
+// List client projects
 projectsRouter.get(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.getProject(id);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-
-    res.json({
-      data: project,
-      milestones: projectsService.listMilestones(id),
-      releases: projectsService.getReleases(id),
-    });
-  })
+  "/client/:clientId",
+  requireEnhancedPermission("projects", "read"),
+  projectController.listClientProjects,
 );
 
+// List freelancer projects
+projectsRouter.get(
+  "/freelancer/:freelancerId",
+  requireEnhancedPermission("projects", "read"),
+  projectController.listFreelancerProjects,
+);
+
+// Update project
 projectsRouter.patch(
-  '/:id',
-  validate(updateProjectSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.updateProject(id, req.body);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({ data: project });
-  })
+  "/:id",
+  requireEnhancedPermission("projects", "write"),
+  projectController.updateProject,
 );
 
+// Fund project
 projectsRouter.post(
-  '/:id/archive',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.archiveProject(id);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({ data: project });
-  })
+  "/:id/fund",
+  requireEnhancedPermission("projects", "write"),
+  projectController.fundProject,
 );
 
+// Submit work
 projectsRouter.post(
-  '/:id/abandon',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.markAbandoned(id);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({ data: project });
-  })
+  "/:id/submit",
+  requireEnhancedPermission("projects", "write"),
+  projectController.submitWork,
 );
 
+// Approve work
 projectsRouter.post(
-  '/:id/scope-change',
-  validate(scopeChangeSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.applyScopeChange(id, req.body.additionalBudget);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({
-      data: project,
-      scopeChange: {
-        additionalBudget: req.body.additionalBudget,
-        reason: req.body.reason,
-      },
-    });
-  })
+  "/:id/approve",
+  requireEnhancedPermission("projects", "write"),
+  projectController.approveWork,
 );
 
+// Raise dispute
 projectsRouter.post(
-  '/:id/milestones',
-  validate(addMilestoneSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const milestone = projectsService.addMilestone(id, req.body);
-    if (!milestone) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.status(201).json({ data: milestone });
-  })
+  "/:id/dispute",
+  requireEnhancedPermission("projects", "write"),
+  projectController.raiseDispute,
 );
 
-projectsRouter.get(
-  '/:id/milestones',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.getProject(id);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    const milestones = projectsService.listMilestones(id);
-    res.json({ data: milestones, count: milestones.length });
-  })
-);
-
-projectsRouter.post(
-  '/:id/milestones/:milestoneId/submit',
-  validate(submitDeliverableSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const milestoneId = Array.isArray(req.params.milestoneId) ? req.params.milestoneId[0] : req.params.milestoneId;
-    const milestone = projectsService.submitDeliverable(id, milestoneId, req.body.submissionUrl, req.body.notes);
-    if (!milestone) {
-      throw new AppError(404, 'Milestone not found', 'NOT_FOUND');
-    }
-    res.json({ data: milestone });
-  })
-);
-
-projectsRouter.post(
-  '/:id/milestones/:milestoneId/approve',
-  validate(approveDeliverableSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const milestoneId = Array.isArray(req.params.milestoneId) ? req.params.milestoneId[0] : req.params.milestoneId;
-
-    const result = projectsService.approveDeliverable(id, milestoneId, req.body.approvedBy);
-    if (!result) {
-      throw new AppError(404, 'Milestone not found', 'NOT_FOUND');
-    }
-    res.json({ data: result.milestone, paymentRelease: result.release });
-  })
-);
-
-projectsRouter.post(
-  '/:id/milestones/:milestoneId/dispute',
-  validate(disputeDeliverableSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const milestoneId = Array.isArray(req.params.milestoneId) ? req.params.milestoneId[0] : req.params.milestoneId;
-    const milestone = projectsService.disputeMilestone(id, milestoneId, req.body.reason);
-    if (!milestone) {
-      throw new AppError(404, 'Milestone not found', 'NOT_FOUND');
-    }
-    res.json({
-      data: milestone,
-      project: projectsService.getProject(id),
-    });
-  })
-);
-
-projectsRouter.get(
-  '/:id/dashboard',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const dashboard = projectsService.getDashboard(id);
-    if (!dashboard) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({ data: dashboard });
-  })
+// Delete project
+projectsRouter.delete(
+  "/:id",
+  requireEnhancedPermission("projects", "delete"),
+  projectController.deleteProject,
 );

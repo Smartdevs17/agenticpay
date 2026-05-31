@@ -73,7 +73,12 @@ export type FeatureFlagName =
   | 'message-queue'
   | 'rate-limit-tiering'
   | 'sla-tracking'
-  | 'response-caching';
+  | 'response-caching'
+  | 'multi-level-cache'
+  | 'single-flight'
+  | 'cache-warming'
+  | 'db-query-profiling'
+  | 'db-composite-indexes';
 
 // ─── Runtime state ────────────────────────────────────────────────────────────
 
@@ -161,6 +166,37 @@ const FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     defaultEnabled: true,
     strategy: 'percentage',
     rolloutPercentage: 100,
+  },
+  {
+    name: 'multi-level-cache',
+    description: 'In-memory + Redis multi-level caching with TTL',
+    defaultEnabled: true,
+    strategy: 'percentage',
+    rolloutPercentage: 100,
+  },
+  {
+    name: 'single-flight',
+    description: 'Single-flight pattern to prevent cache stampede on hot keys',
+    defaultEnabled: true,
+    strategy: 'all',
+  },
+  {
+    name: 'cache-warming',
+    description: 'Pre-warm cache on application startup for known endpoints',
+    defaultEnabled: process.env.CACHE_WARMING_ENABLED === 'true',
+    strategy: 'all',
+  },
+  {
+    name: 'db-query-profiling',
+    description: 'Database query profiling and slow query logging',
+    defaultEnabled: process.env.DB_QUERY_LOGGING_ENABLED === 'true',
+    strategy: 'all',
+  },
+  {
+    name: 'db-composite-indexes',
+    description: 'Composite index management for optimized query patterns',
+    defaultEnabled: true,
+    strategy: 'all',
   },
 ];
 

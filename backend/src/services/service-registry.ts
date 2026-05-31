@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from "node:crypto";
 
-export type ServiceStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
+export type ServiceStatus = "healthy" | "degraded" | "unhealthy" | "unknown";
 
 export interface ServiceInstance {
   id: string;
@@ -8,7 +8,7 @@ export interface ServiceInstance {
   version: string;
   host: string;
   port: number;
-  protocol: 'http' | 'grpc';
+  protocol: "http" | "grpc";
   status: ServiceStatus;
   metadata: Record<string, string>;
   registeredAt: string;
@@ -19,7 +19,7 @@ export interface ServiceInstance {
 export interface ServiceEndpoint {
   name: string;
   instances: ServiceInstance[];
-  loadBalancingPolicy: 'round_robin' | 'least_connections' | 'random';
+  loadBalancingPolicy: "round_robin" | "least_connections" | "random";
 }
 
 const registry = new Map<string, ServiceInstance>();
@@ -28,7 +28,9 @@ let rrCounters = new Map<string, number>();
 
 const HEARTBEAT_TIMEOUT_MS = 30_000;
 
-export function registerService(input: Omit<ServiceInstance, 'id' | 'registeredAt' | 'lastHeartbeatAt'>): ServiceInstance {
+export function registerService(
+  input: Omit<ServiceInstance, "id" | "registeredAt" | "lastHeartbeatAt">,
+): ServiceInstance {
   const instance: ServiceInstance = {
     ...input,
     id: randomUUID(),
@@ -60,12 +62,15 @@ export function heartbeat(instanceId: string): ServiceInstance | undefined {
   if (!instance) return undefined;
 
   instance.lastHeartbeatAt = new Date().toISOString();
-  instance.status = 'healthy';
+  instance.status = "healthy";
   registry.set(instanceId, instance);
   return instance;
 }
 
-export function updateServiceStatus(instanceId: string, status: ServiceStatus): ServiceInstance | undefined {
+export function updateServiceStatus(
+  instanceId: string,
+  status: ServiceStatus,
+): ServiceInstance | undefined {
   const instance = registry.get(instanceId);
   if (!instance) return undefined;
   instance.status = status;
@@ -83,12 +88,14 @@ export function getServiceEndpoint(name: string): ServiceEndpoint {
     .map((id) => registry.get(id))
     .filter((i): i is ServiceInstance => i !== undefined);
 
-  return { name, instances, loadBalancingPolicy: 'round_robin' };
+  return { name, instances, loadBalancingPolicy: "round_robin" };
 }
 
 export function resolveInstance(name: string): ServiceInstance | undefined {
   const endpoint = getServiceEndpoint(name);
-  const healthy = endpoint.instances.filter((i) => i.status === 'healthy' || i.status === 'degraded');
+  const healthy = endpoint.instances.filter(
+    (i) => i.status === "healthy" || i.status === "degraded",
+  );
   if (healthy.length === 0) return undefined;
 
   const counter = rrCounters.get(name) ?? 0;
@@ -107,7 +114,7 @@ export function pruneStaleInstances(): number {
 
   for (const instance of registry.values()) {
     if (new Date(instance.lastHeartbeatAt).getTime() < cutoff) {
-      instance.status = 'unhealthy';
+      instance.status = "unhealthy";
       registry.set(instance.id, instance);
       pruned += 1;
     }
@@ -120,9 +127,52 @@ export function getRegistryStats() {
   const all = Array.from(registry.values());
   return {
     total: all.length,
-    healthy: all.filter((i) => i.status === 'healthy').length,
-    degraded: all.filter((i) => i.status === 'degraded').length,
-    unhealthy: all.filter((i) => i.status === 'unhealthy').length,
+    healthy: all.filter((i) => i.status === "healthy").length,
+    degraded: all.filter((i) => i.status === "degraded").length,
+    unhealthy: all.filter((i) => i.status === "unhealthy").length,
     services: Array.from(serviceIndex.keys()),
   };
+}
+
+// ── Permission-aware Service Registry Extensions ──────────────────────────────
+
+export interface ServicePermission {
+  serviceId: string;
+  requiredPermissions: Array<{
+    resource: string;
+    action: string;
+  }>;
+  allowedRoles: string[];
+}
+
+const servicePermissions = new Map<string, ServicePermission>();
+
+export function registerServicePermissions(
+  serviceId: string,
+  requiredPermissions: Array<{ resource: string; action: string }>,
+  allowedRoles: string[],
+): void {
+  servicePermissions.set(serviceId, {
+    serviceId,
+    requiredPermissions,
+    allowedRoles,
+  });
+}
+
+export function getServicePermissions(
+  serviceId: string,
+): ServicePermission | undefined {
+  return servicePermissions.get(serviceId);
+}
+
+export function canAccessService(serviceId: string, userRole: string): boolean {
+  const perms = servicePermissions.get(serviceId);
+  if (!perms) return true; // No restrictions if not configured
+
+  return perms.allowedRoles.includes(userRole);
+}
+
+export function listServicesForRole(role: string): ServiceInstance[] {
+  const allServices = getAllServices();
+  return allServices.filter((service) => canAccessService(service.id, role));
 }

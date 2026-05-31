@@ -1,6 +1,9 @@
 import Stripe from 'stripe';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { withCircuitBreaker } from '../middleware/circuit-breaker.js';
+
+const STRIPE_CIRCUIT_NAME = 'stripe-api';
 
 let stripeClient: Stripe | null = null;
 
@@ -10,7 +13,11 @@ export function getStripe(): Stripe {
     throw new AppError(500, 'Stripe is not configured', 'STRIPE_NOT_CONFIGURED');
   }
   if (!stripeClient) {
-    stripeClient = new Stripe(cfg.STRIPE_SECRET_KEY, { apiVersion: '2025-02-24.acacia' });
+    stripeClient = new Stripe(cfg.STRIPE_SECRET_KEY, {
+      apiVersion: '2025-02-24.acacia',
+      timeout: 15_000,
+      maxNetworkRetries: 2,
+    });
   }
   return stripeClient;
 }
@@ -26,38 +33,62 @@ export interface CreatePaymentIntentInput {
 }
 
 export async function createPaymentIntent(input: CreatePaymentIntentInput): Promise<Stripe.PaymentIntent> {
-  const stripe = getStripe();
-  return stripe.paymentIntents.create({
-    amount: input.amount,
-    currency: input.currency.toLowerCase(),
-    customer: input.customerId,
-    description: input.description,
-    metadata: input.metadata ?? {},
-    // Enable 3D Secure automatically
-    payment_method_types: ['card'],
-  });
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.paymentIntents.create({
+        amount: input.amount,
+        currency: input.currency.toLowerCase(),
+        customer: input.customerId,
+        description: input.description,
+        metadata: input.metadata ?? {},
+        payment_method_types: ['card'],
+      });
+    },
+  );
 }
 
 export async function confirmPaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
-  const stripe = getStripe();
-  return stripe.paymentIntents.retrieve(paymentIntentId);
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.paymentIntents.retrieve(paymentIntentId);
+    },
+  );
 }
 
 export async function cancelPaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
-  const stripe = getStripe();
-  return stripe.paymentIntents.cancel(paymentIntentId);
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.paymentIntents.cancel(paymentIntentId);
+    },
+  );
 }
 
 // ── Customers ────────────────────────────────────────────────────────────────
 
 export async function createCustomer(email: string, name?: string): Promise<Stripe.Customer> {
-  const stripe = getStripe();
-  return stripe.customers.create({ email, name });
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.customers.create({ email, name });
+    },
+  );
 }
 
 export async function getCustomer(customerId: string): Promise<Stripe.Customer | Stripe.DeletedCustomer> {
-  const stripe = getStripe();
-  return stripe.customers.retrieve(customerId);
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.customers.retrieve(customerId);
+    },
+  );
 }
 
 // ── Refunds ──────────────────────────────────────────────────────────────────
@@ -69,37 +100,62 @@ export interface CreateRefundInput {
 }
 
 export async function createRefund(input: CreateRefundInput): Promise<Stripe.Refund> {
-  const stripe = getStripe();
-  return stripe.refunds.create({
-    payment_intent: input.paymentIntentId,
-    amount: input.amount,
-    reason: input.reason ?? 'requested_by_customer',
-  });
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.refunds.create({
+        payment_intent: input.paymentIntentId,
+        amount: input.amount,
+        reason: input.reason ?? 'requested_by_customer',
+      });
+    },
+  );
 }
 
 export async function getRefund(refundId: string): Promise<Stripe.Refund> {
-  const stripe = getStripe();
-  return stripe.refunds.retrieve(refundId);
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.refunds.retrieve(refundId);
+    },
+  );
 }
 
 // ── Disputes ─────────────────────────────────────────────────────────────────
 
 export async function getDispute(disputeId: string): Promise<Stripe.Dispute> {
-  const stripe = getStripe();
-  return stripe.disputes.retrieve(disputeId);
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.disputes.retrieve(disputeId);
+    },
+  );
 }
 
 export async function listDisputes(paymentIntentId?: string): Promise<Stripe.ApiList<Stripe.Dispute>> {
-  const stripe = getStripe();
-  return stripe.disputes.list(paymentIntentId ? { payment_intent: paymentIntentId } : {});
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.disputes.list(paymentIntentId ? { payment_intent: paymentIntentId } : {});
+    },
+  );
 }
 
 export async function submitDisputeEvidence(
   disputeId: string,
   evidence: Stripe.DisputeUpdateParams['evidence']
 ): Promise<Stripe.Dispute> {
-  const stripe = getStripe();
-  return stripe.disputes.update(disputeId, { evidence });
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.disputes.update(disputeId, { evidence });
+    },
+  );
 }
 
 // ── Webhooks ─────────────────────────────────────────────────────────────────

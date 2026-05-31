@@ -63,7 +63,10 @@ export class SecurityMiddleware {
       sqlEscape: true,
       xssProtection: true,
       htmlSanitization: true,
-      commandEscape: true
+      commandEscape: true,
+      nosqlSanitize: true,
+      normalizeUnicode: true,
+      maxJsonDepth: 12,
     }));
 
     // 5. Request logging for security monitoring

@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config/env.js';
+import { withQueryProfiling } from '../config/database.js';
 
 let openaiClient: OpenAI | null = null;
 

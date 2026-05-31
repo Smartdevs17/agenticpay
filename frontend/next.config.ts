@@ -97,6 +97,8 @@ const nextConfig: NextConfig = {
   images: {
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 60 * 60 * 24 * 7,
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
     remotePatterns: process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN
       ? [
           {
@@ -111,6 +113,21 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   headers: async () => {
     return [
+      {
+        // HTTP/2 server push hints for critical assets on every page load
+        source: "/(.*)",
+        headers: [
+          {
+            key: "Link",
+            value: [
+              // Critical fonts — pushed before HTML is parsed
+              "</fonts/inter-var.woff2>; rel=preload; as=font; type=\"font/woff2\"; crossorigin=anonymous",
+              // Critical CSS — pushed alongside the document
+              "</_next/static/css/app/layout.css>; rel=preload; as=style",
+            ].join(", "),
+          },
+        ],
+      },
       {
         source: "/:path*.js",
         headers: [

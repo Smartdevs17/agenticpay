@@ -1,7 +1,8 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useEffect } from 'react';
 import { toast } from 'sonner';
+import { useOfflineStore } from '@/store/useOfflineStore';
 import {
   flushOfflineQueue,
   getQueuedActionCount,
@@ -9,62 +10,53 @@ import {
 } from '@/lib/offline';
 import { resolveApiUrl } from '@/lib/api/client';
 
-interface OfflineContextValue {
-  isOnline: boolean;
-  queueLength: number;
-  isSyncing: boolean;
-}
-
-const OfflineContext = createContext<OfflineContextValue>({
-  isOnline: true,
-  queueLength: 0,
-  isSyncing: false,
-});
-
+/**
+ * OfflineProvider
+ *
+ * Sets up online/offline event listeners and syncs the shared
+ * `useOfflineStore` Zustand store. No React Context is used — state is
+ * available to any component via the store's selectors.
+ *
+ * Mount this once near the root of the app (wrapping children is optional;
+ * the component renders its children unchanged).
+ */
 export function OfflineProvider({ children }: { children: React.ReactNode }) {
-  const [isOnline, setIsOnline] = useState(true);
-  const [queueLength, setQueueLength] = useState(0);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const setOnline = useOfflineStore((s) => s.setOnline);
+  const setQueueLength = useOfflineStore((s) => s.setQueueLength);
+  const setSyncing = useOfflineStore((s) => s.setSyncing);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
+    if (typeof window === 'undefined') return;
 
     const syncQueueState = () => {
-      setIsOnline(window.navigator.onLine);
+      setOnline(window.navigator.onLine);
       setQueueLength(getQueuedActionCount());
     };
 
     const flushQueuedActions = async () => {
-      if (!window.navigator.onLine) {
-        return;
-      }
+      if (!window.navigator.onLine) return;
 
-      const pendingActions = getQueuedActionCount();
-      if (pendingActions === 0) {
+      const pending = getQueuedActionCount();
+      if (pending === 0) {
         syncQueueState();
         return;
       }
 
-      setIsSyncing(true);
-      toast.info(`Back online. Syncing ${pendingActions} queued action${pendingActions === 1 ? '' : 's'}...`);
+      setSyncing(true);
+      toast.info(`Back online. Syncing ${pending} queued action${pending === 1 ? '' : 's'}...`);
 
       const result = await flushOfflineQueue(resolveApiUrl);
 
-      setIsSyncing(false);
+      setSyncing(false);
       syncQueueState();
 
       if (result.processed > 0) {
         toast.success(`Synced ${result.processed} queued action${result.processed === 1 ? '' : 's'}.`);
       }
-
       if (result.remaining > 0) {
         toast.error(`${result.remaining} queued action${result.remaining === 1 ? '' : 's'} still need attention.`);
       }
     };
-
-    syncQueueState();
 
     const handleOnline = () => {
       syncQueueState();
@@ -75,6 +67,8 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       syncQueueState();
       toast.warning('You are offline. New API actions will be queued until the connection returns.');
     };
+
+    syncQueueState();
 
     const unsubscribe = subscribeToOfflineQueue(syncQueueState);
     window.addEventListener('online', handleOnline);
@@ -89,20 +83,20 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [setOnline, setQueueLength, setSyncing]);
 
-  const value = useMemo(
-    () => ({
-      isOnline,
-      queueLength,
-      isSyncing,
-    }),
-    [isOnline, isSyncing, queueLength]
-  );
-
-  return <OfflineContext.Provider value={value}>{children}</OfflineContext.Provider>;
+  return <>{children}</>;
 }
 
+/**
+ * useOfflineStatus
+ *
+ * Drop-in replacement for the previous Context-based hook.
+ * Subscribes to the Zustand offline store with minimal re-renders.
+ */
 export function useOfflineStatus() {
-  return useContext(OfflineContext);
+  const isOnline = useOfflineStore((s) => s.isOnline);
+  const queueLength = useOfflineStore((s) => s.queueLength);
+  const isSyncing = useOfflineStore((s) => s.isSyncing);
+  return { isOnline, queueLength, isSyncing };
 }
