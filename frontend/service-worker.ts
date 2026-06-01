@@ -316,4 +316,132 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
   }
 });
 
+// ─── Push Notification Handlers ─────────────────────────────────────────────
+
+interface PushMessage {
+  title: string;
+  body: string;
+  icon?: string;
+  badge?: string;
+  tag?: string;
+  data?: {
+    deepLink?: string;
+    category?: string;
+    [key: string]: any;
+  };
+}
+
+self.addEventListener('push', (event: PushEvent) => {
+  if (!event.data) {
+    console.warn('[SW] Push event without data');
+    return;
+  }
+
+  try {
+    const message: PushMessage = event.data.json();
+
+    // Set default values
+    const options: NotificationOptions = {
+      body: message.body || 'You have a new notification',
+      icon: message.icon || '/icons/notification.png',
+      badge: message.badge || '/icons/badge.png',
+      tag: message.tag || 'notification',
+      requireInteraction:
+        message.data?.category === 'dispute_alert' ||
+        message.data?.category === 'security_alert',
+      data: {
+        ...message.data,
+        timestamp: Date.now(),
+      },
+    };
+
+    // Handle notification grouping
+    if (message.tag) {
+      options.tag = message.tag;
+    }
+
+    event.waitUntil(
+      self.registration.showNotification(message.title || 'Notification', options)
+    );
+  } catch (error) {
+    console.error('[SW] Error handling push event:', error);
+    
+    // Fallback: show generic notification
+    event.waitUntil(
+      self.registration.showNotification('New Notification', {
+        body: 'You have a new message',
+        icon: '/icons/notification.png',
+        badge: '/icons/badge.png',
+      })
+    );
+  }
+});
+
+self.addEventListener('notificationclick', (event: NotificationEvent) => {
+  const notification = event.notification;
+  const deepLink = notification.data?.deepLink;
+
+  // Mark notification as clicked via API
+  if (notification.data?.notificationId) {
+    markNotificationAsClicked(notification.data.notificationId).catch(err =>
+      console.error('[SW] Error marking notification as clicked:', err)
+    );
+  }
+
+  event.notification.close();
+
+  // Handle deep link navigation
+  const targetUrl = deepLink || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      // Check if already a window open
+      for (let i = 0; i < clientList.length; i++) {
+        const client = clientList[i];
+        if (client.url === targetUrl && 'focus' in client) {
+          return client.focus();
+        }
+      }
+
+      // Open new window with deep link
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
+  );
+});
+
+self.addEventListener('notificationclose', (event: NotificationEvent) => {
+  const notification = event.notification;
+
+  // Log notification dismissal (optional)
+  console.log('[SW] Notification closed:', notification.data?.tag);
+
+  // You can send analytics here
+  if (notification.data?.notificationId) {
+    // Could send a dismissal event to analytics service
+  }
+});
+
+/**
+ * Helper function to mark notification as clicked in the backend
+ */
+async function markNotificationAsClicked(notificationId: string): Promise<void> {
+  try {
+    const response = await fetch(`/api/v1/push/mark-clicked/${notificationId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn('[SW] Failed to mark notification as clicked:', response.statusText);
+    }
+  } catch (error) {
+    console.error('[SW] Error marking notification as clicked:', error);
+    // Silently fail - this is not critical
+  }
+}
+
 export default null;
