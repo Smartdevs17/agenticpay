@@ -20,6 +20,21 @@ import {
   listFeeRecords,
   estimateStripeFee,
 } from '../services/stripe.js';
+import {
+  createConnectedAccount,
+  getOnboardingStatus,
+  handleConnectWebhook,
+  createPaymentIntentWithConnect,
+} from '../services/stripe-connect.js';
+import {
+  lockRate,
+  confirmConversion,
+  settleToStellar,
+  processFiatRefund,
+  getConversion,
+  listConversions,
+  getRate,
+} from '../services/fiat-crypto.js';
 
 export const stripeRouter = Router();
 
@@ -245,6 +260,83 @@ stripeRouter.get(
   })
 );
 
+// ── Stripe Connect ───────────────────────────────────────────────────────────
+
+const connectAccountSchema = z.object({
+  merchantId: z.string().min(1),
+  email: z.string().email(),
+});
+
+stripeRouter.post('/connect/account', validate(connectAccountSchema), asyncHandler(async (req, res) => {
+  const { merchantId, email } = req.body;
+  const result = await createConnectedAccount(merchantId, email);
+  res.status(201).json(result);
+}));
+
+stripeRouter.get('/connect/account/:merchantId', asyncHandler(async (req, res) => {
+  const status = await getOnboardingStatus(req.params.merchantId);
+  if (!status) return res.status(404).json({ error: 'Account not found' });
+  res.json(status);
+}));
+
+stripeRouter.post('/connect/payment-intents', asyncHandler(async (req, res) => {
+  const { amount, currency, merchantStripeAccountId } = req.body;
+  if (!amount || !currency || !merchantStripeAccountId) {
+    return res.status(400).json({ error: 'amount, currency, and merchantStripeAccountId required' });
+  }
+  const intent = await createPaymentIntentWithConnect(amount, currency, merchantStripeAccountId);
+  res.status(201).json({ id: intent.id, clientSecret: intent.client_secret, status: intent.status });
+}));
+
+// ── Fiat-to-Crypto Conversion ────────────────────────────────────────────────
+
+stripeRouter.get('/rates', asyncHandler(async (req, res) => {
+  const { from = 'USD', to = 'USDC' } = req.query;
+  const rate = getRate(from as string, to as string);
+  res.json({ from, to, rate, updatedAt: new Date().toISOString() });
+}));
+
+stripeRouter.post('/convert/lock-rate', asyncHandler(async (req, res) => {
+  const { fromCurrency = 'USD', toAsset = 'USDC', amount } = req.body;
+  if (!amount) return res.status(400).json({ error: 'amount required' });
+  const lock = await lockRate(fromCurrency, toAsset, amount);
+  res.json(lock);
+}));
+
+stripeRouter.post('/convert/confirm', asyncHandler(async (req, res) => {
+  const { rateLockId, stripePaymentIntentId } = req.body;
+  if (!rateLockId || !stripePaymentIntentId) return res.status(400).json({ error: 'rateLockId and stripePaymentIntentId required' });
+  const conversion = await confirmConversion(rateLockId, stripePaymentIntentId);
+  res.json(conversion);
+}));
+
+stripeRouter.post('/convert/settle', asyncHandler(async (req, res) => {
+  const { conversionId, destinationAddress } = req.body;
+  if (!conversionId || !destinationAddress) return res.status(400).json({ error: 'conversionId and destinationAddress required' });
+  const conversion = await getConversion(conversionId);
+  if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
+  const txHash = await settleToStellar(destinationAddress, conversion.cryptoAmount, conversion.toAsset);
+  res.json({ txHash, status: 'settled' });
+}));
+
+stripeRouter.post('/convert/:id/refund', asyncHandler(async (req, res) => {
+  const ok = await processFiatRefund(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Conversion not found or not refundable' });
+  res.json({ success: true });
+}));
+
+stripeRouter.get('/conversions', asyncHandler(async (req, res) => {
+  const userId = req.query.userId as string | undefined;
+  const conversions = await listConversions(userId);
+  res.json({ conversions, total: conversions.length });
+}));
+
+stripeRouter.get('/conversions/:id', asyncHandler(async (req, res) => {
+  const conversion = await getConversion(req.params.id);
+  if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
+  res.json(conversion);
+}));
+
 // ── Webhooks ─────────────────────────────────────────────────────────────────
 
 /**
@@ -290,6 +382,10 @@ stripeRouter.post(
       case 'charge.refunded': {
         const charge = event.data.object as { id: string; amount_refunded: number };
         console.log(`[Stripe] Charge refunded: ${charge.id} amount: ${charge.amount_refunded}`);
+        break;
+      }
+      case 'account.updated': {
+        await handleConnectWebhook(event);
         break;
       }
       default:

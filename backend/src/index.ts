@@ -72,6 +72,8 @@ import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
 import { fraudDetectionRouter } from './routes/fraud-detection.js';
 import { bridgeRouter } from './routes/bridge.js';
 import { tokenizationRouter } from './routes/tokenization.js';
+import { routingRouter } from './routes/routing.js';
+import { disputesRouter } from './routes/disputes.js';
 import { startWebhookWorker, stopWebhookWorker } from './services/webhooks.js';
 import { analyticsService } from './services/analytics.js';
 import { createAnalyticsRouter } from './routes/analytics.js';
@@ -234,19 +236,21 @@ apiV1Router.use('/allowances', allowancesRouter);
 apiV1Router.use('/forms', formsRouter);
 // Webhook management and verification
 apiV1Router.use('/webhooks', webhooksRouter);
-// Email delivery system
 apiV1Router.use('/disputes', disputeRoutes);
 apiV1Router.use('/emails', emailRouter);
 apiV1Router.use('/portfolio', portfolioRouter);
 apiV1Router.use('/backup', backupRouter);
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
-// NFC / QR payment requests
 apiV1Router.use('/nfc', nfcRouter);
-// Cache management
 apiV1Router.use('/cache', cacheRouter);
-
 apiV1Router.use('/circuit-breaker', circuitBreakerRouter);
+apiV1Router.use('/fraud-detection', fraudDetectionRouter);
+apiV1Router.use('/bridge', bridgeRouter);
+apiV1Router.use('/tokenization', tokenizationRouter);
+apiV1Router.use('/routing', routingRouter);
+apiV1Router.use('/escrow', escrowRouter);
+apiV1Router.use('/disputes', disputesRouter);
 apiV1Router.get('/compression/metrics', (_req, res) => {
   res.json(getCompressionMetrics());
 });

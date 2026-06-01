@@ -1,172 +1,135 @@
 import { randomUUID } from 'node:crypto';
+import { auditService } from './auditService.js';
 
-export type EscrowMilestoneStatus = 'pending' | 'submitted' | 'approved' | 'released' | 'disputed' | 'refunded';
-export type EscrowStatus = 'draft' | 'funded' | 'in_progress' | 'completed' | 'disputed' | 'refunded';
+export type EscrowStatus = 'pending' | 'funded' | 'disputed' | 'released' | 'refunded' | 'expired';
 
-export type EscrowMilestoneInput = {
-  title: string;
-  description?: string;
-  amount: number;
-  completionCriteria: string;
-};
+export interface EscrowRelease {
+  type: 'release_to_freelancer' | 'refund_to_client' | 'split';
+  freelancerPercent?: number;
+  clientPercent?: number;
+  approvedBy: string[];
+}
 
-export type EscrowMilestoneRecord = {
-  id: string;
-  title: string;
-  description?: string;
-  amount: number;
-  completionCriteria: string;
-  status: EscrowMilestoneStatus;
-  submissionUrl: string | null;
-  submissionNotes: string | null;
-  approvedAt: string | null;
-  disputedAt: string | null;
-  disputeReason: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type EscrowAgreement = {
+export interface EscrowRecord {
   id: string;
   projectId: string;
-  payerId: string;
-  payeeId: string;
-  currency: string;
-  totalAmount: number;
-  fundedAmount: number;
+  clientAddress: string;
+  freelancerAddress: string;
+  arbitratorAddresses: string[];
+  amount: string;
+  asset: string;
+  network: string;
   status: EscrowStatus;
-  milestones: EscrowMilestoneRecord[];
-  createdAt: string;
-  updatedAt: string;
-  metadata: Record<string, string>;
-};
+  createdAt: number;
+  fundedAt?: number;
+  disputedAt?: number;
+  releasedAt?: number;
+  deadline: number;
+  release?: EscrowRelease;
+  appealDeadline?: number;
+  appealTarget?: string;
+  signatures: string[];
+}
 
 class EscrowService {
-  private escrows = new Map<string, EscrowAgreement>();
+  private escrows = new Map<string, EscrowRecord>();
 
-  private nowIso(): string {
-    return new Date().toISOString();
-  }
-
-  createEscrow(input: {
+  async createEscrow(params: {
     projectId: string;
-    payerId: string;
-    payeeId: string;
-    currency: string;
-    totalAmount: number;
-    milestones: EscrowMilestoneInput[];
-    metadata?: Record<string, string>;
-  }): EscrowAgreement {
-    const now = this.nowIso();
-    const milestones = input.milestones.map((item) => ({
+    clientAddress: string;
+    freelancerAddress: string;
+    arbitratorAddresses: string[];
+    amount: string;
+    asset: string;
+    network: string;
+    deadline: number;
+  }): Promise<EscrowRecord> {
+    const escrow: EscrowRecord = {
       id: randomUUID(),
-      title: item.title,
-      description: item.description,
-      amount: Number(item.amount.toFixed(2)),
-      completionCriteria: item.completionCriteria,
-      status: 'pending' as EscrowMilestoneStatus,
-      submissionUrl: null,
-      submissionNotes: null,
-      approvedAt: null,
-      disputedAt: null,
-      disputeReason: null,
-      createdAt: now,
-      updatedAt: now,
-    }));
-
-    const escrow: EscrowAgreement = {
-      id: randomUUID(),
-      projectId: input.projectId,
-      payerId: input.payerId,
-      payeeId: input.payeeId,
-      currency: input.currency.toUpperCase(),
-      totalAmount: Number(input.totalAmount.toFixed(2)),
-      fundedAmount: 0,
-      status: 'draft',
-      milestones,
-      createdAt: now,
-      updatedAt: now,
-      metadata: input.metadata ?? {},
+      status: 'pending',
+      createdAt: Date.now(),
+      deadline: params.deadline,
+      signatures: [],
+      ...params,
     };
-
     this.escrows.set(escrow.id, escrow);
+
+    await auditService.logAction({ action: 'escrow.created', resource: 'escrow', resourceId: escrow.id, details: { projectId: params.projectId, amount: params.amount, asset: params.asset } });
     return escrow;
   }
 
-  listEscrows(): EscrowAgreement[] {
-    return [...this.escrows.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  async fundEscrow(escrowId: string, txHash: string): Promise<EscrowRecord | null> {
+    const escrow = this.escrows.get(escrowId);
+    if (!escrow || escrow.status !== 'pending') return null;
+    escrow.status = 'funded';
+    escrow.fundedAt = Date.now();
+    this.escrows.set(escrowId, escrow);
+    await auditService.logAction({ action: 'escrow.funded', resource: 'escrow', resourceId: escrowId, details: { txHash } });
+    return escrow;
   }
 
-  getEscrow(escrowId: string): EscrowAgreement | undefined {
+  async raiseDispute(escrowId: string, raisedBy: string): Promise<EscrowRecord | null> {
+    const escrow = this.escrows.get(escrowId);
+    if (!escrow || escrow.status !== 'funded') return null;
+    escrow.status = 'disputed';
+    escrow.disputedAt = Date.now();
+    escrow.appealDeadline = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    this.escrows.set(escrowId, escrow);
+    await auditService.logAction({ action: 'escrow.disputed', resource: 'escrow', resourceId: escrowId, details: { raisedBy } });
+    return escrow;
+  }
+
+  async resolveDispute(escrowId: string, release: EscrowRelease): Promise<EscrowRecord | null> {
+    const escrow = this.escrows.get(escrowId);
+    if (!escrow || escrow.status !== 'disputed') return null;
+
+    const requiredSigs = Math.ceil((escrow.arbitratorAddresses.length * 2) / 3);
+    if (release.approvedBy.length < requiredSigs) {
+      throw new Error(`Need ${requiredSigs} arbitrator signatures, got ${release.approvedBy.length}`);
+    }
+
+    escrow.status = release.type === 'refund_to_client' ? 'refunded' : 'released';
+    escrow.release = release;
+    escrow.releasedAt = Date.now();
+    this.escrows.set(escrowId, escrow);
+    await auditService.logAction({ action: 'escrow.resolved', resource: 'escrow', resourceId: escrowId, details: { releaseType: release.type, approvedBy: release.approvedBy } });
+    return escrow;
+  }
+
+  async appealDispute(escrowId: string, appealTargetAddress: string): Promise<EscrowRecord | null> {
+    const escrow = this.escrows.get(escrowId);
+    if (!escrow || escrow.status !== 'disputed') return null;
+    if (escrow.appealDeadline && Date.now() > escrow.appealDeadline) {
+      throw new Error('Appeal deadline has passed');
+    }
+    escrow.appealTarget = appealTargetAddress;
+    escrow.appealDeadline = Date.now() + 14 * 24 * 60 * 60 * 1000;
+    escrow.arbitratorAddresses = [appealTargetAddress];
+    this.escrows.set(escrowId, escrow);
+    await auditService.logAction({ action: 'escrow.appealed', resource: 'escrow', resourceId: escrowId, details: { appealTarget: appealTargetAddress } });
+    return escrow;
+  }
+
+  async timeoutRelease(escrowId: string): Promise<EscrowRecord | null> {
+    const escrow = this.escrows.get(escrowId);
+    if (!escrow || escrow.status !== 'disputed') return null;
+    if (escrow.deadline > Date.now()) return null;
+
+    escrow.status = 'released';
+    escrow.release = { type: 'release_to_freelancer', approvedBy: ['system_timeout'] };
+    escrow.releasedAt = Date.now();
+    this.escrows.set(escrowId, escrow);
+    await auditService.logAction({ action: 'escrow.timeout_release', resource: 'escrow', resourceId: escrowId, details: { reason: 'arbitrator_timeout' } });
+    return escrow;
+  }
+
+  async getEscrow(escrowId: string): Promise<EscrowRecord | undefined> {
     return this.escrows.get(escrowId);
   }
 
-  fundEscrow(escrowId: string, amount: number): EscrowAgreement | undefined {
-    const escrow = this.escrows.get(escrowId);
-    if (!escrow) {
-      return undefined;
-    }
-
-    escrow.fundedAmount = Number((escrow.fundedAmount + amount).toFixed(2));
-    escrow.status = escrow.fundedAmount >= escrow.totalAmount ? 'funded' : 'in_progress';
-    escrow.updatedAt = this.nowIso();
-    this.escrows.set(escrow.id, escrow);
-    return escrow;
-  }
-
-  submitMilestone(escrowId: string, milestoneId: string, submissionUrl: string, notes?: string): EscrowMilestoneRecord | undefined {
-    const escrow = this.escrows.get(escrowId);
-    const milestone = escrow?.milestones.find((item) => item.id === milestoneId);
-    if (!escrow || !milestone) {
-      return undefined;
-    }
-
-    milestone.status = 'submitted';
-    milestone.submissionUrl = submissionUrl;
-    milestone.submissionNotes = notes ?? null;
-    milestone.updatedAt = this.nowIso();
-    escrow.status = escrow.status === 'draft' ? 'funded' : 'in_progress';
-    escrow.updatedAt = this.nowIso();
-    this.escrows.set(escrow.id, escrow);
-    return milestone;
-  }
-
-  approveMilestone(escrowId: string, milestoneId: string, approvedBy: string): { escrow: EscrowAgreement; milestone: EscrowMilestoneRecord } | undefined {
-    const escrow = this.escrows.get(escrowId);
-    const milestone = escrow?.milestones.find((item) => item.id === milestoneId);
-    if (!escrow || !milestone || milestone.status !== 'submitted') {
-      return undefined;
-    }
-
-    milestone.status = 'released';
-    milestone.approvedAt = this.nowIso();
-    milestone.updatedAt = this.nowIso();
-    escrow.status = 'in_progress';
-    escrow.updatedAt = this.nowIso();
-
-    const allReleased = escrow.milestones.every((item) => item.status === 'released');
-    if (allReleased) {
-      escrow.status = 'completed';
-    }
-    this.escrows.set(escrow.id, escrow);
-    return { escrow, milestone };
-  }
-
-  disputeMilestone(escrowId: string, milestoneId: string, reason: string): EscrowMilestoneRecord | undefined {
-    const escrow = this.escrows.get(escrowId);
-    const milestone = escrow?.milestones.find((item) => item.id === milestoneId);
-    if (!escrow || !milestone || milestone.status === 'approved' || milestone.status === 'released') {
-      return undefined;
-    }
-
-    milestone.status = 'disputed';
-    milestone.disputeReason = reason;
-    milestone.disputedAt = this.nowIso();
-    milestone.updatedAt = this.nowIso();
-    escrow.status = 'disputed';
-    escrow.updatedAt = this.nowIso();
-    this.escrows.set(escrow.id, escrow);
-    return milestone;
+  async listEscrows(status?: EscrowStatus): Promise<EscrowRecord[]> {
+    const all = Array.from(this.escrows.values());
+    return status ? all.filter(e => e.status === status) : all;
   }
 }
 
