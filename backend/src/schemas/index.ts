@@ -205,3 +205,61 @@ export const refundEvaluationSchema = z.object({
   hasChargeback: z.boolean().default(false),
   hasDispute: z.boolean().default(false),
 });
+
+// Multisig Wallet Schemas
+export const createMultisigGroupSchema = z.object({
+  name: z.string().min(1, 'Wallet name is required').max(100),
+  walletAddresses: z
+    .array(z.string().min(1, 'Wallet address is required'))
+    .min(2, 'At least 2 signers required')
+    .max(20, 'Maximum 20 signers allowed'),
+  threshold: z.number().int().min(1, 'Threshold must be at least 1'),
+  mode: z.enum(['onchain', 'offchain']).optional(),
+  timeoutSeconds: z.number().int().positive().optional(),
+});
+
+export const updateMultisigGroupSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  timeoutSeconds: z.number().int().positive().optional(),
+});
+
+export const addSignerSchema = z.object({
+  newSigner: z.string().min(1, 'New signer address is required'),
+  proposerSigner: z.string().min(1, 'Proposer signer address is required'),
+  proposerSignature: z.string().min(1, 'Proposer signature is required'),
+});
+
+export const removeSignerSchema = z.object({
+  signerToRemove: z.string().min(1, 'Signer address to remove is required'),
+  proposerSigner: z.string().min(1, 'Proposer signer address is required'),
+  proposerSignature: z.string().min(1, 'Proposer signature is required'),
+  newThreshold: z.number().int().min(1).optional(),
+});
+
+export const changeThresholdSchema = z.object({
+  newThreshold: z.number().int().min(1, 'New threshold must be at least 1'),
+  proposerSigner: z.string().min(1, 'Proposer signer address is required'),
+  proposerSignature: z.string().min(1, 'Proposer signature is required'),
+});
+
+export const createMultisigPaymentSchema = z.object({
+  groupId: z.string().min(1, 'Group ID is required'),
+  amount: z.number().positive('Amount must be positive'),
+  currency: z.string().min(1, 'Currency is required').default('USD'),
+  description: z.string().optional(),
+  recipient: z.string().optional(),
+  mode: z.enum(['onchain', 'offchain']).optional(),
+  metadata: z.record(z.string()).optional(),
+  timeoutSeconds: z.number().int().positive().optional(),
+});
+
+export const approveMultisigPaymentSchema = z.object({
+  signer: z.string().min(1, 'Signer address is required'),
+  signature: z.string().min(1, 'Signature is required'),
+});
+
+export const rejectMultisigPaymentSchema = z.object({
+  signer: z.string().min(1, 'Signer address is required'),
+  signature: z.string().min(1, 'Signature is required'),
+  reason: z.string().optional(),
+});
