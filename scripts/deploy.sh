@@ -160,30 +160,14 @@ run_migrations() {
     return 0
   fi
 
-  # ── Prisma (uncomment when Prisma is added) ──────────────────────────────
-  # if [[ -f "$BACKEND_DIR/prisma/schema.prisma" ]]; then
-  #   log "Running Prisma migrations..."
-  #   (cd "$BACKEND_DIR" && npx prisma migrate deploy)
-  #   log "Prisma migrations complete."
-  #   return 0
-  # fi
+  if [[ -f "$BACKEND_DIR/prisma/schema.prisma" ]]; then
+    log "Running Prisma migrations (db:migrate)..."
+    (cd "$BACKEND_DIR" && npm run db:generate && npm run db:migrate)
+    log "Database migrations complete."
+    return 0
+  fi
 
-  # ── TypeORM (uncomment when TypeORM is added) ────────────────────────────
-  # if [[ -f "$BACKEND_DIR/src/data-source.ts" ]]; then
-  #   log "Running TypeORM migrations..."
-  #   (cd "$BACKEND_DIR" && npx typeorm-ts-node-commonjs -d src/data-source.ts migration:run)
-  #   log "TypeORM migrations complete."
-  #   return 0
-  # fi
-
-  # ── Custom migration script ──────────────────────────────────────────────
-  # if [[ -f "$BACKEND_DIR/scripts/migrate.sh" ]]; then
-  #   log "Running custom migration script..."
-  #   bash "$BACKEND_DIR/scripts/migrate.sh"
-  #   return 0
-  # fi
-
-  info "No database migration tooling detected — skipping (no-op)."
+  warn "No prisma/schema.prisma found — skipping migrations."
 }
 
 # ─── Build ───────────────────────────────────────────────────────────────────
@@ -306,6 +290,11 @@ health_check() {
 
 rollback() {
   section "Rolling back"
+
+  if [[ -f "$BACKEND_DIR/prisma/schema.prisma" && "${MIGRATION_ROLLBACK_ON_DEPLOY_FAILURE:-false}" == "true" ]]; then
+    warn "Attempting database rollback-one (dev/staging only)..."
+    (cd "$BACKEND_DIR" && npm run db:rollback:one) || warn "DB rollback-one skipped or failed."
+  fi
 
   if [[ ! -d "$BACKUP_DIR" ]]; then
     error "No backup found at $BACKUP_DIR — cannot roll back."

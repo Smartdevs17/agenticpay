@@ -1,0 +1,1457 @@
+# OpenAPI Specification
+# Generated automatically from AgenticPay API
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AgenticPay API",
+    "description": "AI-Powered Payment Infrastructure for Autonomous Agents on Stellar",
+    "version": "1.0.0",
+    "contact": {
+      "name": "AgenticPay Team",
+      "url": "https://github.com/Smartdevs17/agenticpay",
+      "email": "hello@agenticpay.com"
+    },
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://opensource.org/licenses/Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3001/api/v1",
+      "description": "Development server"
+    },
+    {
+      "url": "https://api.agenticpay.com/api/v1",
+      "description": "Production server"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Service health check",
+        "description": "Returns dependency status for Stellar, OpenAI, and scheduler.",
+        "operationId": "GET_/health",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [],
+        "deprecated": false
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Readiness probe",
+        "operationId": "GET_/ready",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [],
+        "deprecated": false
+      }
+    },
+    "/verification/verify": {
+      "post": {
+        "tags": [
+          "Verification"
+        ],
+        "summary": "Verify work submission",
+        "description": "AI-powered verification of freelancer deliverables.",
+        "operationId": "POST_/verification/verify",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "milestoneDescription": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "repositoryUrl",
+                  "milestoneDescription",
+                  "projectId"
+                ]
+              },
+              "examples": {
+                "default": {
+                  "summary": "Example request",
+                  "value": {
+                    "repositoryUrl": "string",
+                    "milestoneDescription": "string",
+                    "projectId": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/verification/verify/batch": {
+      "post": {
+        "tags": [
+          "Verification"
+        ],
+        "summary": "Batch verify work submissions",
+        "operationId": "POST_/verification/verify/batch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "repositoryUrl": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "milestoneDescription": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "repositoryUrl",
+                        "milestoneDescription",
+                        "projectId"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "items"
+                ]
+              },
+              "examples": {
+                "default": {
+                  "summary": "Example request",
+                  "value": {
+                    "items": [
+                      {
+                        "repositoryUrl": "string",
+                        "milestoneDescription": "string",
+                        "projectId": "string"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/invoice/generate": {
+      "post": {
+        "tags": [
+          "Invoicing"
+        ],
+        "summary": "Generate invoice",
+        "operationId": "POST_/invoice/generate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "merchantId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "workDescription": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "hoursWorked": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "hourlyRate": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "countryCode": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "merchantId",
+                  "workDescription"
+                ]
+              },
+              "examples": {
+                "default": {
+                  "summary": "Example request",
+                  "value": {
+                    "projectId": "string",
+                    "merchantId": "string",
+                    "workDescription": "string",
+                    "hoursWorked": 1,
+                    "hourlyRate": 1,
+                    "countryCode": {}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/onboarding": {
+      "post": {
+        "tags": [
+          "Onboarding"
+        ],
+        "summary": "Create merchant onboarding",
+        "operationId": "POST_/onboarding",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "merchantId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "businessName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "businessType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "contactEmail": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "contactPhone": {
+                    "type": "string"
+                  },
+                  "website": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "merchantId",
+                  "businessName",
+                  "businessType",
+                  "contactEmail"
+                ]
+              },
+              "examples": {
+                "default": {
+                  "summary": "Example request",
+                  "value": {
+                    "merchantId": "string",
+                    "businessName": "string",
+                    "businessType": "string",
+                    "contactEmail": "string",
+                    "contactPhone": "string",
+                    "website": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/onboarding/{id}/documents": {
+      "post": {
+        "tags": [
+          "Onboarding"
+        ],
+        "summary": "Submit onboarding document",
+        "operationId": "POST_/onboarding/{id}/documents",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "documentType": {
+                    "type": "string",
+                    "enum": [
+                      "business_license",
+                      "tax_id",
+                      "bank_statement",
+                      "identity_proof",
+                      "address_proof"
+                    ]
+                  },
+                  "fileName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fileSize": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fileData": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "documentType",
+                  "fileName",
+                  "fileSize",
+                  "mimeType"
+                ]
+              },
+              "examples": {
+                "default": {
+                  "summary": "Example request",
+                  "value": {
+                    "taskId": "string",
+                    "documentType": "business_license",
+                    "fileName": "string",
+                    "fileSize": 1,
+                    "mimeType": "string",
+                    "fileData": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/escrow": {
+      "post": {
+        "tags": [
+          "Escrow"
+        ],
+        "summary": "Create escrow agreement",
+        "operationId": "POST_/escrow",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "payerId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "payeeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "totalAmount": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "milestones": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "completionCriteria": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "title",
+                        "amount",
+                        "completionCriteria"
+                      ]
+                    }
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "payerId",
+                  "payeeId",
+                  "currency",
+                  "totalAmount",
+                  "milestones"
+                ]
+              },
+              "examples": {
+                "default": {
+                  "summary": "Example request",
+                  "value": {
+                    "projectId": "string",
+                    "payerId": "string",
+                    "payeeId": "string",
+                    "currency": "string",
+                    "totalAmount": 1,
+                    "milestones": [
+                      {
+                        "title": "string",
+                        "description": "string",
+                        "amount": 1,
+                        "completionCriteria": "string"
+                      }
+                    ],
+                    "metadata": {}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/escrow/{id}/fund": {
+      "post": {
+        "tags": [
+          "Escrow"
+        ],
+        "summary": "Fund escrow",
+        "operationId": "POST_/escrow/{id}/fund",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "amount"
+                ]
+              },
+              "examples": {
+                "default": {
+                  "summary": "Example request",
+                  "value": {
+                    "amount": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/escrow/{id}/milestones/{milestoneId}/confirm": {
+      "post": {
+        "tags": [
+          "Escrow",
+          "Payments"
+        ],
+        "summary": "Confirm milestone payment",
+        "description": "Release or confirm funds for a completed milestone.",
+        "operationId": "POST_/escrow/{id}/milestones/{milestoneId}/confirm",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/disputes": {
+      "post": {
+        "tags": [
+          "Disputes"
+        ],
+        "summary": "File a dispute",
+        "description": "Open a payment dispute for arbitration.",
+        "operationId": "POST_/disputes",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/disputes/{id}/respond": {
+      "post": {
+        "tags": [
+          "Disputes"
+        ],
+        "summary": "Respond to dispute",
+        "operationId": "POST_/disputes/{id}/respond",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/disputes/{id}/resolve": {
+      "post": {
+        "tags": [
+          "Disputes"
+        ],
+        "summary": "Resolve dispute",
+        "operationId": "POST_/disputes/{id}/resolve",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/stellar/payment/{transactionHash}": {
+      "get": {
+        "tags": [
+          "Stellar"
+        ],
+        "summary": "Get Stellar payment status",
+        "operationId": "GET_/stellar/payment/{transactionHash}",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "deprecated": false
+      }
+    },
+    "/sandbox/status": {
+      "get": {
+        "tags": [
+          "Sandbox"
+        ],
+        "summary": "Sandbox environment status",
+        "operationId": "GET_/sandbox/status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [],
+        "deprecated": false
+      }
+    },
+    "/sandbox/payments/process": {
+      "post": {
+        "tags": [
+          "Sandbox",
+          "Payments"
+        ],
+        "summary": "Process mock payment (sandbox)",
+        "operationId": "POST_/sandbox/payments/process",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [],
+        "deprecated": false
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Request__verification_verify": {
+        "type": "object",
+        "properties": {
+          "repositoryUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "milestoneDescription": {
+            "type": "string",
+            "minLength": 1
+          },
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "repositoryUrl",
+          "milestoneDescription",
+          "projectId"
+        ]
+      },
+      "Request__verification_verify_batch": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "repositoryUrl": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "milestoneDescription": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "repositoryUrl",
+                "milestoneDescription",
+                "projectId"
+              ]
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Request__invoice_generate": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "workDescription": {
+            "type": "string",
+            "minLength": 1
+          },
+          "hoursWorked": {
+            "type": "number",
+            "minimum": 0
+          },
+          "hourlyRate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "countryCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "merchantId",
+          "workDescription"
+        ]
+      },
+      "Request__onboarding": {
+        "type": "object",
+        "properties": {
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "businessName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "businessType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contactEmail": {
+            "type": "string",
+            "format": "email"
+          },
+          "contactPhone": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "merchantId",
+          "businessName",
+          "businessType",
+          "contactEmail"
+        ]
+      },
+      "Request__onboarding__id__documents": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "documentType": {
+            "type": "string",
+            "enum": [
+              "business_license",
+              "tax_id",
+              "bank_statement",
+              "identity_proof",
+              "address_proof"
+            ]
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fileSize": {
+            "type": "number",
+            "minimum": 0
+          },
+          "mimeType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fileData": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskId",
+          "documentType",
+          "fileName",
+          "fileSize",
+          "mimeType"
+        ]
+      },
+      "Request__escrow": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "payerId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "payeeId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 1
+          },
+          "totalAmount": {
+            "type": "number",
+            "minimum": 0
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "completionCriteria": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "title",
+                "amount",
+                "completionCriteria"
+              ]
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "projectId",
+          "payerId",
+          "payeeId",
+          "currency",
+          "totalAmount",
+          "milestones"
+        ]
+      },
+      "Request__escrow__id__fund": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "amount"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT authentication"
+      },
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "API Key authentication"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Validation failed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string",
+                  "example": "VALIDATION_FAILED"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "details": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "statusCode": {
+                  "type": "number",
+                  "example": 404
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized access",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "statusCode": {
+                  "type": "number",
+                  "example": 401
+                }
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Internal server error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "statusCode": {
+                  "type": "number",
+                  "example": 500
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Verification"
+    },
+    {
+      "name": "Verification"
+    },
+    {
+      "name": "Invoicing"
+    },
+    {
+      "name": "Onboarding"
+    },
+    {
+      "name": "Onboarding"
+    },
+    {
+      "name": "Escrow"
+    },
+    {
+      "name": "Escrow"
+    },
+    {
+      "name": "Escrow"
+    },
+    {
+      "name": "Payments"
+    },
+    {
+      "name": "Disputes"
+    },
+    {
+      "name": "Disputes"
+    },
+    {
+      "name": "Disputes"
+    },
+    {
+      "name": "Stellar"
+    },
+    {
+      "name": "Sandbox"
+    },
+    {
+      "name": "Sandbox"
+    },
+    {
+      "name": "Payments"
+    },
+    {
+      "name": "Authentication",
+      "description": "All protected endpoints require `Authorization: Bearer <token>`. Obtain tokens via your merchant dashboard or API key management."
+    }
+  ],
+  "externalDocs": {
+    "url": "https://docs.agenticpay.com",
+    "description": "Full API documentation"
+  }
+}

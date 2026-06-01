@@ -6,6 +6,7 @@ export const webhookProviderSchema = z.enum(['stripe', 'paypal', 'github', 'cust
 
 export const webhookSecretSchema = z.object({
   id: z.string(),
+  keyId: z.string().optional(),
   provider: webhookProviderSchema,
   secret: z.string().min(32, 'Secret must be at least 32 characters'),
   isActive: z.boolean().default(true),
@@ -20,6 +21,7 @@ export const webhookVerificationSchema = z.object({
   body: z.string(),
   provider: webhookProviderSchema,
   toleranceSeconds: z.number().default(300), // 5 minutes default tolerance
+  keyId: z.string().optional(),
 });
 
 export type WebhookProvider = z.infer<typeof webhookProviderSchema>;
@@ -74,9 +76,8 @@ export function verifyWebhookSignature(
 ): WebhookVerificationResult {
   const parsed = webhookVerificationSchema.parse(input);
 
-  // Get active secret for provider
-  const secret = getActiveSecretForProvider(parsed.provider);
-  if (!secret) {
+  const secrets = getActiveSecretsForProvider(parsed.provider, parsed.keyId);
+  if (secrets.length === 0) {
     return {
       isValid: false,
       provider: parsed.provider,
@@ -100,18 +101,20 @@ export function verifyWebhookSignature(
     };
   }
 
-  // Generate expected signature
-  const expectedSignature = generateWebhookSignature(
-    parsed.body,
-    secret.secret,
-    parsed.timestamp
-  );
+  let isValid = false;
+  let matchedSecret: WebhookSecret | undefined;
+  for (const secret of secrets) {
+    const expectedSignature = generateWebhookSignature(parsed.body, secret.secret, parsed.timestamp);
+    if (constantTimeEquals(expectedSignature, parsed.signature)) {
+      isValid = true;
+      matchedSecret = secret;
+      break;
+    }
+  }
 
-  // Compare signatures (constant-time comparison to prevent timing attacks)
-  const isValid = constantTimeEquals(expectedSignature, parsed.signature);
-
-  // Update last used timestamp
-  updateSecretLastUsed(secret.id);
+  if (matchedSecret) {
+    updateSecretLastUsed(matchedSecret.id);
+  }
 
   return {
     isValid,
@@ -143,11 +146,13 @@ function constantTimeEquals(a: string, b: string): boolean {
 export function createWebhookSecret(
   provider: WebhookProvider,
   secret: string,
-  expiresAt?: string
+  expiresAt?: string,
+  keyId?: string,
 ): WebhookSecret {
   const id = `whs_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const webhookSecret: WebhookSecret = {
     id,
+    keyId: keyId ?? `key_${provider}_${Date.now()}`,
     provider,
     secret,
     isActive: true,
@@ -160,15 +165,20 @@ export function createWebhookSecret(
 }
 
 /**
- * Get active secret for a provider
+ * Get active secret for a provider (newest)
  */
 export function getActiveSecretForProvider(provider: WebhookProvider): WebhookSecret | null {
-  const activeSecrets = Array.from(webhookSecrets.values())
-    .filter(secret => secret.provider === provider && secret.isActive)
-    .filter(secret => !secret.expiresAt || new Date(secret.expiresAt) >= new Date())
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const list = getActiveSecretsForProvider(provider);
+  return list.length > 0 ? list[0] : null;
+}
 
-  return activeSecrets.length > 0 ? activeSecrets[0] : null;
+/** All active secrets (supports key rotation overlap) */
+export function getActiveSecretsForProvider(provider: WebhookProvider, keyId?: string): WebhookSecret[] {
+  return Array.from(webhookSecrets.values())
+    .filter((secret) => secret.provider === provider && secret.isActive)
+    .filter((secret) => !secret.expiresAt || new Date(secret.expiresAt) >= new Date())
+    .filter((secret) => !keyId || secret.keyId === keyId)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 /**
@@ -177,18 +187,17 @@ export function getActiveSecretForProvider(provider: WebhookProvider): WebhookSe
 export function rotateWebhookSecret(
   provider: WebhookProvider,
   newSecret: string,
-  gracePeriodHours: number = 24
+  gracePeriodHours: number = 24,
+  newKeyId?: string,
 ): WebhookSecret {
-  // Deactivate current secret
-  const currentSecret = getActiveSecretForProvider(provider);
-  if (currentSecret) {
+  const currentSecrets = getActiveSecretsForProvider(provider);
+  for (const currentSecret of currentSecrets) {
     currentSecret.isActive = false;
     currentSecret.expiresAt = new Date(Date.now() + gracePeriodHours * 60 * 60 * 1000).toISOString();
     webhookSecrets.set(currentSecret.id, currentSecret);
   }
 
-  // Create new active secret
-  return createWebhookSecret(provider, newSecret);
+  return createWebhookSecret(provider, newSecret, undefined, newKeyId);
 }
 
 /**

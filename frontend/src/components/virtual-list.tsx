@@ -43,6 +43,10 @@ export interface VirtualListProps<T extends VirtualListItem> {
   containerHeight: number;
   /** Default row height in px (used when `item.height` is absent). */
   estimatedRowHeight?: number;
+  /** Resolve per-item height (enables dynamic row sizing). */
+  getItemHeight?: (item: T, index: number) => number;
+  /** Called when a row reports a new measured height. */
+  onItemHeightChange?: (id: string | number, height: number) => void;
   /** Number of extra rows to render above and below the visible window. */
   overscan?: number;
   /** Render function for each row. */
@@ -116,6 +120,8 @@ export function VirtualList<T extends VirtualListItem>({
   items,
   containerHeight,
   estimatedRowHeight = 48,
+  getItemHeight,
+  onItemHeightChange,
   overscan = 5,
   renderRow,
   header,
@@ -145,10 +151,13 @@ export function VirtualList<T extends VirtualListItem>({
     [controlledSelectedIds, onSelectionChange]
   );
 
-  // Build row heights array
+  // Build row heights array (supports dynamic measurement cache)
   const rowHeights = useMemo(
-    () => items.map((item) => item.height ?? estimatedRowHeight),
-    [items, estimatedRowHeight]
+    () =>
+      items.map((item, index) =>
+        getItemHeight?.(item, index) ?? item.height ?? estimatedRowHeight
+      ),
+    [items, estimatedRowHeight, getItemHeight]
   );
 
   const { startIndex, endIndex, totalHeight, offsetTop, offsetBottom } =
@@ -271,10 +280,19 @@ export function VirtualList<T extends VirtualListItem>({
         onScroll={handleScroll}
         onKeyDown={handleKeyDown}
         role="listbox"
-        aria-multiselectable="true"
+        aria-multiselectable={onExport ? 'true' : undefined}
+        aria-activedescendant={
+          focusedIndex != null ? `virtual-row-${items[focusedIndex]?.id}` : undefined
+        }
         aria-label="Data list"
         tabIndex={0}
-        style={{ height: containerHeight, overflowY: 'auto', outline: 'none' }}
+        style={{
+          height: containerHeight,
+          overflowY: 'auto',
+          outline: 'none',
+          scrollBehavior: 'auto',
+          willChange: 'scroll-position',
+        }}
       >
         {items.length === 0 && !isLoading ? (
           emptyState ?? (
@@ -298,10 +316,17 @@ export function VirtualList<T extends VirtualListItem>({
               return (
                 <div
                   key={item.id}
+                  id={`virtual-row-${item.id}`}
                   role="option"
                   aria-selected={isSelected}
                   data-focused={isFocused || undefined}
+                  data-index={globalIdx}
                   style={rowStyle}
+                  ref={(node) => {
+                    if (!node || !onItemHeightChange) return;
+                    const measured = node.getBoundingClientRect().height;
+                    if (measured > 0) onItemHeightChange(item.id, measured);
+                  }}
                   onClick={() => {
                     setFocusedIndex(globalIdx);
                     const next = new Set(selectedIds);

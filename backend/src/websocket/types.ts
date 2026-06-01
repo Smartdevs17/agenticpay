@@ -43,4 +43,6 @@ export type WebSocketServerOptions = {
   pongTimeoutMs: number;
   defaultChannels: WebSocketChannel[];
   maxAuthAgeMs: number;
+  /** When true, clients that opt in via ?proto=1 receive binary protobuf frames instead of JSON. */
+  enableBinaryProtocol?: boolean;
 };

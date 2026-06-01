@@ -1,0 +1,8 @@
+{
+  "title": "AgenticPay API",
+  "version": "1.0.0",
+  "description": "AI-Powered Payment Infrastructure for Autonomous Agents on Stellar",
+  "baseUrl": "http://localhost:3001/api/v1",
+  "generateSDKs": true,
+  "sdkLanguages": ["typescript"]
+}

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Request, Response, NextFunction } from 'express';
+import Redis from 'ioredis';
 
 export interface CacheOptions {
   maxAge: number;
@@ -153,15 +154,29 @@ class CacheMonitor {
 }
 
 class RedisCache {
+  private client: Redis | null = null;
   private enabled = false;
 
   async connect(): Promise<void> {
+    const url = process.env.REDIS_URL;
+    if (!url) return;
+
     try {
-      const env = process.env.REDIS_URL || process.env.REDIS_ENABLED;
-      if (env) {
-        this.enabled = true;
-      }
+      this.client = new Redis(url, {
+        lazyConnect: true,
+        maxRetriesPerRequest: 3,
+        retryStrategy: (times) => Math.min(times * 200, 2000),
+      });
+      await this.client.connect();
+
+      // Configure optimal eviction policy and memory limit
+      const memoryLimit = process.env.REDIS_MEMORY_LIMIT ?? '256mb';
+      await this.client.config('SET', 'maxmemory', memoryLimit);
+      await this.client.config('SET', 'maxmemory-policy', 'allkeys-lru');
+
+      this.enabled = true;
     } catch {
+      this.client = null;
       this.enabled = false;
     }
   }
@@ -171,19 +186,55 @@ class RedisCache {
   }
 
   async get<T>(key: string): Promise<T | null> {
-    if (!this.enabled) return null;
-    return null;
+    if (!this.client || !this.enabled) return null;
+    try {
+      const raw = await this.client.get(key);
+      return raw ? (JSON.parse(raw) as T) : null;
+    } catch {
+      return null;
+    }
   }
 
   async set(key: string, value: unknown, ttlMs: number): Promise<void> {
+    if (!this.client || !this.enabled) return;
+    const ttlSec = Math.max(1, Math.ceil(ttlMs / 1000));
+    try {
+      await this.client.setex(key, ttlSec, JSON.stringify(value));
+    } catch { /* non-fatal */ }
   }
 
   async invalidate(pattern: string): Promise<void> {
-    if (!this.enabled) return;
+    if (!this.client || !this.enabled) return;
+    try {
+      const keys = await this.client.keys(pattern);
+      if (keys.length > 0) await this.client.del(...keys);
+    } catch { /* non-fatal */ }
   }
 
   async invalidateAll(): Promise<void> {
-    if (!this.enabled) return;
+    if (!this.client || !this.enabled) return;
+    try {
+      await this.client.flushdb();
+    } catch { /* non-fatal */ }
+  }
+
+  /** Returns Redis memory usage and server-side hit ratio for monitoring. */
+  async getMemoryInfo(): Promise<{ usedMemory: string; maxMemory: string; hitRatio: number } | null> {
+    if (!this.client || !this.enabled) return null;
+    try {
+      const [memInfo, statsInfo] = await Promise.all([
+        this.client.info('memory'),
+        this.client.info('stats'),
+      ]);
+      const usedMemory = memInfo.match(/used_memory_human:(.+)/)?.[1]?.trim() ?? '?';
+      const maxMemory = memInfo.match(/maxmemory_human:(.+)/)?.[1]?.trim() ?? '?';
+      const hits = Number(statsInfo.match(/keyspace_hits:(\d+)/)?.[1] ?? 0);
+      const misses = Number(statsInfo.match(/keyspace_misses:(\d+)/)?.[1] ?? 0);
+      const hitRatio = hits + misses > 0 ? hits / (hits + misses) : 0;
+      return { usedMemory, maxMemory, hitRatio };
+    } catch {
+      return null;
+    }
   }
 }
 

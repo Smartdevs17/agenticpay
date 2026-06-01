@@ -4,14 +4,14 @@
 Implement webhook signature verification for all incoming webhooks to prevent spoofed callbacks from payment providers, webhooks, and other services.
 
 ## Acceptance Criteria
-- [ ] HMAC-SHA256 verification
-- [ ] Per-provider secrets
-- [ ] Timestamp verification (replay protection)
-- [ ] Signature validation on all incoming
-- [ ] Failed webhook queuing
-- [ ] Manual retry
-- [ ] Secret rotation
-- [ ] Verification logs
+- [x] HMAC-SHA256 verification
+- [x] Per-provider secrets (with optional `keyId` for rotation)
+- [x] Timestamp verification (replay protection) + event-id dedup
+- [x] Signature validation on all incoming (`/webhooks/*`, Stripe SDK on `/webhooks/stripe`)
+- [x] Failed webhook queuing
+- [x] Manual retry
+- [x] Secret rotation
+- [x] Verification logs (structured Pino + `/api/v1/webhooks/audit`)
 
 ## Technical Scope
 - Files: backend/webhooks/verification

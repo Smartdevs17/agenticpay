@@ -23,4 +23,20 @@ test.describe('Visual regression', () => {
     await page.goto('/auth', { waitUntil: 'networkidle' });
     await expect(page).toHaveScreenshot('auth.png', { fullPage: true });
   });
+
+  test('escrow dashboard', async ({ authenticatedPage: page }) => {
+    await page.goto('/dashboard/escrow', { waitUntil: 'networkidle' });
+    await expect(page).toHaveScreenshot('escrow-dashboard.png', {
+      fullPage: true,
+      maxDiffPixelRatio: 0.03,
+    });
+  });
+
+  test('disputes list', async ({ authenticatedPage: page }) => {
+    await page.goto('/dashboard/disputes', { waitUntil: 'networkidle' });
+    await expect(page).toHaveScreenshot('disputes-list.png', {
+      fullPage: true,
+      maxDiffPixelRatio: 0.03,
+    });
+  });
 });

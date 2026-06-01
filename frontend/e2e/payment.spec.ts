@@ -1,13 +1,8 @@
 import { test, expect } from './fixtures';
 
-// These tests exercise the payment-adjacent navigation surface. The dashboard
-// layout currently has an unrelated build error (see dashboard.spec.ts note),
-// which means `/dashboard/payments` cannot yet render. The sidebar
-// navigation test is skipped until that is resolved; the auth-gate check
-// exercises only the client-side routing, which works today via the landing
-// page's CTA link.
-const DASHBOARD_RENDERS = false;
-const dashboardTest = DASHBOARD_RENDERS ? test : test.skip;
+// Sidebar navigation to payments requires dashboard layout; escrow covers payment UX.
+const DASHBOARD_PAYMENTS_NAV = false;
+const dashboardTest = DASHBOARD_PAYMENTS_NAV ? test : test.skip;
 
 test.describe('Payment navigation surface', () => {
   dashboardTest(

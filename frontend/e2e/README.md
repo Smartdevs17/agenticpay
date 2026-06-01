@@ -9,8 +9,11 @@ is in [`../playwright.config.ts`](../playwright.config.ts).
 - **Landing page** — hero, features, CTAs (`landing.spec.ts`)
 - **Authentication surface** — tabs, providers, copy (`auth.spec.ts`)
 - **Dashboard** — auth redirect, sidebar navigation, active state (`dashboard.spec.ts`)
-- **Payment routing** — sidebar entry point and auth gating (`payment.spec.ts`)
-- **Visual regression** — snapshots for landing and auth (`visual.spec.ts`)
+- **Payment flow** — sandbox create/fund/confirm + escrow milestone approval (`payment-flow.spec.ts`)
+- **Onboarding** — checklist, document upload with API mocks (`onboarding.spec.ts`)
+- **Disputes** — list, file dispute, detail view (`disputes.spec.ts`)
+- **Payment routing** — auth gating (`payment.spec.ts`)
+- **Visual regression** — landing, auth, escrow, disputes (`visual.spec.ts`)
 
 Tests run against Chromium, Firefox, WebKit, plus Pixel 7 and iPhone 14 mobile
 viewports.
@@ -73,7 +76,14 @@ Snapshots live under `e2e/__snapshots__/` and are keyed per browser project.
 Update them intentionally (`test:e2e:update-snapshots`) and review diffs in
 the HTML report.
 
+## Test data & cleanup
+
+Fixtures in `helpers/test-data.ts` and API mocks in `helpers/api-mocks.ts` provide
+stable onboarding and payment payloads. The `authenticatedPage` fixture clears
+`localStorage` after each test.
+
 ## CI
 
-The `e2e.yml` workflow shards the suite across the browser projects and uploads
-the HTML report plus failure traces/videos as workflow artifacts.
+The `e2e.yml` workflow shards the suite across browser projects (Chromium, Firefox,
+WebKit, mobile). Failed runs upload HTML reports, traces, and videos. Retries are
+enabled in CI (`retries: 2`) to reduce flake from dev-server compilation.

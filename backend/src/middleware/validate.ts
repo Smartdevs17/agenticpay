@@ -1,26 +1,52 @@
 import { Request, Response, NextFunction } from 'express';
-import { ZodSchema, ZodError } from 'zod';
+import { ZodSchema, ZodError, ZodIssue } from 'zod';
+
+export interface ValidationTargets {
+  body?: ZodSchema;
+  query?: ZodSchema;
+  params?: ZodSchema;
+}
+
+function formatIssues(issues: ZodIssue[]) {
+  return issues.map((err) => ({
+    path: err.path.join('.') || 'root',
+    message: err.message,
+  }));
+}
 
 /**
- * Reusable middleware to validate the request body against a Zod schema.
- * Returns a 400 Bad Request with detailed errors if validation fails.
+ * Validate request body, query, and params against Zod schemas.
+ * Returns generic 400 responses without leaking internal details.
  */
-export const validate = (schema: ZodSchema) => {
-  return function validateMiddleware(req: Request, res: Response, next: NextFunction) {
+export const validateRequest = (targets: ValidationTargets) => {
+  return function validateRequestMiddleware(req: Request, res: Response, next: NextFunction) {
     try {
-      schema.parse(req.body);
+      if (targets.body) {
+        req.body = targets.body.parse(req.body ?? {});
+      }
+      if (targets.query) {
+        req.query = targets.query.parse(req.query ?? {}) as typeof req.query;
+      }
+      if (targets.params) {
+        req.params = targets.params.parse(req.params ?? {}) as typeof req.params;
+      }
       next();
     } catch (error) {
       if (error instanceof ZodError) {
         return res.status(400).json({
-          message: 'Validation failed',
-          errors: error.errors.map((err) => ({
-            path: err.path.join('.'),
-            message: err.message,
-          })),
+          error: 'VALIDATION_FAILED',
+          message: 'Request validation failed',
+          details: formatIssues(error.errors),
         });
       }
       next(error);
     }
   };
 };
+
+/**
+ * Backward-compatible body-only validator.
+ */
+export const validate = (schema: ZodSchema) => validateRequest({ body: schema });
+
+export default validate;

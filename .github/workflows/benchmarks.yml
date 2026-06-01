@@ -1,0 +1,106 @@
+name: API Benchmarks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/benchmarks.yml'
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/benchmarks.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: API performance benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Run benchmark suite
+        run: npm run benchmark
+        env:
+          OPENAI_API_KEY: sk-ci-benchmark-placeholder
+          BENCHMARK_DURATION_SEC: 2
+          BENCHMARK_WARMUP_SEC: 1
+          BENCHMARK_CONNECTIONS: 5
+
+      - name: Compare against baseline
+        run: npm run benchmark:compare
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-benchmarks
+          path: |
+            backend/benchmarks/results.json
+            backend/benchmarks/trend.md
+          retention-days: 90
+
+      - name: Publish benchmark summary
+        if: always()
+        run: |
+          if [ -f benchmarks/results.json ]; then
+            echo "## Benchmark Results" >> "$GITHUB_STEP_SUMMARY"
+            node -e "
+              const r = require('./benchmarks/results.json');
+              console.log('| Endpoint | p99 (ms) | throughput |');
+              console.log('|----------|----------|------------|');
+              for (const e of r.endpoints) {
+                console.log('| ' + e.name + ' | ' + e.latency.p99.toFixed(2) + ' | ' + e.throughput.toFixed(0) + ' req/s |');
+              }
+            " >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  load-test:
+    name: Peak traffic simulation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Peak load on health endpoint
+        run: |
+          npx tsx src/tests/benchmarks/serve.ts &
+          SERVER_PID=$!
+          sleep 2
+          npx autocannon -c 50 -d 15 -p 5 http://127.0.0.1:3099/health
+          kill $SERVER_PID || true
+        env:
+          OPENAI_API_KEY: sk-ci-benchmark-placeholder
