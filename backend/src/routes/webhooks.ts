@@ -15,15 +15,19 @@ import {
   WebhookProvider,
 } from '../services/webhooks/verification.js';
 import { getWebhookAuditLog } from '../services/webhooks/audit.js';
-// Webhook delivery services
+// Webhook delivery tracking
 import {
   enqueueWebhookEvent,
   getWebhookDelivery,
+  getEndpointRateLimits,
+  getSamplePayloads,
+  getWebhookAnalytics,
   listDeadLetterQueue,
   listWebhookConfigs,
   listWebhookDeliveries,
   retryWebhookDeliveryManually,
   rotateWebhookSecret,
+  sendWebhookTest,
   startWebhookWorker,
   upsertWebhookConfig,
 } from '../services/webhooks.js';
@@ -229,5 +233,46 @@ webhooksRouter.get(
   '/dead-letter',
   asyncHandler(async (_req, res) => {
     res.json({ data: listDeadLetterQueue() });
+  })
+);
+
+// Webhook analytics
+webhooksRouter.get(
+  '/analytics',
+  asyncHandler(async (_req, res) => {
+    res.json(getWebhookAnalytics());
+  })
+);
+
+// Webhook testing endpoint
+webhooksRouter.get(
+  '/test/payloads',
+  asyncHandler(async (_req, res) => {
+    res.json({ samplePayloads: getSamplePayloads() });
+  })
+);
+
+const webhookTestSchema = z.object({
+  merchantId: z.string().min(1),
+  eventType: z.enum(['payment.completed', 'payment.failed', 'payment.disputed']).optional(),
+});
+
+webhooksRouter.post(
+  '/test',
+  validate(webhookTestSchema),
+  asyncHandler(async (req, res) => {
+    const result = await sendWebhookTest(req.body);
+    if (!result.success) {
+      throw new AppError(400, result.error ?? 'Webhook test failed', 'WEBHOOK_TEST_FAILED');
+    }
+    res.json(result);
+  })
+);
+
+// Per-endpoint rate limit status
+webhooksRouter.get(
+  '/rate-limits',
+  asyncHandler(async (_req, res) => {
+    res.json({ data: getEndpointRateLimits() });
   })
 );

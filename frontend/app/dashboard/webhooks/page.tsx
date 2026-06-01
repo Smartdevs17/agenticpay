@@ -11,26 +11,32 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
-import { WebhookSecret, WebhookEvent } from '@/lib/api';
-import { Key, RotateCcw, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { WebhookSecret, WebhookEvent, WebhookAnalytics } from '@/lib/api';
+import { Key, RotateCcw, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle, BarChart3, Send } from 'lucide-react';
 
 export default function DashboardWebhooksPage() {
   const [secrets, setSecrets] = useState<WebhookSecret[]>([]);
   const [events, setEvents] = useState<WebhookEvent[]>([]);
+  const [analytics, setAnalytics] = useState<WebhookAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false);
+  const [testDialogOpen, setTestDialogOpen] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
+  const [testEventType, setTestEventType] = useState<string>('payment.completed');
+  const [testMerchantId, setTestMerchantId] = useState<string>('');
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [secretsResponse, eventsResponse] = await Promise.all([
+      const [secretsResponse, eventsResponse, analyticsData] = await Promise.all([
         api.webhooks.listSecrets(),
         api.webhooks.listEvents(50),
+        api.webhooks.getAnalytics(),
       ]);
       setSecrets(secretsResponse.secrets);
       setEvents(eventsResponse.events);
+      setAnalytics(analyticsData);
     } catch (error) {
       console.error(error);
       toast.error('Failed to load webhook data');
@@ -116,6 +122,26 @@ export default function DashboardWebhooksPage() {
     }
   };
 
+  const handleSendTest = async () => {
+    if (!testMerchantId.trim()) {
+      toast.error('Please enter a merchant ID');
+      return;
+    }
+    try {
+      const result = await api.webhooks.sendTest({ merchantId: testMerchantId, eventType: testEventType });
+      if (result.success) {
+        toast.success(`Test webhook delivered (HTTP ${result.statusCode})`);
+      } else {
+        toast.error(`Test failed: ${result.error ?? 'Unknown error'}`);
+      }
+      setTestDialogOpen(false);
+      loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to send test webhook');
+    }
+  };
+
   const getStatusBadge = (event: WebhookEvent) => {
     if (event.processed) {
       return <Badge variant="default" className="bg-green-100 text-green-800"><CheckCircle className="h-3 w-3 mr-1" />Processed</Badge>;
@@ -158,6 +184,47 @@ export default function DashboardWebhooksPage() {
           <div className="flex items-center justify-between">
             <CardTitle>Webhook Secrets</CardTitle>
             <div className="flex gap-2">
+              <Dialog open={testDialogOpen} onOpenChange={setTestDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">
+                    <Send className="h-4 w-4 mr-2" />
+                    Send Test
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Send Test Webhook</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="testMerchantId">Merchant ID</Label>
+                      <Input
+                        id="testMerchantId"
+                        value={testMerchantId}
+                        onChange={(e) => setTestMerchantId(e.target.value)}
+                        placeholder="Enter merchant ID"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="testEventType">Event Type</Label>
+                      <Select value={testEventType} onValueChange={setTestEventType}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="payment.completed">Payment Completed</SelectItem>
+                          <SelectItem value="payment.failed">Payment Failed</SelectItem>
+                          <SelectItem value="payment.disputed">Payment Disputed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setTestDialogOpen(false)}>Cancel</Button>
+                      <Button onClick={handleSendTest}>Send Test</Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
               <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
                 <DialogTrigger asChild>
                   <Button>
@@ -346,6 +413,49 @@ export default function DashboardWebhooksPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delivery Analytics */}
+      {analytics && analytics.totalDeliveries > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5" />
+              Delivery Analytics
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="text-center p-4 bg-green-50 dark:bg-green-950 rounded-lg">
+                <div className="text-2xl font-bold text-green-700 dark:text-green-300">{analytics.successRate}%</div>
+                <div className="text-sm text-green-600 dark:text-green-400">Success Rate</div>
+              </div>
+              <div className="text-center p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">{analytics.avgLatencyMs}ms</div>
+                <div className="text-sm text-blue-600 dark:text-blue-400">Avg Latency</div>
+              </div>
+              <div className="text-center p-4 bg-purple-50 dark:bg-purple-950 rounded-lg">
+                <div className="text-2xl font-bold text-purple-700 dark:text-purple-300">{analytics.delivered}</div>
+                <div className="text-sm text-purple-600 dark:text-purple-400">Delivered</div>
+              </div>
+              <div className="text-center p-4 bg-orange-50 dark:bg-orange-950 rounded-lg">
+                <div className="text-2xl font-bold text-orange-700 dark:text-orange-300">{analytics.avgPayloadSizeBytes}B</div>
+                <div className="text-sm text-orange-600 dark:text-orange-400">Avg Payload Size</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4 text-center text-sm">
+              <div>
+                <span className="font-medium">Pending:</span> {analytics.pending}
+              </div>
+              <div>
+                <span className="font-medium">Failed:</span> {analytics.failed}
+              </div>
+              <div>
+                <span className="font-medium">Dead Letter:</span> {analytics.deadLetter}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Rotate Secret Dialog */}
       <Dialog open={rotateDialogOpen} onOpenChange={setRotateDialogOpen}>

@@ -142,6 +142,42 @@ export interface RotateWebhookSecretRequest {
   gracePeriodHours?: number;
 }
 
+export interface WebhookAnalytics {
+  totalDeliveries: number;
+  delivered: number;
+  failed: number;
+  pending: number;
+  deadLetter: number;
+  successRate: number;
+  avgLatencyMs: number;
+  avgPayloadSizeBytes: number;
+  byStatus: Record<string, number>;
+  recentDeliveries: Array<{
+    id: string;
+    status: string;
+    attempt: number;
+    statusCode?: number;
+    latencyMs?: number;
+    payloadSizeBytes: number;
+    createdAt: string;
+  }>;
+}
+
+export interface WebhookTestResult {
+  success: boolean;
+  statusCode?: number;
+  responseBody?: string;
+  error?: string;
+}
+
+export interface EndpointRateLimitInfo {
+  url: string;
+  count: number;
+  limit: number;
+  remaining: number;
+  resetInMs: number;
+}
+
 export const api = {
     /**
      * AI Work Verification
@@ -241,5 +277,18 @@ export const api = {
       markEventProcessed: async (eventId: string) => apiCall(`/webhooks/events/${eventId}/process`, {
         method: 'POST',
       }),
+
+      // Analytics
+      getAnalytics: async () => apiCall<WebhookAnalytics>('/webhooks/analytics', { method: 'GET' }),
+
+      // Testing
+      getSamplePayloads: async () => apiCall<{ samplePayloads: Record<string, Record<string, unknown>> }>('/webhooks/test/payloads', { method: 'GET' }),
+      sendTest: async (payload: { merchantId: string; eventType?: string }) => apiCall<WebhookTestResult>('/webhooks/test', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+      // Rate limits
+      getRateLimits: async () => apiCall<{ data: EndpointRateLimitInfo[] }>('/webhooks/rate-limits', { method: 'GET' }),
     },
 };
