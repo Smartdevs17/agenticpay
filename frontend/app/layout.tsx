@@ -3,6 +3,7 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 import PWAWrapper from "@/components/PWAWrapper";
 import { LanguageProvider } from "@/components/providers/LanguageProvider";
+import { OfflineProvider } from "@/components/offline/OfflineProvider";
 
 // Using system fonts defined in globals.css to avoid network dependencies during build
 
@@ -37,7 +38,7 @@ export default function RootLayout({
       >
         <Providers>
           <LanguageProvider>
-            {children}
+            <OfflineProvider>{children}</OfflineProvider>
           </LanguageProvider>
           <PWAWrapper />
         </Providers>

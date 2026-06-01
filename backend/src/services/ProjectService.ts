@@ -1,7 +1,9 @@
 /**
- * ProjectService.ts — Issue #366
+ * ProjectService.ts — Issue #366/#374
  *
- * Business logic layer for projects
+ * Business logic layer for projects. Expected business-rule failures are
+ * returned as Result errors; exceptions are reserved for unexpected runtime
+ * failures from infrastructure dependencies.
  */
 
 import { BaseService } from "./BaseService.js";
@@ -9,7 +11,8 @@ import {
   ProjectRepository,
   Project,
 } from "../repositories/ProjectRepository.js";
-import { PaginationOptions } from "../repositories/BaseRepository.js";
+import { PaginationOptions, PaginatedResult } from "../repositories/BaseRepository.js";
+import { Result } from "../lib/result.js";
 
 export interface CreateProjectDTO {
   clientId: string;
@@ -44,221 +47,193 @@ export class ProjectService extends BaseService {
     super();
   }
 
-  async createProject(data: CreateProjectDTO): Promise<Project> {
-    // Validate business rules
-    this.validate(data.amount > 0, "Project amount must be positive");
-    this.validate(
-      data.clientId !== data.freelancerId,
-      "Client and freelancer must be different",
-    );
-
-    if (data.deadline) {
-      const deadlineDate = new Date(data.deadline);
-      this.validate(
-        deadlineDate > new Date(),
-        "Deadline must be in the future",
-      );
+  async createProject(data: CreateProjectDTO): Promise<Result<Project>> {
+    if (data.amount <= 0) {
+      return this.validationFailure("Project amount must be positive");
+    }
+    if (data.clientId === data.freelancerId) {
+      return this.validationFailure("Client and freelancer must be different");
+    }
+    if (data.deadline && new Date(data.deadline) <= new Date()) {
+      return this.validationFailure("Deadline must be in the future");
     }
 
-    return await this.projectRepository.create(data);
+    return this.ok(await this.projectRepository.create(data));
   }
 
-  async getProject(id: string, tenantId: string): Promise<Project> {
+  async getProject(id: string, tenantId: string): Promise<Result<Project>> {
     const project = await this.projectRepository.findById(id);
 
     if (!project) {
-      this.notFound("Project", id);
+      return this.notFoundFailure("Project", id);
     }
 
-    // Tenant isolation
     if (project.tenantId !== tenantId) {
-      this.forbidden("Access denied to this project");
+      return this.forbiddenFailure("Access denied to this project");
     }
 
-    return project;
+    return this.ok(project);
   }
 
-  async listProjects(tenantId: string, options: PaginationOptions) {
-    return await this.projectRepository.findByTenant(tenantId, options);
+  async listProjects(
+    tenantId: string,
+    options: PaginationOptions,
+  ): Promise<Result<PaginatedResult<Project>>> {
+    return this.ok(await this.projectRepository.findByTenant(tenantId, options));
   }
 
   async listClientProjects(
     clientId: string,
-    tenantId: string,
+    _tenantId: string,
     options: PaginationOptions,
-  ) {
-    // Verify client belongs to tenant (in real app, check user-tenant relationship)
-    return await this.projectRepository.findByClient(clientId, options);
+  ): Promise<Result<PaginatedResult<Project>>> {
+    // Tenant membership validation belongs in the user/tenant repository once wired.
+    return this.ok(await this.projectRepository.findByClient(clientId, options));
   }
 
   async listFreelancerProjects(
     freelancerId: string,
-    tenantId: string,
+    _tenantId: string,
     options: PaginationOptions,
-  ) {
-    // Verify freelancer belongs to tenant
-    return await this.projectRepository.findByFreelancer(freelancerId, options);
+  ): Promise<Result<PaginatedResult<Project>>> {
+    return this.ok(await this.projectRepository.findByFreelancer(freelancerId, options));
   }
 
   async updateProject(
     id: string,
     data: UpdateProjectDTO,
     tenantId: string,
-  ): Promise<Project> {
-    const project = await this.getProject(id, tenantId);
+  ): Promise<Result<Project>> {
+    const projectResult = await this.getProject(id, tenantId);
+    if (!projectResult.ok) return projectResult;
 
-    // Validate state transitions
     if (data.status) {
-      this.validateStatusTransition(project.status, data.status);
+      const transition = this.validateStatusTransition(projectResult.value.status, data.status);
+      if (!transition.ok) return transition;
     }
 
-    if (data.amount !== undefined) {
-      this.validate(data.amount > 0, "Project amount must be positive");
+    if (data.amount !== undefined && data.amount <= 0) {
+      return this.validationFailure("Project amount must be positive");
     }
 
     const updated = await this.projectRepository.update(id, data);
-    if (!updated) {
-      this.notFound("Project", id);
-    }
-
-    return updated;
+    return updated ? this.ok(updated) : this.notFoundFailure("Project", id);
   }
 
   async fundProject(
     id: string,
     data: FundProjectDTO,
     tenantId: string,
-  ): Promise<Project> {
-    const project = await this.getProject(id, tenantId);
+  ): Promise<Result<Project>> {
+    const projectResult = await this.getProject(id, tenantId);
+    if (!projectResult.ok) return projectResult;
+    const project = projectResult.value;
 
-    // Validate business rules
-    this.validate(
-      project.clientId === data.clientId,
-      "Only project client can fund",
-    );
-    this.validate(
-      project.status === "created",
-      "Project must be in created status",
-    );
-    this.validate(data.amount > 0, "Funding amount must be positive");
+    if (project.clientId !== data.clientId) {
+      return this.validationFailure("Only project client can fund");
+    }
+    if (project.status !== "created") {
+      return this.validationFailure("Project must be in created status");
+    }
+    if (data.amount <= 0) {
+      return this.validationFailure("Funding amount must be positive");
+    }
 
     const newDeposited = project.deposited + data.amount;
     const newStatus = newDeposited >= project.amount ? "funded" : "created";
-
     const updated = await this.projectRepository.update(id, {
       deposited: newDeposited,
       status: newStatus,
     });
 
-    if (!updated) {
-      this.notFound("Project", id);
-    }
-
-    return updated;
+    return updated ? this.ok(updated) : this.notFoundFailure("Project", id);
   }
 
   async submitWork(
     id: string,
     data: SubmitWorkDTO,
     tenantId: string,
-  ): Promise<Project> {
-    const project = await this.getProject(id, tenantId);
+  ): Promise<Result<Project>> {
+    const projectResult = await this.getProject(id, tenantId);
+    if (!projectResult.ok) return projectResult;
+    const project = projectResult.value;
 
-    // Validate business rules
-    this.validate(
-      project.freelancerId === data.freelancerId,
-      "Only assigned freelancer can submit work",
-    );
-    this.validate(
-      project.status === "funded" || project.status === "in_progress",
-      "Project must be funded or in progress",
-    );
+    if (project.freelancerId !== data.freelancerId) {
+      return this.validationFailure("Only assigned freelancer can submit work");
+    }
+    if (project.status !== "funded" && project.status !== "in_progress") {
+      return this.validationFailure("Project must be funded or in progress");
+    }
 
     const updated = await this.projectRepository.update(id, {
       githubRepo: data.githubRepo,
       status: "work_submitted",
     });
 
-    if (!updated) {
-      this.notFound("Project", id);
-    }
-
-    return updated;
+    return updated ? this.ok(updated) : this.notFoundFailure("Project", id);
   }
 
   async approveWork(
     id: string,
     clientId: string,
     tenantId: string,
-  ): Promise<Project> {
-    const project = await this.getProject(id, tenantId);
+  ): Promise<Result<Project>> {
+    const projectResult = await this.getProject(id, tenantId);
+    if (!projectResult.ok) return projectResult;
+    const project = projectResult.value;
 
-    // Validate business rules
-    this.validate(
-      project.clientId === clientId,
-      "Only project client can approve",
-    );
-    this.validate(
-      project.status === "work_submitted" || project.status === "verified",
-      "Work must be submitted or verified",
-    );
-
-    // In real implementation, transfer funds here
-    const updated = await this.projectRepository.update(id, {
-      status: "completed",
-      deposited: 0, // Funds released
-    });
-
-    if (!updated) {
-      this.notFound("Project", id);
+    if (project.clientId !== clientId) {
+      return this.validationFailure("Only project client can approve");
+    }
+    if (project.status !== "work_submitted" && project.status !== "verified") {
+      return this.validationFailure("Work must be submitted or verified");
     }
 
-    return updated;
+    const updated = await this.projectRepository.update(id, {
+      status: "completed",
+      deposited: 0,
+    });
+
+    return updated ? this.ok(updated) : this.notFoundFailure("Project", id);
   }
 
   async raiseDispute(
     id: string,
     userId: string,
     tenantId: string,
-  ): Promise<Project> {
-    const project = await this.getProject(id, tenantId);
+  ): Promise<Result<Project>> {
+    const projectResult = await this.getProject(id, tenantId);
+    if (!projectResult.ok) return projectResult;
+    const project = projectResult.value;
 
-    // Validate business rules
-    this.validate(
-      project.clientId === userId || project.freelancerId === userId,
-      "Only client or freelancer can raise dispute",
-    );
+    if (project.clientId !== userId && project.freelancerId !== userId) {
+      return this.validationFailure("Only client or freelancer can raise dispute");
+    }
 
     const updated = await this.projectRepository.update(id, {
       status: "disputed",
     });
 
-    if (!updated) {
-      this.notFound("Project", id);
-    }
-
-    return updated;
+    return updated ? this.ok(updated) : this.notFoundFailure("Project", id);
   }
 
-  async deleteProject(id: string, tenantId: string): Promise<void> {
-    const project = await this.getProject(id, tenantId);
+  async deleteProject(id: string, tenantId: string): Promise<Result<void>> {
+    const projectResult = await this.getProject(id, tenantId);
+    if (!projectResult.ok) return projectResult;
+    const project = projectResult.value;
 
-    // Validate business rules
-    this.validate(
-      project.status === "created" && project.deposited === 0,
-      "Can only delete unfunded projects",
-    );
+    if (project.status !== "created" || project.deposited !== 0) {
+      return this.validationFailure("Can only delete unfunded projects");
+    }
 
     const deleted = await this.projectRepository.delete(id);
-    if (!deleted) {
-      this.notFound("Project", id);
-    }
+    return deleted ? this.ok(undefined) : this.notFoundFailure("Project", id);
   }
 
   private validateStatusTransition(
     from: Project["status"],
     to: Project["status"],
-  ): void {
+  ): Result<void> {
     const validTransitions: Record<Project["status"], Project["status"][]> = {
       created: ["funded", "cancelled"],
       funded: ["in_progress", "cancelled"],
@@ -271,9 +246,8 @@ export class ProjectService extends BaseService {
     };
 
     const allowed = validTransitions[from] || [];
-    this.validate(
-      allowed.includes(to),
-      `Invalid status transition from ${from} to ${to}`,
-    );
+    return allowed.includes(to)
+      ? this.ok(undefined)
+      : this.validationFailure(`Invalid status transition from ${from} to ${to}`);
   }
 }
