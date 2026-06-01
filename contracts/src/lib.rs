@@ -6,6 +6,65 @@ extern crate std;
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec};
 
 // ---------------------------------------------------------------------------
+// Multi-signature wallet types
+// ---------------------------------------------------------------------------
+
+/// On-chain status for a multisig transaction proposal.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum MultisigProposalStatus {
+    Pending,
+    Executed,
+    Rejected,
+    Expired,
+    Cancelled,
+}
+
+/// A multisig wallet configuration stored on-chain.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct MultisigWallet {
+    /// Unique wallet id (same as the storage counter key).
+    pub id: u64,
+    /// Ordered list of signer addresses.
+    pub signers: Vec<Address>,
+    /// Minimum number of approvals needed to execute a proposal.
+    pub threshold: u32,
+    /// Ledger timestamp after which new proposals auto-expire (0 = no timeout).
+    pub timeout_ledgers: u64,
+    /// Whether the wallet is active.
+    pub active: bool,
+}
+
+/// An on-chain multisig transaction proposal.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct MultisigProposal {
+    pub id: u64,
+    pub wallet_id: u64,
+    /// Amount in stroops (or smallest denomination).
+    pub amount: i128,
+    pub recipient: Address,
+    pub description: String,
+    pub status: MultisigProposalStatus,
+    /// Addresses that have approved this proposal.
+    pub approvals: Vec<Address>,
+    /// Addresses that have rejected this proposal.
+    pub rejections: Vec<Address>,
+    pub created_at: u64,
+    /// Ledger timestamp at which the proposal expires (0 = never).
+    pub expires_at: u64,
+}
+
+#[contracttype]
+pub enum MultisigDataKey {
+    WalletCount,
+    Wallet(u64),
+    ProposalCount,
+    Proposal(u64),
+}
+
+// ---------------------------------------------------------------------------
 // Reentrancy guard key
 // ---------------------------------------------------------------------------
 // Soroban's execution model is single-threaded and does not allow re-entrant
@@ -73,6 +132,11 @@ pub enum DataKey {
     ReentrancyLock,
     /// Emergency circuit breaker: `true` means the contract is paused.
     Paused,
+    // Multisig wallet storage
+    MultisigWalletCount,
+    MultisigWallet(u64),
+    MultisigProposalCount,
+    MultisigProposal(u64),
 }
 
 /// Input parameters for batch project creation.
@@ -748,6 +812,503 @@ impl AgenticPayContract {
     /// Return the contract version for tracking upgrades.
     pub fn version(_env: Env) -> u32 {
         1
+    }
+
+    // -----------------------------------------------------------------------
+    // Multi-signature wallet management
+    // -----------------------------------------------------------------------
+
+    /// Create a new multisig wallet with the given signers and threshold.
+    ///
+    /// # Arguments
+    /// * `creator`       - Address authorizing the creation
+    /// * `signers`       - Vec of signer addresses (min 2)
+    /// * `threshold`     - Number of approvals required (1..=signers.len())
+    /// * `timeout_ledgers` - Ledgers before proposals auto-expire (0 = never)
+    ///
+    /// # Returns
+    /// The new wallet id.
+    pub fn create_multisig_wallet(
+        env: Env,
+        creator: Address,
+        signers: Vec<Address>,
+        threshold: u32,
+        timeout_ledgers: u64,
+    ) -> u64 {
+        Self::_require_not_paused(&env);
+        creator.require_auth();
+        Self::_acquire_lock(&env);
+
+        assert!(signers.len() >= 2, "At least 2 signers required");
+        assert!(threshold >= 1, "Threshold must be at least 1");
+        assert!(
+            threshold as u32 <= signers.len(),
+            "Threshold cannot exceed number of signers"
+        );
+
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigWalletCount)
+            .unwrap_or(0);
+        count += 1;
+
+        let wallet = MultisigWallet {
+            id: count,
+            signers,
+            threshold,
+            timeout_ledgers,
+            active: true,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigWallet(count), &wallet);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigWalletCount, &count);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("created")),
+            (count, threshold),
+        );
+
+        Self::_release_lock(&env);
+        count
+    }
+
+    /// Retrieve a multisig wallet by id.
+    pub fn get_multisig_wallet(env: Env, wallet_id: u64) -> MultisigWallet {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found")
+    }
+
+    /// Add a new signer to an existing wallet.
+    ///
+    /// Requires the caller to already be a signer (one-of-N consensus is
+    /// enforced off-chain via the proposal flow; this entry-point is for
+    /// direct admin-level additions authorized by the wallet creator).
+    pub fn add_multisig_signer(
+        env: Env,
+        authorizer: Address,
+        wallet_id: u64,
+        new_signer: Address,
+    ) {
+        Self::_require_not_paused(&env);
+        authorizer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found");
+
+        assert!(wallet.active, "Wallet is inactive");
+
+        // Ensure authorizer is an existing signer.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == authorizer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Authorizer is not a signer");
+
+        wallet.signers.push_back(new_signer.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigWallet(wallet_id), &wallet);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("sgn_add")),
+            (wallet_id, new_signer),
+        );
+
+        Self::_release_lock(&env);
+    }
+
+    /// Remove a signer from an existing wallet.
+    ///
+    /// The resulting signer count must remain >= threshold.
+    pub fn remove_multisig_signer(
+        env: Env,
+        authorizer: Address,
+        wallet_id: u64,
+        signer_to_remove: Address,
+    ) {
+        Self::_require_not_paused(&env);
+        authorizer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found");
+
+        assert!(wallet.active, "Wallet is inactive");
+
+        let mut is_authorizer_signer = false;
+        let mut remove_idx: Option<u32> = None;
+        for i in 0..wallet.signers.len() {
+            let s = wallet.signers.get(i).unwrap();
+            if s == authorizer {
+                is_authorizer_signer = true;
+            }
+            if s == signer_to_remove {
+                remove_idx = Some(i);
+            }
+        }
+        assert!(is_authorizer_signer, "Authorizer is not a signer");
+        assert!(remove_idx.is_some(), "Signer to remove not found");
+
+        let new_len = wallet.signers.len() - 1;
+        assert!(new_len >= 2, "Cannot reduce below 2 signers");
+        assert!(
+            wallet.threshold as u32 <= new_len,
+            "Removal would make threshold unreachable"
+        );
+
+        // Rebuild signers vec without the removed address.
+        let mut new_signers = Vec::new(&env);
+        for i in 0..wallet.signers.len() {
+            if Some(i) != remove_idx {
+                new_signers.push_back(wallet.signers.get(i).unwrap());
+            }
+        }
+        wallet.signers = new_signers;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigWallet(wallet_id), &wallet);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("sgn_rem")),
+            (wallet_id, signer_to_remove),
+        );
+
+        Self::_release_lock(&env);
+    }
+
+    /// Create a transaction proposal for a multisig wallet.
+    ///
+    /// # Returns
+    /// The new proposal id.
+    pub fn create_multisig_proposal(
+        env: Env,
+        proposer: Address,
+        wallet_id: u64,
+        amount: i128,
+        recipient: Address,
+        description: String,
+    ) -> u64 {
+        Self::_require_not_paused(&env);
+        proposer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found");
+        assert!(wallet.active, "Wallet is inactive");
+        assert!(amount > 0, "Amount must be positive");
+
+        // Ensure proposer is a signer.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == proposer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Proposer is not a signer of this wallet");
+
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigProposalCount)
+            .unwrap_or(0);
+        count += 1;
+
+        let now = env.ledger().timestamp();
+        let expires_at = if wallet.timeout_ledgers > 0 {
+            now + wallet.timeout_ledgers
+        } else {
+            0
+        };
+
+        // Proposer's approval is implicit.
+        let mut initial_approvals = Vec::new(&env);
+        initial_approvals.push_back(proposer.clone());
+
+        let proposal = MultisigProposal {
+            id: count,
+            wallet_id,
+            amount,
+            recipient: recipient.clone(),
+            description,
+            status: MultisigProposalStatus::Pending,
+            approvals: initial_approvals,
+            rejections: Vec::new(&env),
+            created_at: now,
+            expires_at,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(count), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigProposalCount, &count);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("prop")),
+            (count, wallet_id, amount, recipient),
+        );
+
+        Self::_release_lock(&env);
+        count
+    }
+
+    /// Approve a multisig proposal.
+    ///
+    /// When the approval count reaches the wallet threshold the proposal is
+    /// automatically marked Executed and a payment event is emitted.
+    pub fn approve_multisig_proposal(
+        env: Env,
+        signer: Address,
+        proposal_id: u64,
+    ) {
+        Self::_require_not_paused(&env);
+        signer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        assert!(
+            proposal.status == MultisigProposalStatus::Pending,
+            "Proposal is not pending"
+        );
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(proposal.wallet_id))
+            .expect("Wallet not found");
+
+        // Auto-expire check.
+        if proposal.expires_at > 0 && env.ledger().timestamp() >= proposal.expires_at {
+            proposal.status = MultisigProposalStatus::Expired;
+            env.storage()
+                .persistent()
+                .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+            Self::_release_lock(&env);
+            panic!("Proposal has expired");
+        }
+
+        // Verify signer membership.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == signer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Not a signer of this wallet");
+
+        // Idempotency: skip if already approved.
+        for i in 0..proposal.approvals.len() {
+            if proposal.approvals.get(i).unwrap() == signer {
+                Self::_release_lock(&env);
+                return;
+            }
+        }
+
+        proposal.approvals.push_back(signer.clone());
+
+        if proposal.approvals.len() >= wallet.threshold {
+            proposal.status = MultisigProposalStatus::Executed;
+            env.events().publish(
+                (symbol_short!("msig"), symbol_short!("exec")),
+                (proposal_id, proposal.wallet_id, proposal.amount, proposal.recipient.clone()),
+            );
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+
+        Self::_release_lock(&env);
+    }
+
+    /// Reject a multisig proposal.
+    ///
+    /// If the number of rejections makes the threshold unreachable the
+    /// proposal is marked Rejected immediately.
+    pub fn reject_multisig_proposal(
+        env: Env,
+        signer: Address,
+        proposal_id: u64,
+    ) {
+        Self::_require_not_paused(&env);
+        signer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        assert!(
+            proposal.status == MultisigProposalStatus::Pending,
+            "Proposal is not pending"
+        );
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(proposal.wallet_id))
+            .expect("Wallet not found");
+
+        // Verify signer membership.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == signer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Not a signer of this wallet");
+
+        // Idempotency.
+        for i in 0..proposal.rejections.len() {
+            if proposal.rejections.get(i).unwrap() == signer {
+                Self::_release_lock(&env);
+                return;
+            }
+        }
+
+        proposal.rejections.push_back(signer);
+
+        // If enough rejections to block the threshold, finalize.
+        let blocking = wallet.signers.len() - wallet.threshold + 1;
+        if proposal.rejections.len() >= blocking {
+            proposal.status = MultisigProposalStatus::Rejected;
+            env.events().publish(
+                (symbol_short!("msig"), symbol_short!("reject")),
+                (proposal_id, proposal.wallet_id),
+            );
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+
+        Self::_release_lock(&env);
+    }
+
+    /// Cancel a pending proposal (any signer may cancel).
+    pub fn cancel_multisig_proposal(
+        env: Env,
+        signer: Address,
+        proposal_id: u64,
+    ) {
+        Self::_require_not_paused(&env);
+        signer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        assert!(
+            proposal.status == MultisigProposalStatus::Pending,
+            "Only pending proposals can be cancelled"
+        );
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(proposal.wallet_id))
+            .expect("Wallet not found");
+
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == signer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Not a signer of this wallet");
+
+        proposal.status = MultisigProposalStatus::Cancelled;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("cancel")),
+            (proposal_id, proposal.wallet_id),
+        );
+
+        Self::_release_lock(&env);
+    }
+
+    /// Retrieve a multisig proposal by id.
+    pub fn get_multisig_proposal(env: Env, proposal_id: u64) -> MultisigProposal {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found")
+    }
+
+    /// Check and auto-expire a proposal whose timeout has passed.
+    ///
+    /// Returns `true` if the proposal was expired, `false` otherwise.
+    pub fn check_multisig_expiry(env: Env, proposal_id: u64) -> bool {
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        if proposal.status != MultisigProposalStatus::Pending || proposal.expires_at == 0 {
+            Self::_release_lock(&env);
+            return false;
+        }
+
+        if env.ledger().timestamp() < proposal.expires_at {
+            Self::_release_lock(&env);
+            return false;
+        }
+
+        proposal.status = MultisigProposalStatus::Expired;
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("expired")),
+            (proposal_id, proposal.wallet_id),
+        );
+
+        Self::_release_lock(&env);
+        true
     }
 }
 
