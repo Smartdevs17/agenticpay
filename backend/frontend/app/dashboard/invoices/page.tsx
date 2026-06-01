@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useDashboardData, DashboardInvoice } from '@/lib/hooks/useDashboardData';
+import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, Clock, AlertCircle, Filter, FileText } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { FadeIn } from '@/components/ui/fade-in';
 import Link from 'next/link';
 import { InvoiceCardSkeleton } from '@/components/ui/loading-skeletons';
 import { EmptyState } from '@/components/empty/EmptyState';
@@ -88,12 +88,7 @@ export default function InvoicesPage() {
 
       <div className="grid grid-cols-1 gap-4">
         {filteredInvoices.map((invoice, index) => (
-          <motion.div
-            key={invoice.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.05 }}
-          >
+          <FadeIn key={invoice.id} delay={index * 0.05}>
             <Link href={`/dashboard/projects/${invoice.projectId}`}>
               <Card className="hover:shadow-lg transition-all cursor-pointer">
                 <CardContent className="p-6">
@@ -124,7 +119,7 @@ export default function InvoicesPage() {
                 </CardContent>
               </Card>
             </Link>
-          </motion.div>
+          </FadeIn>
         ))}
       </div>
 

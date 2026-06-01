@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Plus, ExternalLink, Clock, Folder } from 'lucide-react';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
+import { FadeIn } from '@/components/ui/fade-in';
 import { ProjectCardSkeleton } from '@/components/ui/loading-skeletons';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/empty/EmptyState';
@@ -101,12 +101,7 @@ export default function ProjectsPage() {
                 : 0;
 
             return (
-              <motion.div
-                key={project.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-              >
+              <FadeIn key={project.id} delay={index * 0.05}>
                 <Card className="hover:shadow-lg transition-all duration-200 border border-gray-200">
                   <CardHeader>
                     <div className="flex justify-between items-start">
@@ -162,7 +157,7 @@ export default function ProjectsPage() {
                     </Link>
                   </CardContent>
                 </Card>
-              </motion.div>
+              </FadeIn>
             );
           })}
         </div>

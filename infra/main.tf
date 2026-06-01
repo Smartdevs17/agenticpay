@@ -298,6 +298,20 @@ resource "aws_amplify_app" "frontend" {
   name       = "agenticpay-frontend-${var.environment}"
   repository = "https://github.com/Smartdevs17/agenticpay"
 
+  # HTTP/2 is enabled by default on AWS Amplify (ALPN negotiation via CloudFront).
+  # custom_headers propagates Link preload hints so CloudFront can issue
+  # HTTP/2 PUSH_PROMISE frames for critical fonts and CSS before the HTML
+  # has been parsed by the browser.
+  custom_headers = <<-EOT
+    customHeaders:
+      - pattern: '**'
+        headers:
+          - key: 'X-Frame-Options'
+            value: 'SAMEORIGIN'
+          - key: 'Link'
+            value: '</fonts/inter-var.woff2>; rel=preload; as=font; type="font/woff2"; crossorigin=anonymous'
+  EOT
+
   build_spec = <<-EOT
     version: 1
     frontend:

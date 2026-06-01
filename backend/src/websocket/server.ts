@@ -66,6 +66,7 @@ export function attachWebSocketServer(params: {
     pongTimeoutMs: 10_000,
     defaultChannels: ['payment.events', 'dispute.updates', 'analytics.updates'],
     maxAuthAgeMs: 60 * 60 * 1000,
+    enableBinaryProtocol: true,
     ...params.options,
   };
 
@@ -109,6 +110,7 @@ export function attachWebSocketServer(params: {
       maxBatchSize: options.maxBatchSize,
       defaultChannels: options.defaultChannels,
       authExpiresAtMs: parseAuthExpiry(url.searchParams.get('expiresAt'), options.maxAuthAgeMs),
+      useBinary: options.enableBinaryProtocol && url.searchParams.get('proto') === '1',
     });
 
     connections.set(ws, managed);

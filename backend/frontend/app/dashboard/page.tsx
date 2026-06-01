@@ -3,7 +3,7 @@
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { FadeIn } from '@/components/ui/fade-in';
 import { DashboardStatsSkeleton } from '@/components/ui/loading-skeletons';
 
 export default function DashboardPage() {
@@ -43,11 +43,7 @@ export default function DashboardPage() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-        >
+        <FadeIn delay={0.1}>
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-600">
@@ -63,13 +59,9 @@ export default function DashboardPage() {
               </p>
             </CardContent>
           </Card>
-        </motion.div>
+        </FadeIn>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
+        <FadeIn delay={0.2}>
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-600">
@@ -82,13 +74,9 @@ export default function DashboardPage() {
               <p className="text-xs text-yellow-600 mt-1">Awaiting approval</p>
             </CardContent>
           </Card>
-        </motion.div>
+        </FadeIn>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-        >
+        <FadeIn delay={0.3}>
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-600">
@@ -101,13 +89,9 @@ export default function DashboardPage() {
               <p className="text-xs text-blue-600 mt-1">In progress</p>
             </CardContent>
           </Card>
-        </motion.div>
+        </FadeIn>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-        >
+        <FadeIn delay={0.4}>
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-600">
@@ -120,15 +104,11 @@ export default function DashboardPage() {
               <p className="text-xs text-gray-600 mt-1">Projects done</p>
             </CardContent>
           </Card>
-        </motion.div>
+        </FadeIn>
       </div>
 
       {/* Recent Activity */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5 }}
-      >
+      <FadeIn delay={0.5}>
         <Card>
           <CardHeader>
             <CardTitle>Recent Activity</CardTitle>
@@ -152,7 +132,7 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </FadeIn>
     </div>
   );
 }

@@ -1,0 +1,24 @@
+syntax = "proto3";
+package agenticpay.websocket;
+
+// Server → client: a single event frame
+message WireMessage {
+  string type       = 1; // event type, e.g. "payment.created"
+  string channel    = 2; // subscription channel
+  uint32 sequence   = 3; // monotonic per-session sequence number
+  string session_id = 4;
+  string emitted_at = 5; // ISO-8601 timestamp
+  bytes  payload    = 6; // JSON-encoded event payload
+}
+
+// Server → client: a batch of WireMessages in one binary frame
+message WireMessageBatch {
+  repeated WireMessage messages = 1;
+}
+
+// Client → server: control message (subscribe / unsubscribe / auth.refresh / ping)
+message ClientMessage {
+  string          type       = 1;
+  repeated string channels   = 2;
+  string          expires_at = 3;
+}

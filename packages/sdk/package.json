@@ -11,7 +11,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rimraf dist",
-    "test": "vitest run --passWithNoTests"
+    "docs": "typedoc --options typedoc.json",
+    "test": "vitest run --passWithNoTests",
+    "example:getting-started": "tsx examples/getting-started.ts",
+    "example:split": "tsx examples/split-payment.ts",
+    "example:errors": "tsx examples/error-handling.ts"
   },
   "keywords": [
     "agenticpay",
@@ -26,7 +30,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.5.0",
-    "typescript": "^5.9.3",
+    "tsx": "^4.19.0",
+    "typedoc": "^0.28.0",
+    "typescript": "~5.7.2",
     "vitest": "^4.1.1"
   }
 }

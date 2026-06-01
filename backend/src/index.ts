@@ -1,5 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
@@ -33,6 +31,7 @@ import { stellarRouter } from './routes/stellar.js';
 import { catalogRouter } from './routes/catalog.js';
 import { jobsRouter } from './routes/jobs.js';
 import { healthRouter } from './routes/health.js';
+import { docsRouter } from './routes/docs.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
@@ -52,6 +51,7 @@ import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
 import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
+import { httpLogger, correlationMiddleware } from './middleware/logger.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { flagsRouter } from './routes/flags.js';
 import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
@@ -101,6 +101,7 @@ import './events/projections.js';
 import { stripeRouter } from './routes/stripe.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { requestSizeLimit } from './middleware/request-size-limit.js';
 import { signaturesRouter } from './routes/signatures.js';
 import { createSandboxRouter } from './routes/sandbox.js';
 import { circuitBreakerRouter } from './routes/circuit-breaker.js';
@@ -111,6 +112,9 @@ import { emailV2Router } from './routes/email-v2.js';
 import { createBullMQScheduler, getBullMQScheduler } from './services/bullmq-scheduler.js';
 import { getScheduledTasks } from './config/scheduled-tasks.js';
 import { bullMQMonitorRouter } from './routes/bullmq-monitor.js';
+import { fileUploadRouter } from './routes/file-upload.js';
+import { credentialRotationRouter } from './routes/credential-rotation.js';
+import zkIdentityRouter from './routes/zk-identity.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -128,33 +132,11 @@ if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
   console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
 }
 
-const traceStorage = new AsyncLocalStorage<string>();
-
-const originalConsole = {
-  log: console.log,
-  info: console.info,
-  warn: console.warn,
-  error: console.error,
-};
-
-function formatMessage(args: any[]): any[] {
-  const traceId = traceStorage.getStore();
-  if (traceId) {
-    if (typeof args[0] === 'string') {
-      args[0] = `[TraceID: ${traceId}] ${args[0]}`;
-    } else {
-      args.unshift(`[TraceID: ${traceId}]`);
-    }
-  }
-  return args;
-}
-
-console.log = (...args) => originalConsole.log(...formatMessage(args));
-console.info = (...args) => originalConsole.info(...formatMessage(args));
-console.warn = (...args) => originalConsole.warn(...formatMessage(args));
-console.error = (...args) => originalConsole.error(...formatMessage(args));
-
 const app = express();
+
+// Security stack: headers, sanitization, payload limits
+SecurityMiddleware.getInstance().applySecurity(app);
+app.use(requestSizeLimit());
 
 // Token-bucket rate limiter (replaces fixed-window tieredRateLimit)
 const apiRateLimiter = tokenBucketRateLimit({ keyPrefix: 'rl:api' });
@@ -181,9 +163,20 @@ app.use(
       'API-Version',
       'X-API-Version',
       'Accept-Version',
+      'Stripe-Signature',
+      'X-Hub-Signature-256',
+      'X-Webhook-Key-Id',
     ],
   })
 );
+
+app.use(requestIdMiddleware);
+app.use(correlationMiddleware);
+app.use(httpLogger);
+
+// Incoming webhooks: raw body capture before global JSON parser (#393)
+app.use('/webhooks', webhookHandlersRouter);
+
 app.use(express.json());
 app.use(express.text({ type: ['text/csv', 'text/plain'] }));
 
@@ -194,23 +187,6 @@ app.use(
     minSizeBytes: 1024,
   })
 );
-
-app.use(requestIdMiddleware);
-
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const traceId = (req.headers['x-trace-id'] as string) || randomUUID();
-  res.setHeader('X-Trace-Id', traceId);
-
-  traceStorage.run(traceId, () => {
-    console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Started`);
-
-    res.on('finish', () => {
-      console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Finished with status ${res.statusCode}`);
-    });
-
-    next();
-  });
-});
 
 app.use(slaTrackingMiddleware);
 app.use(sessionMiddleware);
@@ -224,6 +200,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 app.use(healthRouter);
+app.use('/docs', docsRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 
@@ -249,6 +226,8 @@ apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
 apiV1Router.use('/flags', flagsRouter);
+apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
+apiV1Router.use('/zk-identity', zkIdentityRouter);
 apiV1Router.use('/kyb', kybRouter);
 apiV1Router.use('/batch', batchRouter);
 apiV1Router.use('/relayer', relayerRouter);
@@ -302,6 +281,12 @@ app.use('/api/v1/events', eventsRouter);
 // Advanced threat detection with behavioral analysis
 app.use('/api/v1/threat-detection', threatDetectionRouter);
 
+// Secure file upload with MIME/magic-bytes validation and ClamAV scanning (Issue #401)
+app.use('/api/v1/uploads', fileUploadRouter);
+
+// Credential rotation management with dual-key overlap and audit trail (Issue #395)
+app.use('/api/v1/credentials', credentialRotationRouter);
+
 // Microservices service mesh — registry, discovery, circuit breakers
 app.use('/api/v1/service-mesh', serviceMeshRouter);
 
@@ -327,9 +312,6 @@ app.use('/api/v2/email', emailV2Router);
 // GraphQL gateway with federation-ready schema and subscriptions stream
 app.use('/graphql', graphQLRouter);
 app.use('/graphql/ws', graphQLWsRouter);
-
-// Webhook handlers (outside API versioning for direct access)
-app.use('/webhooks', webhookHandlersRouter);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
@@ -364,6 +346,10 @@ if (config.jobs.enabled) {
     console.error('[bullmq] Scheduler startup error:', err);
   });
 }
+
+// Start automated credential rotation scheduler (Issue #395)
+startScheduledRotation();
+console.log('[CredentialRotation] Scheduled rotation started');
 
 registerDefaultProcessors();
 if (config.queue.enabled) {
@@ -427,6 +413,13 @@ const shutdown = (signal: string) => {
       }
     } catch (err) {
       console.error('Error stopping BullMQ scheduler:', err);
+    }
+
+    try {
+      stopScheduledRotation();
+      console.log('Credential rotation scheduler stopped.');
+    } catch (err) {
+      console.error('Error stopping credential rotation:', err);
     }
 
     try {

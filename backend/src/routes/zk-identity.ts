@@ -1,15 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { ZKIdentityService } from '../services/zk-identity-service';
-import { 
-  IdentityVerificationRequest, 
-  VerificationResult, 
-  Credential, 
-  RevocationList,
+import { ZKIdentityService } from '../services/zk-identity-service.js';
+import {
   AgeVerificationInput,
   IdentityVerificationInput,
-  KYBVerificationInput
-} from '../types/zk-types';
-import { validateInput } from '../middleware/sanitize';
+  KYBVerificationInput,
+  IdentityVerificationRequest,
+} from '../types/zk-types.js';
+import { validateRequest } from '../middleware/validate.js';
 import { z } from 'zod';
 
 const router = Router();
@@ -46,7 +43,7 @@ const kybVerificationSchema = z.object({
 /**
  * Generate age verification proof
  */
-router.post('/prove/age', validateInput(ageVerificationSchema), async (req: Request, res: Response) => {
+router.post('/prove/age', validateRequest({ body: ageVerificationSchema }), async (req: Request, res: Response) => {
   try {
     const input: AgeVerificationInput = req.body;
     
@@ -75,7 +72,30 @@ router.post('/prove/age', validateInput(ageVerificationSchema), async (req: Requ
 /**
  * Generate identity verification proof
  */
-router.post('/prove/identity', validateInput(identityVerificationSchema), async (req: Request, res: Response) => {
+/**
+ * Preset endpoints for common regulatory thresholds.
+ */
+router.post('/prove/age/over-18', validateRequest({ body: ageVerificationSchema.omit({ minAge: true }) }), async (req: Request, res: Response) => {
+  try {
+    const input: AgeVerificationInput = { ...req.body, minAge: 18 };
+    const proof = await zkService.generateAgeProof(input);
+    res.json({ success: true, proof, verified: await zkService.verifyProof(proof), threshold: 18 });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Age proof failed' });
+  }
+});
+
+router.post('/prove/age/over-21', validateRequest({ body: ageVerificationSchema.omit({ minAge: true }) }), async (req: Request, res: Response) => {
+  try {
+    const input: AgeVerificationInput = { ...req.body, minAge: 21 };
+    const proof = await zkService.generateAgeProof(input);
+    res.json({ success: true, proof, verified: await zkService.verifyProof(proof), threshold: 21 });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Age proof failed' });
+  }
+});
+
+router.post('/prove/identity', validateRequest({ body: identityVerificationSchema }), async (req: Request, res: Response) => {
   try {
     const input: IdentityVerificationInput = req.body;
     
@@ -104,7 +124,7 @@ router.post('/prove/identity', validateInput(identityVerificationSchema), async 
 /**
  * Generate KYB verification proof
  */
-router.post('/prove/kyb', validateInput(kybVerificationSchema), async (req: Request, res: Response) => {
+router.post('/prove/kyb', validateRequest({ body: kybVerificationSchema }), async (req: Request, res: Response) => {
   try {
     const input: KYBVerificationInput = req.body;
     

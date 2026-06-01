@@ -1,5 +1,6 @@
 import type { DomainEventType, EventHandler, StoredEvent } from './event-types.js';
 import type { AgenticPayWebSocketServer } from '../websocket/server.js';
+import { addToDeadLetterQueue } from './dead-letter-queue.js';
 
 type WildcardHandler = (event: StoredEvent) => void | Promise<void>;
 
@@ -21,7 +22,6 @@ export function subscribe<T = unknown>(type: DomainEventType, handler: EventHand
   const set = handlers.get(type) ?? new Set<EventHandler>();
   set.add(handler as EventHandler);
   handlers.set(type, set);
-
   return () => {
     set.delete(handler as EventHandler);
   };
@@ -32,14 +32,26 @@ export function subscribeAll(handler: WildcardHandler): () => void {
   return () => wildcardHandlers.delete(handler);
 }
 
+async function invokeHandler(
+  handler: (event: StoredEvent) => void | Promise<void>,
+  event: StoredEvent
+): Promise<void> {
+  try {
+    await handler(event);
+  } catch (err) {
+    addToDeadLetterQueue(event, handler.name || 'anonymous', err);
+    console.error(`[event-bus] Handler "${handler.name || 'anonymous'}" failed for event "${event.type}":`, err);
+  }
+}
+
 export async function publish(event: StoredEvent): Promise<void> {
   const typed = handlers.get(event.type);
   if (typed) {
-    await Promise.all(Array.from(typed).map((h) => h(event)));
+    await Promise.all(Array.from(typed).map((h) => invokeHandler(h, event)));
   }
 
   if (wildcardHandlers.size > 0) {
-    await Promise.all(Array.from(wildcardHandlers).map((h) => h(event)));
+    await Promise.all(Array.from(wildcardHandlers).map((h) => invokeHandler(h, event)));
   }
 
   const channel = channelByEventPrefix.find(({ prefix }) => event.type.startsWith(prefix))?.channel;

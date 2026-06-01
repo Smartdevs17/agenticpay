@@ -114,6 +114,21 @@ const nextConfig: NextConfig = {
   headers: async () => {
     return [
       {
+        // HTTP/2 server push hints for critical assets on every page load
+        source: "/(.*)",
+        headers: [
+          {
+            key: "Link",
+            value: [
+              // Critical fonts — pushed before HTML is parsed
+              "</fonts/inter-var.woff2>; rel=preload; as=font; type=\"font/woff2\"; crossorigin=anonymous",
+              // Critical CSS — pushed alongside the document
+              "</_next/static/css/app/layout.css>; rel=preload; as=style",
+            ].join(", "),
+          },
+        ],
+      },
+      {
         source: "/:path*.js",
         headers: [
           {

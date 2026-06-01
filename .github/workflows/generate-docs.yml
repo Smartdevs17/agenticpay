@@ -38,9 +38,13 @@ jobs:
 
       - name: Generate OpenAPI Specification
         working-directory: backend
+        run: npm run openapi:generate
+
+      - name: Validate OpenAPI spec
+        working-directory: backend
         run: |
-          mkdir -p ${{ env.API_DOCS_DIR }}
-          npx ts-node scripts/generate-openapi.ts
+          test -f docs/api/openapi/openapi.json
+          node -e "const s=require('./docs/api/openapi/openapi.json'); if(!s.paths||!s.components) process.exit(1)"
 
       - name: Install Python for documentation
         uses: actions/setup-python@v5
@@ -288,9 +292,19 @@ jobs:
           path: ${{ env.API_DOCS_DIR }}/
           retention-days: 90
 
+      - name: Commit updated spec (deployment bot)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/docs/api/openapi/
+          git diff --staged --quiet || git commit -m "chore(docs): update OpenAPI spec [automated]"
+          git push || echo "Spec commit skipped (no changes or permissions)"
+
       - name: Deploy to Pages (if available)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         run: |
-          echo "📤 Documentation available at: https://agenticpay-docs.example.com/api"
-          echo "ℹ️ Update GitHub Pages configuration to deploy from ${{ env.API_DOCS_DIR }}"
+          echo "Swagger UI: serve from backend at /docs after deploy"
+          echo "Static explorer: ${{ env.API_DOCS_DIR }}/explorer/index.html"

@@ -6,8 +6,9 @@ import type {
   WebSocketServerMetrics,
   WebSocketWireMessage,
 } from './types.js';
+import { encodeBatch } from './codec.js';
 
-type QueueItem = { json: string; priority: 'high' | 'normal' };
+type QueueItem = { message: WebSocketWireMessage; priority: 'high' | 'normal' };
 
 export class ManagedConnection {
   readonly sessionId = randomUUID();
@@ -16,6 +17,7 @@ export class ManagedConnection {
   private readonly maxQueueSize: number;
   private readonly maxBufferedAmountBytes: number;
   private readonly maxBatchSize: number;
+  private readonly useBinary: boolean;
   private readonly queueHigh: QueueItem[] = [];
   private readonly queueNormal: QueueItem[] = [];
   private readonly channels = new Set<WebSocketChannel>();
@@ -30,12 +32,14 @@ export class ManagedConnection {
     maxBatchSize: number;
     defaultChannels: WebSocketChannel[];
     authExpiresAtMs?: number;
+    useBinary?: boolean;
   }) {
     this.ws = params.ws;
     this.metrics = params.metrics;
     this.maxQueueSize = params.maxQueueSize;
     this.maxBufferedAmountBytes = params.maxBufferedAmountBytes;
     this.maxBatchSize = params.maxBatchSize;
+    this.useBinary = params.useBinary ?? false;
     this.authExpiresAtMs = params.authExpiresAtMs;
 
     for (const channel of params.defaultChannels) {
@@ -57,7 +61,6 @@ export class ManagedConnection {
       sequence: ++this.sequence,
       emittedAt: new Date().toISOString(),
     };
-    const json = JSON.stringify(wireMessage);
 
     const totalSize = this.queueHigh.length + this.queueNormal.length;
     if (totalSize >= this.maxQueueSize) {
@@ -65,7 +68,7 @@ export class ManagedConnection {
       return { accepted: false, reason: 'QUEUE_FULL' };
     }
 
-    const item: QueueItem = { json, priority };
+    const item: QueueItem = { message: wireMessage, priority };
     if (priority === 'high') {
       this.queueHigh.push(item);
     } else {
@@ -111,19 +114,25 @@ export class ManagedConnection {
     if (this.ws.readyState !== this.ws.OPEN) return;
     if (this.ws.bufferedAmount > this.maxBufferedAmountBytes) return;
 
-    const batch: string[] = [];
+    const batch: QueueItem[] = [];
     while (batch.length < this.maxBatchSize) {
       const next = this.queueHigh.shift() ?? this.queueNormal.shift();
       if (!next) break;
-      batch.push(next.json);
+      batch.push(next);
     }
 
     if (batch.length === 0) return;
 
-    // A single frame keeps slow clients from amplifying CPU overhead.
-    const payload = batch.length === 1 ? batch[0] : `[${batch.join(',')}]`;
-    this.ws.send(payload);
-    this.metrics.sentMessages += batch.length;
+    const messages = batch.map((i) => i.message);
+    if (this.useBinary) {
+      // Binary protobuf frame — WireMessageBatch encoding
+      this.ws.send(encodeBatch(messages));
+    } else {
+      // Text JSON frame — compatible with all clients
+      const strs = messages.map((m) => JSON.stringify(m));
+      this.ws.send(strs.length === 1 ? strs[0] : `[${strs.join(',')}]`);
+    }
+    this.metrics.sentMessages += messages.length;
   }
 
   getQueuedCount(): number {

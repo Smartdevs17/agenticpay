@@ -1,0 +1,60 @@
+name: SDK Documentation
+
+on:
+  pull_request:
+    paths:
+      - 'packages/sdk/**'
+      - 'packages/types/**'
+      - '.github/workflows/sdk-docs.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'packages/sdk/**'
+      - 'packages/types/**'
+
+jobs:
+  typedoc:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [sdk, types]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/${{ matrix.package }}/package-lock.json
+
+      - name: Install
+        working-directory: packages/${{ matrix.package }}
+        run: npm ci 2>/dev/null || npm install
+
+      - name: Build
+        working-directory: packages/${{ matrix.package }}
+        run: npm run build
+
+      - name: Generate TypeDoc
+        working-directory: packages/${{ matrix.package }}
+        run: npm run docs
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: typedoc-${{ matrix.package }}
+          path: packages/${{ matrix.package }}/docs/api
+
+  sdk-examples:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run build
+      - name: Compile examples
+        run: npx tsc --noEmit examples/*.ts --module nodenext --moduleResolution nodenext --target ES2022
