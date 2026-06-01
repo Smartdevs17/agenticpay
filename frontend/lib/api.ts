@@ -142,6 +142,55 @@ export interface RotateWebhookSecretRequest {
   gracePeriodHours?: number;
 }
 
+export interface BatchPaymentItem {
+  recipient: string;
+  amount: string;
+  asset: string;
+  memo?: string;
+}
+
+export interface BatchEstimate {
+  totalPayments: number;
+  totalAmount: string;
+  byAsset: Record<string, string>;
+  estimatedGasUnits: number;
+  duplicateCount: number;
+  invalidAddressCount: number;
+  estimatedDurationMs: number;
+}
+
+export interface BatchRecord {
+  id: string;
+  label?: string;
+  status: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  payments: BatchPaymentItem[];
+  results: Array<{
+    index: number;
+    recipient: string;
+    amount: string;
+    asset: string;
+    status: string;
+    txHash?: string;
+    error?: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduledBatch {
+  id: string;
+  label?: string;
+  payments: BatchPaymentItem[];
+  scheduledAt: string;
+  executeAt: string;
+  status: string;
+  result?: BatchRecord;
+  createdAt: string;
+}
+
 export const api = {
     /**
      * AI Work Verification
@@ -241,5 +290,38 @@ export const api = {
       markEventProcessed: async (eventId: string) => apiCall(`/webhooks/events/${eventId}/process`, {
         method: 'POST',
       }),
+    },
+
+    /**
+     * Batch Payment API
+     */
+    batch: {
+      parse: async (payload: { payments: BatchPaymentItem[] }) => apiCall(`/batch/parse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }),
+      parseCSV: async (csv: string) => apiCall(`/batch/parse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        body: csv,
+      }),
+      estimate: async (payload: { payments: BatchPaymentItem[] }) => apiCall<BatchEstimate>(`/batch/estimate`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      submit: async (payload: { payments: BatchPaymentItem[]; label?: string }) => apiCall<BatchRecord>(`/batch/submit`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      schedule: async (payload: { payments: BatchPaymentItem[]; executeAt: string; label?: string }) => apiCall<ScheduledBatch>(`/batch/schedule`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      list: async () => apiCall<{ batches: BatchRecord[] }>(`/batch`, { method: 'GET' }),
+      get: async (id: string) => apiCall<BatchRecord>(`/batch/${id}`, { method: 'GET' }),
+      getReport: async (id: string) => apiCall(`/batch/${id}/report`, { method: 'GET' }),
+      listScheduled: async () => apiCall<{ batches: ScheduledBatch[] }>(`/batch/scheduled`, { method: 'GET' }),
+      cancelScheduled: async (id: string) => apiCall<ScheduledBatch>(`/batch/scheduled/${id}`, { method: 'DELETE' }),
     },
 };
