@@ -356,6 +356,24 @@ enum EmailStatus {
   failed
 }
 
+enum NotificationCategory {
+  payment_notification
+  dispute_alert
+  project_update
+  milestone_reminder
+  security_alert
+  subscription_update
+  system_notification
+}
+
+enum NotificationStatus {
+  pending
+  sent
+  delivered
+  clicked
+  failed
+}
+
 enum DeliveryProvider {
   smtp
   sendgrid
@@ -479,3 +497,89 @@ model EmailAnalytics {
   @@index([date])
   @@map("email_analytics")
 }
+
+// ─── Push Notification Models ──────────────────────────────────────────────────
+
+model PushSubscription {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  userId       String   @map("user_id")
+  endpoint     String
+  auth         String   // VAPID auth secret
+  p256dh       String   // VAPID public key
+  userAgent    String?  @map("user_agent")
+  isActive     Boolean  @default(true) @map("is_active")
+  lastUsedAt   DateTime? @map("last_used_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  notifications NotificationLog[]
+
+  @@unique([tenantId, userId, endpoint])
+  @@index([tenantId, userId])
+  @@index([endpoint])
+  @@index([isActive])
+  @@index([createdAt])
+  @@map("push_subscriptions")
+}
+
+model PushPreference {
+  id                         String   @id @default(uuid())
+  tenantId                   String   @map("tenant_id")
+  userId                     String   @map("user_id")
+  paymentNotifications       Boolean  @default(true) @map("payment_notifications")
+  disputeAlerts              Boolean  @default(true) @map("dispute_alerts")
+  projectUpdates             Boolean  @default(true) @map("project_updates")
+  milestoneReminders         Boolean  @default(true) @map("milestone_reminders")
+  securityAlerts             Boolean  @default(true) @map("security_alerts")
+  subscriptionUpdates        Boolean  @default(true) @map("subscription_updates")
+  systemNotifications        Boolean  @default(true) @map("system_notifications")
+  groupNotifications         Boolean  @default(true) @map("group_notifications")
+  notifySound                Boolean  @default(true) @map("notify_sound")
+  notifyBadge                Boolean  @default(true) @map("notify_badge")
+  locale                     String   @default("en")
+  timezone                   String   @default("UTC")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("push_preferences")
+}
+
+model NotificationLog {
+  id                String              @id @default(uuid())
+  tenantId          String              @map("tenant_id")
+  userId            String              @map("user_id")
+  subscriptionId    String?             @map("subscription_id")
+  category          NotificationCategory
+  status            NotificationStatus  @default(pending)
+  title             String
+  body              String
+  icon              String?
+  badge            String?
+  tag               String?             // For grouping notifications
+  data              Json?               // Custom data for deep linking
+  deepLink          String?             @map("deep_link")
+  sentAt            DateTime?           @map("sent_at")
+  deliveredAt       DateTime?           @map("delivered_at")
+  clickedAt         DateTime?           @map("clicked_at")
+  error             String?
+  retryCount        Int                 @default(0) @map("retry_count")
+  metadata          Json?
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  subscription      PushSubscription?   @relation(fields: [subscriptionId], references: [id])
+
+  @@index([tenantId, userId])
+  @@index([status])
+  @@index([category])
+  @@index([subscriptionId])
+  @@index([sentAt])
+  @@index([tag])
+  @@map("notification_logs")
+}
+

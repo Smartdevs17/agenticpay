@@ -23,7 +23,8 @@
     "openapi:validate": "node -e \"require('fs').accessSync('docs/api/openapi/openapi.json')\"",
     "benchmark": "tsx src/tests/benchmarks/run-benchmarks.ts",
     "benchmark:baseline": "tsx src/tests/benchmarks/run-benchmarks.ts --write-baseline",
-    "benchmark:compare": "tsx src/tests/benchmarks/compare-baseline.ts"
+    "benchmark:compare": "tsx src/tests/benchmarks/compare-baseline.ts",
+    "generate:vapid-keys": "node scripts/generate-vapid-keys.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
