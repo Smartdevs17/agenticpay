@@ -19,6 +19,8 @@ import { OfflineActionQueuedError } from '@/lib/offline';
 import { formatDateInTimeZone } from '@/lib/utils';
 import { useAuthStore } from '@/store/useAuthStore';
 import { ConfirmModal } from '@/components/transaction/ConfirmModal';
+import { MarkdownContent } from '@/components/markdown/MarkdownContent';
+import { CopyButton } from '@/components/ui/copy-button';
 import { parseEther } from 'viem';
 
 type PendingTransaction = {
@@ -134,8 +136,16 @@ export default function ProjectDetailPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
             <div>
               <CardTitle className="text-2xl mb-2 dark:text-gray-100">{project.title}</CardTitle>
-              <p className="text-gray-600 dark:text-gray-400">Client: <span className="font-mono text-xs">{project.client.address}</span></p>
-              <p className="text-gray-600 dark:text-gray-400">Freelancer: <span className="font-mono text-xs">{project.freelancer.address}</span></p>
+              <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1 flex-wrap">
+                Client:
+                <span className="font-mono text-xs">{project.client.address}</span>
+                <CopyButton value={project.client.address} label="Client address copied" className="h-6 w-6" />
+              </p>
+              <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1 flex-wrap">
+                Freelancer:
+                <span className="font-mono text-xs">{project.freelancer.address}</span>
+                <CopyButton value={project.freelancer.address} label="Freelancer address copied" className="h-6 w-6" />
+              </p>
             </div>
             <span
               className={`px-4 py-2 rounded-full text-sm font-medium border ${project.status === 'active'
@@ -166,6 +176,12 @@ export default function ProjectDetailPage() {
               </p>
             </div>
           </div>
+          {project.milestones[0]?.description && (
+            <div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Description</p>
+              <MarkdownContent content={project.milestones[0].description} previewMode />
+            </div>
+          )}
           {project.githubRepo && (
             <div>
               <p className="text-sm text-gray-600 mb-2">GitHub Repository</p>
@@ -310,7 +326,9 @@ export default function ProjectDetailPage() {
                     <div className="flex-1">
                       <h4 className="font-semibold text-gray-900 dark:text-gray-100">{milestone.title}</h4>
                       {milestone.description && (
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{milestone.description}</p>
+                        <div className="mt-2">
+                          <MarkdownContent content={milestone.description} previewMode />
+                        </div>
                       )}
                     </div>
                   </div>

@@ -3,6 +3,7 @@
 import { forwardRef, useLayoutEffect, useRef } from 'react';
 import { CheckCircle2, Clock, ExternalLink, XCircle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { CopyButton } from '@/components/ui/copy-button';
 import type { Payment } from '@/lib/types';
 
 export interface TransactionRowProps {
@@ -98,8 +99,9 @@ export const TransactionRow = forwardRef<HTMLDivElement, TransactionRowProps>(
             </div>
 
             {payment.transactionHash && (
-              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
-                <p className="text-[10px] text-gray-400 font-mono truncate">{payment.transactionHash}</p>
+              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 flex items-center gap-2">
+                <p className="text-[10px] text-gray-400 font-mono truncate flex-1">{payment.transactionHash}</p>
+                <CopyButton value={payment.transactionHash} label="Transaction hash copied" size="sm" />
               </div>
             )}
           </CardContent>

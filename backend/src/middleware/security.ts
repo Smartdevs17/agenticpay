@@ -77,17 +77,7 @@ export class SecurityMiddleware {
    * Create rate limiting middleware
    */
   private createRateLimits() {
-    // General rate limit
-    const generalLimit = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // limit each IP to 100 requests per windowMs
-      message: {
-        error: 'Too many requests',
-        message: 'Rate limit exceeded. Please try again later.'
-      },
-      standardHeaders: true,
-      legacyHeaders: false,
-    });
+    // API-wide limit (100 req / 15 min) is applied in src/index.ts via apiExpressRateLimit.
 
     // Strict rate limit for sensitive endpoints
     const strictLimit = rateLimit({
@@ -114,9 +104,8 @@ export class SecurityMiddleware {
       
       if (isSensitive) {
         return strictLimit(req, res, next);
-      } else {
-        return generalLimit(req, res, next);
       }
+      next();
     };
   }
 

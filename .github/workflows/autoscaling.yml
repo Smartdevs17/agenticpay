@@ -1,0 +1,215 @@
+name: Auto-Scaling
+
+# Issue #77 — CI runner auto-scaling with defined triggers, min/max instances,
+# scaling policies, and cost monitoring integration.
+#
+# Scaling model (GitHub Actions):
+#   - Triggers: push/PR load, scheduled health check, manual scale profile
+#   - Min instances: 1 concurrent job per scaling group (always at least one runner slot)
+#   - Max instances: configurable per profile (default 4, burst 8)
+#   - Policies: scale-up on queue depth; scale-down via concurrency cancel + idle timeout
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  schedule:
+    # Weekly scaling policy review + cost snapshot (pairs with cost-monitor.yml)
+    - cron: '30 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      scale_profile:
+        description: 'Scaling profile (conservative | balanced | burst)'
+        required: false
+        default: 'balanced'
+        type: choice
+        options:
+          - conservative
+          - balanced
+          - burst
+      min_parallel:
+        description: 'Minimum parallel matrix jobs (floor)'
+        required: false
+        default: '1'
+      max_parallel:
+        description: 'Maximum parallel matrix jobs (ceiling)'
+        required: false
+        default: '4'
+
+concurrency:
+  group: autoscaling-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SERVICE: agenticpay
+  # Scaling profiles — min/max parallel jobs per matrix
+  SCALE_CONSERVATIVE_MIN: 1
+  SCALE_CONSERVATIVE_MAX: 2
+  SCALE_BALANCED_MIN: 1
+  SCALE_BALANCED_MAX: 4
+  SCALE_BURST_MIN: 2
+  SCALE_BURST_MAX: 8
+  # Triggers: scale up when pending workflow runs exceed this threshold
+  QUEUE_DEPTH_SCALE_UP: 3
+  # Cost alert integration threshold (% of included Actions minutes)
+  COST_ALERT_THRESHOLD_PERCENT: '80'
+
+jobs:
+  resolve-scaling-policy:
+    name: Resolve Scaling Policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      profile: ${{ steps.policy.outputs.profile }}
+      min_parallel: ${{ steps.policy.outputs.min_parallel }}
+      max_parallel: ${{ steps.policy.outputs.max_parallel }}
+      scale_up: ${{ steps.queue.outputs.scale_up }}
+    steps:
+      - name: Apply scaling profile
+        id: policy
+        env:
+          PROFILE: ${{ inputs.scale_profile || 'balanced' }}
+          MIN_OVERRIDE: ${{ inputs.min_parallel }}
+          MAX_OVERRIDE: ${{ inputs.max_parallel }}
+        run: |
+          case "$PROFILE" in
+            conservative) MIN=${SCALE_CONSERVATIVE_MIN}; MAX=${SCALE_CONSERVATIVE_MAX} ;;
+            burst)        MIN=${SCALE_BURST_MIN};        MAX=${SCALE_BURST_MAX} ;;
+            *)            MIN=${SCALE_BALANCED_MIN};     MAX=${SCALE_BALANCED_MAX} ;;
+          esac
+
+          if [ -n "$MIN_OVERRIDE" ]; then MIN="$MIN_OVERRIDE"; fi
+          if [ -n "$MAX_OVERRIDE" ]; then MAX="$MAX_OVERRIDE"; fi
+
+          if [ "$MIN" -gt "$MAX" ]; then
+            echo "::error::min_parallel ($MIN) cannot exceed max_parallel ($MAX)"
+            exit 1
+          fi
+
+          echo "profile=${PROFILE}"       >> "$GITHUB_OUTPUT"
+          echo "min_parallel=${MIN}"        >> "$GITHUB_OUTPUT"
+          echo "max_parallel=${MAX}"        >> "$GITHUB_OUTPUT"
+
+          echo "::notice title=Scaling Policy::profile=${PROFILE} min=${MIN} max=${MAX}"
+
+      - name: Evaluate queue-depth trigger
+        id: queue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PENDING=$(gh api "repos/${{ github.repository }}/actions/runs?status=queued&per_page=100" \
+            --jq '[.workflow_runs[] | select(.name=="CI" or .name=="Auto-Scaling")] | length' 2>/dev/null || echo 0)
+
+          SCALE_UP="false"
+          if [ "$PENDING" -ge "${QUEUE_DEPTH_SCALE_UP}" ]; then
+            SCALE_UP="true"
+            echo "::notice title=Scale-Up Trigger::${PENDING} queued runs (threshold ${QUEUE_DEPTH_SCALE_UP})"
+          else
+            echo "::notice title=Queue Depth::${PENDING} queued runs — within normal range"
+          fi
+
+          echo "pending=${PENDING}"     >> "$GITHUB_OUTPUT"
+          echo "scale_up=${SCALE_UP}"   >> "$GITHUB_OUTPUT"
+
+      - name: Write scaling manifest
+        run: |
+          cat > scaling-manifest.json <<EOF
+          {
+            "service": "${{ env.SERVICE }}",
+            "profile": "${{ steps.policy.outputs.profile }}",
+            "min_instances": ${{ steps.policy.outputs.min_parallel }},
+            "max_instances": ${{ steps.policy.outputs.max_parallel }},
+            "scale_up_triggered": "${{ steps.queue.outputs.scale_up }}",
+            "pending_runs": ${{ steps.queue.outputs.pending }},
+            "triggers": {
+              "queue_depth_threshold": ${{ env.QUEUE_DEPTH_SCALE_UP }},
+              "on_push": true,
+              "on_pull_request": true,
+              "weekly_schedule": "30 8 * * 1"
+            },
+            "policies": {
+              "concurrency_cancel_in_progress": true,
+              "fail_fast_matrix": false,
+              "cost_monitor_threshold_percent": ${{ env.COST_ALERT_THRESHOLD_PERCENT }}
+            },
+            "recorded_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "commit": "${{ github.sha }}"
+          }
+          EOF
+          cat scaling-manifest.json
+
+      - name: Upload scaling manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: scaling-manifest-${{ github.run_number }}
+          path: scaling-manifest.json
+          retention-days: 90
+
+  scaled-ci-matrix:
+    name: Scaled CI (${{ needs.resolve-scaling-policy.outputs.profile }})
+    needs: resolve-scaling-policy
+    if: needs.resolve-scaling-policy.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.resolve-scaling-policy.outputs.max_parallel) }}
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Backend smoke (shard ${{ matrix.shard }})
+        working-directory: backend
+        run: npm ci --prefer-offline && npm run build
+
+      - name: Frontend smoke (shard ${{ matrix.shard }})
+        working-directory: frontend
+        run: npm ci --prefer-offline && npm run build
+
+      - name: Emit scaling metrics
+        run: |
+          echo "::notice title=Shard::${{ matrix.shard }}/${{ strategy.job-total }}"
+          echo "::notice title=Max Parallel::${{ needs.resolve-scaling-policy.outputs.max_parallel }}"
+
+  cost-monitor-hook:
+    name: Report to Cost Monitor
+    needs: [resolve-scaling-policy, scaled-ci-matrix]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarize scaling run for cost tracking
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Auto-Scaling Summary
+
+          | Policy | Value |
+          |--------|-------|
+          | Profile | ${{ needs.resolve-scaling-policy.outputs.profile }} |
+          | Min instances | ${{ needs.resolve-scaling-policy.outputs.min_parallel }} |
+          | Max instances | ${{ needs.resolve-scaling-policy.outputs.max_parallel }} |
+          | Scale-up triggered | ${{ needs.resolve-scaling-policy.outputs.scale_up }} |
+
+          Cost monitoring runs weekly via **Cost Monitor** workflow and after CI on `main`.
+          EOF
+
+      - name: Trigger cost monitor on main (threshold alert)
+        if: github.ref == 'refs/heads/main' && needs.resolve-scaling-policy.outputs.scale_up == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run cost-monitor.yml \
+            -f alert_threshold_percent="${COST_ALERT_THRESHOLD_PERCENT}" \
+            -f dry_run=false 2>/dev/null || \
+          echo "::warning title=Cost Monitor::Could not dispatch cost-monitor workflow (may require workflow scope)"

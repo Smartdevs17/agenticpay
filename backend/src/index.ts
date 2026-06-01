@@ -1,7 +1,9 @@
+import http from 'node:http';
 import express, { Request, Response, NextFunction } from 'express';
 import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import { tokenBucketRateLimit } from './middleware/rate-limit.js';
+import { apiExpressRateLimit } from './middleware/express-api-rate-limit.js';
 import { compressionMiddleware, getCompressionMetrics } from './middleware/compression.js';
 import { poolMetrics } from './config/database.js';
 import { config } from './config.js';
@@ -94,6 +96,9 @@ import { bullMQMonitorRouter } from './routes/bullmq-monitor.js';
 import { fileUploadRouter } from './routes/file-upload.js';
 import { credentialRotationRouter } from './routes/credential-rotation.js';
 import zkIdentityRouter from './routes/zk-identity.js';
+import { coldStartMonitorRouter } from './routes/cold-start-monitor.js';
+import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
+import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -199,6 +204,9 @@ app.use('/docs', docsRouter);
 
 // Cold start monitoring dashboard — available before auth/rate-limit middleware
 app.use('/api/v1/cold-start', coldStartMonitorRouter);
+
+// express-rate-limit: 100 requests / 15 min per IP on all API routes (Issue #8)
+app.use('/api', apiExpressRateLimit);
 
 app.use('/api/', apiRateLimiter);
 
