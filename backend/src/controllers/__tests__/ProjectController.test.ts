@@ -6,7 +6,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Request, Response, NextFunction } from "express";
 import { ProjectController } from "../ProjectController.js";
 import { ProjectService } from "../../services/ProjectService.js";
-import { ProjectRepository } from "../../repositories/ProjectRepository.js";
+import { Project, ProjectRepository } from "../../repositories/ProjectRepository.js";
+import { Result } from "../../lib/result.js";
 
 describe("ProjectController", () => {
   let controller: ProjectController;
@@ -35,6 +36,7 @@ describe("ProjectController", () => {
     res = {
       status: vi.fn().mockReturnThis(),
       send: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
       apiSuccess: vi.fn().mockReturnThis(),
       apiPaginated: vi.fn().mockReturnThis(),
     };
@@ -70,14 +72,14 @@ describe("ProjectController", () => {
 
   describe("getProject", () => {
     it("should get a project by ID", async () => {
-      const project = await service.createProject({
+      const project = unwrapProject(await service.createProject({
         clientId: "user1",
         freelancerId: "freelancer1",
         amount: 1000,
         description: "Test",
         githubRepo: "https://github.com/test/repo",
         tenantId: "tenant1",
-      });
+      }));
 
       req.params = { id: project.id };
 
@@ -91,7 +93,8 @@ describe("ProjectController", () => {
 
       await controller.getProject(req as Request, res as Response, next);
 
-      expect(next).toHaveBeenCalledWith(expect.any(Error));
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.objectContaining({ code: "NOT_FOUND" }) }));
     });
   });
 
@@ -125,14 +128,14 @@ describe("ProjectController", () => {
 
   describe("updateProject", () => {
     it("should update a project", async () => {
-      const project = await service.createProject({
+      const project = unwrapProject(await service.createProject({
         clientId: "user1",
         freelancerId: "freelancer1",
         amount: 1000,
         description: "Test",
         githubRepo: "https://github.com/test/repo",
         tenantId: "tenant1",
-      });
+      }));
 
       req.params = { id: project.id };
       req.body = { description: "Updated description" };
@@ -145,14 +148,14 @@ describe("ProjectController", () => {
 
   describe("fundProject", () => {
     it("should fund a project", async () => {
-      const project = await service.createProject({
+      const project = unwrapProject(await service.createProject({
         clientId: "user1",
         freelancerId: "freelancer1",
         amount: 1000,
         description: "Test",
         githubRepo: "https://github.com/test/repo",
         tenantId: "tenant1",
-      });
+      }));
 
       req.params = { id: project.id };
       req.body = { amount: 1000 };
@@ -163,14 +166,14 @@ describe("ProjectController", () => {
     });
 
     it("should validate amount", async () => {
-      const project = await service.createProject({
+      const project = unwrapProject(await service.createProject({
         clientId: "user1",
         freelancerId: "freelancer1",
         amount: 1000,
         description: "Test",
         githubRepo: "https://github.com/test/repo",
         tenantId: "tenant1",
-      });
+      }));
 
       req.params = { id: project.id };
       req.body = {};
@@ -183,14 +186,14 @@ describe("ProjectController", () => {
 
   describe("submitWork", () => {
     it("should submit work", async () => {
-      const project = await service.createProject({
+      const project = unwrapProject(await service.createProject({
         clientId: "user1",
         freelancerId: "freelancer1",
         amount: 1000,
         description: "Test",
         githubRepo: "https://github.com/test/repo",
         tenantId: "tenant1",
-      });
+      }));
 
       await service.fundProject(
         project.id,
@@ -214,14 +217,14 @@ describe("ProjectController", () => {
 
   describe("approveWork", () => {
     it("should approve work and release payment", async () => {
-      const project = await service.createProject({
+      const project = unwrapProject(await service.createProject({
         clientId: "user1",
         freelancerId: "freelancer1",
         amount: 1000,
         description: "Test",
         githubRepo: "https://github.com/test/repo",
         tenantId: "tenant1",
-      });
+      }));
 
       await service.fundProject(
         project.id,
@@ -248,14 +251,14 @@ describe("ProjectController", () => {
 
   describe("raiseDispute", () => {
     it("should raise a dispute", async () => {
-      const project = await service.createProject({
+      const project = unwrapProject(await service.createProject({
         clientId: "user1",
         freelancerId: "freelancer1",
         amount: 1000,
         description: "Test",
         githubRepo: "https://github.com/test/repo",
         tenantId: "tenant1",
-      });
+      }));
 
       await service.fundProject(
         project.id,
@@ -273,14 +276,14 @@ describe("ProjectController", () => {
 
   describe("deleteProject", () => {
     it("should delete an unfunded project", async () => {
-      const project = await service.createProject({
+      const project = unwrapProject(await service.createProject({
         clientId: "user1",
         freelancerId: "freelancer1",
         amount: 1000,
         description: "Test",
         githubRepo: "https://github.com/test/repo",
         tenantId: "tenant1",
-      });
+      }));
 
       req.params = { id: project.id };
 
@@ -290,14 +293,14 @@ describe("ProjectController", () => {
     });
 
     it("should not delete funded project", async () => {
-      const project = await service.createProject({
+      const project = unwrapProject(await service.createProject({
         clientId: "user1",
         freelancerId: "freelancer1",
         amount: 1000,
         description: "Test",
         githubRepo: "https://github.com/test/repo",
         tenantId: "tenant1",
-      });
+      }));
 
       await service.fundProject(
         project.id,
@@ -309,7 +312,15 @@ describe("ProjectController", () => {
 
       await controller.deleteProject(req as Request, res as Response, next);
 
-      expect(next).toHaveBeenCalledWith(expect.any(Error));
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.objectContaining({ code: "VALIDATION_ERROR" }) }));
     });
   });
 });
+
+function unwrapProject(result: Result<Project>): Project {
+  if (!result.ok) {
+    throw new Error(result.error.message);
+  }
+  return result.value;
+}

@@ -1,7 +1,8 @@
 /**
- * ProjectController.ts — Issue #366
+ * ProjectController.ts — Issue #366/#374
  *
- * HTTP layer for projects - handles request/response only
+ * HTTP layer for projects - handles request/response only and maps explicit
+ * Result service failures to stable HTTP envelopes.
  */
 
 import { Request, Response, NextFunction } from "express";
@@ -14,251 +15,153 @@ export class ProjectController extends BaseController {
     super();
   }
 
-  createProject = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  createProject = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     await this.execute(req, res, next, async (req, res) => {
       const user = this.getUser(req);
+      this.validateRequired(req.body, ["freelancerId", "amount", "description", "githubRepo"]);
 
-      this.validateRequired(req.body, [
-        "freelancerId",
-        "amount",
-        "description",
-        "githubRepo",
-      ]);
-
-      const project = await this.projectService.createProject({
+      const result = await this.projectService.createProject({
         ...req.body,
         clientId: user.id,
         tenantId: user.tenantId,
       });
 
-      res.status(201).apiSuccess(project, {
-        message: "Project created successfully",
+      this.sendResult(res, result, (project) => {
+        res.status(201).apiSuccess(project, { message: "Project created successfully" });
       });
     });
   };
 
-  getProject = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  getProject = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     await this.execute(req, res, next, async (req, res) => {
       const user = this.getUser(req);
-      const { id } = req.params;
-
-      const project = await this.projectService.getProject(id, user.tenantId);
-
-      res.apiSuccess(project);
+      const result = await this.projectService.getProject(req.params.id, user.tenantId);
+      this.sendResult(res, result, (project) => res.apiSuccess(project));
     });
   };
 
-  listProjects = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  listProjects = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     await this.execute(req, res, next, async (req, res) => {
       const user = this.getUser(req);
       const pagination = this.getPaginationParams(req);
+      const result = await this.projectService.listProjects(user.tenantId, pagination);
 
-      const result = await this.projectService.listProjects(
-        user.tenantId,
-        pagination,
-      );
-
-      const paginationMeta = buildPaginationMeta(
-        result.items,
-        pagination.limit,
-        result.hasMore,
-      );
-
-      res.apiPaginated(result.items, paginationMeta);
+      this.sendResult(res, result, (projects) => {
+        res.apiPaginated(
+          projects.items,
+          buildPaginationMeta(projects.items, pagination.limit, projects.hasMore),
+        );
+      });
     });
   };
 
-  listClientProjects = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  listClientProjects = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     await this.execute(req, res, next, async (req, res) => {
       const user = this.getUser(req);
-      const { clientId } = req.params;
       const pagination = this.getPaginationParams(req);
-
       const result = await this.projectService.listClientProjects(
-        clientId,
+        req.params.clientId,
         user.tenantId,
         pagination,
       );
 
-      const paginationMeta = buildPaginationMeta(
-        result.items,
-        pagination.limit,
-        result.hasMore,
-      );
-
-      res.apiPaginated(result.items, paginationMeta);
-    });
-  };
-
-  listFreelancerProjects = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
-    await this.execute(req, res, next, async (req, res) => {
-      const user = this.getUser(req);
-      const { freelancerId } = req.params;
-      const pagination = this.getPaginationParams(req);
-
-      const result = await this.projectService.listFreelancerProjects(
-        freelancerId,
-        user.tenantId,
-        pagination,
-      );
-
-      const paginationMeta = buildPaginationMeta(
-        result.items,
-        pagination.limit,
-        result.hasMore,
-      );
-
-      res.apiPaginated(result.items, paginationMeta);
-    });
-  };
-
-  updateProject = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
-    await this.execute(req, res, next, async (req, res) => {
-      const user = this.getUser(req);
-      const { id } = req.params;
-
-      const project = await this.projectService.updateProject(
-        id,
-        req.body,
-        user.tenantId,
-      );
-
-      res.apiSuccess(project, {
-        message: "Project updated successfully",
+      this.sendResult(res, result, (projects) => {
+        res.apiPaginated(
+          projects.items,
+          buildPaginationMeta(projects.items, pagination.limit, projects.hasMore),
+        );
       });
     });
   };
 
-  fundProject = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  listFreelancerProjects = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     await this.execute(req, res, next, async (req, res) => {
       const user = this.getUser(req);
-      const { id } = req.params;
+      const pagination = this.getPaginationParams(req);
+      const result = await this.projectService.listFreelancerProjects(
+        req.params.freelancerId,
+        user.tenantId,
+        pagination,
+      );
 
+      this.sendResult(res, result, (projects) => {
+        res.apiPaginated(
+          projects.items,
+          buildPaginationMeta(projects.items, pagination.limit, projects.hasMore),
+        );
+      });
+    });
+  };
+
+  updateProject = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    await this.execute(req, res, next, async (req, res) => {
+      const user = this.getUser(req);
+      const result = await this.projectService.updateProject(req.params.id, req.body, user.tenantId);
+      this.sendResult(res, result, (project) => {
+        res.apiSuccess(project, { message: "Project updated successfully" });
+      });
+    });
+  };
+
+  fundProject = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    await this.execute(req, res, next, async (req, res) => {
+      const user = this.getUser(req);
       this.validateRequired(req.body, ["amount"]);
 
-      const project = await this.projectService.fundProject(
-        id,
-        {
-          amount: req.body.amount,
-          clientId: user.id,
-        },
+      const result = await this.projectService.fundProject(
+        req.params.id,
+        { amount: req.body.amount, clientId: user.id },
         user.tenantId,
       );
 
-      res.apiSuccess(project, {
-        message: "Project funded successfully",
+      this.sendResult(res, result, (project) => {
+        res.apiSuccess(project, { message: "Project funded successfully" });
       });
     });
   };
 
-  submitWork = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  submitWork = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     await this.execute(req, res, next, async (req, res) => {
       const user = this.getUser(req);
-      const { id } = req.params;
-
       this.validateRequired(req.body, ["githubRepo"]);
 
-      const project = await this.projectService.submitWork(
-        id,
-        {
-          githubRepo: req.body.githubRepo,
-          freelancerId: user.id,
-        },
+      const result = await this.projectService.submitWork(
+        req.params.id,
+        { githubRepo: req.body.githubRepo, freelancerId: user.id },
         user.tenantId,
       );
 
-      res.apiSuccess(project, {
-        message: "Work submitted successfully",
+      this.sendResult(res, result, (project) => {
+        res.apiSuccess(project, { message: "Work submitted successfully" });
       });
     });
   };
 
-  approveWork = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  approveWork = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     await this.execute(req, res, next, async (req, res) => {
       const user = this.getUser(req);
-      const { id } = req.params;
-
-      const project = await this.projectService.approveWork(
-        id,
-        user.id,
-        user.tenantId,
-      );
-
-      res.apiSuccess(project, {
-        message: "Work approved and payment released",
+      const result = await this.projectService.approveWork(req.params.id, user.id, user.tenantId);
+      this.sendResult(res, result, (project) => {
+        res.apiSuccess(project, { message: "Work approved and payment released" });
       });
     });
   };
 
-  raiseDispute = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  raiseDispute = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     await this.execute(req, res, next, async (req, res) => {
       const user = this.getUser(req);
-      const { id } = req.params;
-
-      const project = await this.projectService.raiseDispute(
-        id,
-        user.id,
-        user.tenantId,
-      );
-
-      res.apiSuccess(project, {
-        message: "Dispute raised successfully",
+      const result = await this.projectService.raiseDispute(req.params.id, user.id, user.tenantId);
+      this.sendResult(res, result, (project) => {
+        res.apiSuccess(project, { message: "Dispute raised successfully" });
       });
     });
   };
 
-  deleteProject = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  deleteProject = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     await this.execute(req, res, next, async (req, res) => {
       const user = this.getUser(req);
-      const { id } = req.params;
-
-      await this.projectService.deleteProject(id, user.tenantId);
-
-      res.status(204).send();
+      const result = await this.projectService.deleteProject(req.params.id, user.tenantId);
+      this.sendResult(res, result, () => res.status(204).send());
     });
   };
 }

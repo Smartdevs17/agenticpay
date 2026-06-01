@@ -205,3 +205,40 @@ export interface ApiError {
   statusCode: number;
   details?: Record<string, unknown>;
 }
+
+// ─── Result / Option primitives ──────────────────────────────────────────────
+
+export type Result<T, E = AppError> =
+  | { ok: true; value: T }
+  | { ok: false; error: E };
+
+export type Option<T> = T | null | undefined;
+
+export interface AppError {
+  code: string;
+  message: string;
+  statusCode: number;
+  details?: Record<string, unknown>;
+  cause?: unknown;
+}
+
+export type ValidationAppError = AppError & { code: 'VALIDATION_ERROR'; statusCode: 400 };
+export type NotFoundAppError = AppError & { code: 'NOT_FOUND'; statusCode: 404 };
+export type ForbiddenAppError = AppError & { code: 'FORBIDDEN'; statusCode: 403 };
+export type ConflictAppError = AppError & { code: 'CONFLICT'; statusCode: 409 };
+
+export function ok<T>(value: T): Result<T, never> {
+  return { ok: true, value };
+}
+
+export function err<E extends AppError>(error: E): Result<never, E> {
+  return { ok: false, error };
+}
+
+export function isOk<T, E>(result: Result<T, E>): result is { ok: true; value: T } {
+  return result.ok;
+}
+
+export function isErr<T, E>(result: Result<T, E>): result is { ok: false; error: E } {
+  return !result.ok;
+}

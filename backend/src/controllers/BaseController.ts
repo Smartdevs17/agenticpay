@@ -7,8 +7,39 @@
 
 import { Request, Response, NextFunction } from "express";
 import { ErrorCode } from "../middleware/responseFormatter.js";
+import { Result, ServiceError } from "../lib/result.js";
 
 export abstract class BaseController {
+
+  /**
+   * Map explicit Result errors to HTTP responses. Use this for expected
+   * business-rule outcomes; unexpected exceptions still flow through next().
+   */
+  protected sendResult<T>(
+    res: Response,
+    result: Result<T>,
+    onSuccess: (value: T) => void,
+  ): void {
+    if (result.ok) {
+      onSuccess(result.value);
+      return;
+    }
+
+    this.sendServiceError(res, result.error);
+  }
+
+  protected sendServiceError(res: Response, error: ServiceError): void {
+    res.status(error.statusCode).json({
+      error: {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+      },
+      meta: {
+        timestamp: new Date().toISOString(),
+      },
+    });
+  }
   /**
    * Execute controller action with error handling
    */

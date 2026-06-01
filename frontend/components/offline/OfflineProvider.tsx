@@ -28,9 +28,11 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    let serviceWorkerQueueLength = 0;
+
     const syncQueueState = () => {
       setOnline(window.navigator.onLine);
-      setQueueLength(getQueuedActionCount());
+      setQueueLength(getQueuedActionCount() + serviceWorkerQueueLength);
     };
 
     const flushQueuedActions = async () => {
@@ -68,11 +70,28 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       toast.warning('You are offline. New API actions will be queued until the connection returns.');
     };
 
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'PAYMENT_QUEUE_CHANGED') {
+        serviceWorkerQueueLength = Number(event.data.remaining) || 0;
+        syncQueueState();
+      }
+
+      if (event.data?.type === 'PAYMENT_QUEUE_SYNCED') {
+        serviceWorkerQueueLength = Number(event.data.remaining) || 0;
+        syncQueueState();
+
+        if (event.data.synced > 0) {
+          toast.success(`Synced ${event.data.synced} offline payment${event.data.synced === 1 ? '' : 's'}.`);
+        }
+      }
+    };
+
     syncQueueState();
 
     const unsubscribe = subscribeToOfflineQueue(syncQueueState);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage);
 
     if (window.navigator.onLine) {
       void flushQueuedActions();
@@ -82,6 +101,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       unsubscribe();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.navigator.serviceWorker?.removeEventListener('message', handleServiceWorkerMessage);
     };
   }, [setOnline, setQueueLength, setSyncing]);
 

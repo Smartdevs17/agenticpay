@@ -63,8 +63,11 @@ jobs:
       - name: Type-check scripts & tests
         run: npm run lint
 
-      - name: Run Hardhat tests
-        run: npx hardhat test
+      - name: Generate TypeChain bindings
+        run: npx hardhat typechain
+
+      - name: Run Hardhat tests with gas report
+        run: npm run test:gas
 
       - name: Run coverage
         run: npx hardhat coverage
