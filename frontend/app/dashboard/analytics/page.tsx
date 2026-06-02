@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import {
   AreaChart,
   Area,
@@ -25,9 +26,11 @@ import {
   AlertTriangle,
   CheckCircle2,
   DollarSign,
+  Download,
   TrendingUp,
   Wifi,
   WifiOff,
+  BarChart3,
 } from 'lucide-react';
 
 // ── Types (mirrored from backend analytics.ts) ─────────────────────────────
@@ -78,6 +81,13 @@ interface AnalyticsSnapshot {
   generatedAt: string;
 }
 
+interface MerchantPercentile {
+  volumePercentile: number;
+  successRatePercentile: number;
+  avgAmountPercentile: number;
+  note: string;
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444'];
@@ -90,25 +100,46 @@ const SEVERITY_COLOR: Record<string, string> = {
   critical: 'bg-red-50 border-red-200 text-red-800',
 };
 
+const TIME_PRESETS = [
+  { label: '1h', hours: 1 },
+  { label: '24h', hours: 24 },
+  { label: '7d', hours: 168 },
+  { label: '30d', hours: 720 },
+] as const;
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsSnapshot | null>(null);
+  const [percentiles, setPercentiles] = useState<MerchantPercentile | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [hours, setHours] = useState<number>(24);
 
   const applySnapshot = useCallback((snapshot: AnalyticsSnapshot) => {
     setData(snapshot);
     setLastUpdated(new Date().toLocaleTimeString());
   }, []);
 
-  // Fetch initial snapshot via REST
+  const fetchSnapshot = useCallback(
+    (selectedHours: number) => {
+      fetch(`${API_URL}/api/v1/analytics?hours=${selectedHours}`)
+        .then((r) => r.json())
+        .then(applySnapshot)
+        .catch(console.error);
+
+      fetch(`${API_URL}/api/v1/analytics/percentiles?hours=${selectedHours}`)
+        .then((r) => r.json())
+        .then(setPercentiles)
+        .catch(console.error);
+    },
+    [applySnapshot],
+  );
+
+  // Fetch when time period changes
   useEffect(() => {
-    fetch(`${API_URL}/api/v1/analytics`)
-      .then((r) => r.json())
-      .then(applySnapshot)
-      .catch(console.error);
-  }, [applySnapshot]);
+    fetchSnapshot(hours);
+  }, [hours, fetchSnapshot]);
 
   // Subscribe to real-time updates via WebSocket
   useEffect(() => {
@@ -118,9 +149,7 @@ export default function AnalyticsPage() {
     function connect() {
       try {
         ws = new WebSocket(WS_URL);
-
         ws.onopen = () => setWsConnected(true);
-
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data as string);
@@ -131,12 +160,10 @@ export default function AnalyticsPage() {
             // ignore malformed frames
           }
         };
-
         ws.onclose = () => {
           setWsConnected(false);
           reconnectTimeout = setTimeout(connect, 5000);
         };
-
         ws.onerror = () => ws.close();
       } catch {
         reconnectTimeout = setTimeout(connect, 5000);
@@ -144,12 +171,15 @@ export default function AnalyticsPage() {
     }
 
     connect();
-
     return () => {
       clearTimeout(reconnectTimeout);
       ws?.close();
     };
   }, [applySnapshot]);
+
+  const handleExport = () => {
+    window.open(`${API_URL}/api/v1/analytics/export?hours=${hours}`, '_blank');
+  };
 
   if (!data) {
     return (
@@ -179,28 +209,49 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6 pb-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            Payment Analytics
-          </h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Payment Analytics</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
             Real-time metrics, funnel analysis, and anomaly detection
           </p>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          {wsConnected ? (
-            <span className="flex items-center gap-1 text-green-600">
-              <Wifi className="h-4 w-4" /> Live
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 text-gray-400">
-              <WifiOff className="h-4 w-4" /> Offline
-            </span>
-          )}
-          {lastUpdated && (
-            <span className="text-gray-400 text-xs">Updated {lastUpdated}</span>
-          )}
+
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Time period selector */}
+          <div className="flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-700 p-1">
+            {TIME_PRESETS.map((preset) => (
+              <Button
+                key={preset.hours}
+                size="sm"
+                variant={hours === preset.hours ? 'default' : 'ghost'}
+                onClick={() => setHours(preset.hours)}
+                className="h-7 px-3 text-xs"
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+
+          {/* Export CSV */}
+          <Button size="sm" variant="outline" onClick={handleExport} className="gap-2">
+            <Download className="h-4 w-4" />
+            Export CSV
+          </Button>
+
+          {/* Live status */}
+          <div className="flex items-center gap-2 text-sm">
+            {wsConnected ? (
+              <span className="flex items-center gap-1 text-green-600">
+                <Wifi className="h-4 w-4" /> Live
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-gray-400">
+                <WifiOff className="h-4 w-4" /> Offline
+              </span>
+            )}
+            {lastUpdated && <span className="text-gray-400 text-xs">Updated {lastUpdated}</span>}
+          </div>
         </div>
       </div>
 
@@ -231,7 +282,9 @@ export default function AnalyticsPage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">{summary.totalRevenue.toFixed(2)}</p>
-            <p className="text-xs text-gray-500 mt-1">Last 24 hours</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Last {hours < 24 ? `${hours}h` : hours === 24 ? '24 hours' : hours === 168 ? '7 days' : '30 days'}
+            </p>
           </CardContent>
         </Card>
 
@@ -269,6 +322,7 @@ export default function AnalyticsPage() {
         </Card>
       </div>
 
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Revenue Time-Series */}
         <Card>
@@ -372,6 +426,36 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Merchant Percentile Card */}
+      {percentiles && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-blue-600" />
+              Industry Comparison
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
+              ⚠ {percentiles.note}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { label: 'Volume', value: percentiles.volumePercentile },
+                { label: 'Success Rate', value: percentiles.successRatePercentile },
+                { label: 'Avg Payment', value: percentiles.avgAmountPercentile },
+              ].map(({ label, value }) => (
+                <div key={label} className="text-center p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <p className="text-3xl font-bold text-blue-600">{value}th</p>
+                  <p className="text-sm text-gray-500 mt-1">percentile</p>
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mt-1">{label}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

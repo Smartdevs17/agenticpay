@@ -8,12 +8,13 @@ import { FormBuilder } from '@/components/forms/FormBuilder';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { FormSchema } from '@/components/forms/types';
-import { Trash2, Eye, Copy, BarChart3 } from 'lucide-react';
+import { Trash2, Eye, Copy, BarChart3, X } from 'lucide-react';
 
 export default function DashboardFormsPage() {
   const [forms, setForms] = useState<FormSchema[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedFormId, setSelectedFormId] = useState<string | null>(null);
+  const [embedSnippetFormId, setEmbedSnippetFormId] = useState<string | null>(null);
 
   const loadForms = async () => {
     try {
@@ -47,10 +48,15 @@ export default function DashboardFormsPage() {
     }
   };
 
-  const handleCopyEmbedUrl = (formId: string) => {
-    const embedUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/forms/embed/${formId}`;
-    navigator.clipboard.writeText(embedUrl);
-    toast.success('Embed URL copied to clipboard');
+  const getEmbedSnippet = (formId: string): string => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const src = `${origin}/forms/embed/${formId}`;
+    return `<iframe\n  src="${src}"\n  width="100%"\n  height="600"\n  frameborder="0"\n  sandbox="allow-forms allow-scripts allow-same-origin"\n  title="Payment Form"\n></iframe>`;
+  };
+
+  const handleCopyEmbedSnippet = (formId: string) => {
+    navigator.clipboard.writeText(getEmbedSnippet(formId));
+    toast.success('iframe snippet copied to clipboard');
   };
 
   return (
@@ -104,7 +110,11 @@ export default function DashboardFormsPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleCopyEmbedUrl(form.id)}
+                        onClick={() =>
+                          setEmbedSnippetFormId(
+                            embedSnippetFormId === form.id ? null : form.id,
+                          )
+                        }
                         className="gap-2"
                       >
                         <Copy className="h-4 w-4" />
@@ -121,6 +131,34 @@ export default function DashboardFormsPage() {
                       </Button>
                     </div>
                   </div>
+                  {embedSnippetFormId === form.id && (
+                    <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-900/10 dark:border-blue-800 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-blue-700 dark:text-blue-400">
+                          Embed snippet — paste this into your website's HTML:
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEmbedSnippetFormId(null)}
+                          className="h-6 w-6 p-0"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <pre className="text-xs font-mono bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-3 overflow-x-auto whitespace-pre-wrap break-all">
+                        {getEmbedSnippet(form.id)}
+                      </pre>
+                      <Button
+                        size="sm"
+                        onClick={() => handleCopyEmbedSnippet(form.id)}
+                        className="gap-2"
+                      >
+                        <Copy className="h-4 w-4" />
+                        Copy snippet
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

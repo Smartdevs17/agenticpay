@@ -142,7 +142,7 @@ export class ProjectController extends BaseController {
       const user = this.getUser(req);
       const result = await this.projectService.approveWork(req.params.id, user.id, user.tenantId);
       this.sendResult(res, result, (project) => {
-        res.apiSuccess(project, { message: "Work approved and payment released" });
+        res.apiSuccess({ ...project, invoiceHint: true }, { message: "Work approved and payment released" });
       });
     });
   };

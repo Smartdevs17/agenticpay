@@ -51,6 +51,21 @@ export interface AnalyticsSnapshot {
   generatedAt: string;
 }
 
+export interface MerchantPercentile {
+  volumePercentile: number;
+  successRatePercentile: number;
+  avgAmountPercentile: number;
+  note: string;
+}
+
+export interface ReportSchedule {
+  userId: string;
+  email: string;
+  frequencyHours: number;
+  createdAt: string;
+  lastSentAt?: string;
+}
+
 interface PaymentRecord {
   id: string;
   amount: number;
@@ -58,6 +73,35 @@ interface PaymentRecord {
   network: string;
   status: 'initiated' | 'confirmed' | 'completed' | 'failed';
   timestamp: Date;
+}
+
+// In-memory report schedule store
+const reportSchedules = new Map<string, ReportSchedule>();
+
+export function scheduleReport(userId: string, email: string, frequencyHours: number): ReportSchedule {
+  const schedule: ReportSchedule = {
+    userId,
+    email,
+    frequencyHours,
+    createdAt: new Date().toISOString(),
+  };
+  reportSchedules.set(userId, schedule);
+  return schedule;
+}
+
+export function getReportSchedule(userId: string): ReportSchedule | undefined {
+  return reportSchedules.get(userId);
+}
+
+export function getAllReportSchedules(): ReportSchedule[] {
+  return Array.from(reportSchedules.values());
+}
+
+export function markReportSent(userId: string): void {
+  const schedule = reportSchedules.get(userId);
+  if (schedule) {
+    schedule.lastSentAt = new Date().toISOString();
+  }
 }
 
 export class PaymentAnalyticsService {
@@ -217,6 +261,43 @@ export class PaymentAnalyticsService {
       summary: this.buildSummary(since),
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Returns simulated industry percentile rankings for the merchant.
+   * NOTE: Uses hardcoded benchmark curves — not real peer data.
+   */
+  buildMerchantPercentiles(since?: Date): MerchantPercentile {
+    const summary = this.buildSummary(since);
+
+    // Benchmark curves derived from simulated industry distributions
+    const volumePercentile = this.scorePercentile(summary.totalRevenue, [500, 2000, 5000, 15000, 50000]);
+    const successRatePercentile = this.scorePercentile(summary.successRate * 100, [60, 70, 78, 85, 95]);
+    const avgAmountPercentile = this.scorePercentile(summary.avgPaymentAmount, [50, 150, 400, 1000, 3000]);
+
+    return {
+      volumePercentile,
+      successRatePercentile,
+      avgAmountPercentile,
+      note: 'Estimated industry comparison — simulated benchmark data, not real peer metrics',
+    };
+  }
+
+  private scorePercentile(value: number, thresholds: number[]): number {
+    const brackets = [10, 25, 50, 75, 90, 99];
+    for (let i = 0; i < thresholds.length; i++) {
+      if (value < thresholds[i]) return brackets[i];
+    }
+    return brackets[thresholds.length];
+  }
+
+  exportToCsv(since?: Date): string {
+    const revenue = this.buildTimeSeries('hour', since);
+    const header = 'timestamp,revenue,count,network';
+    const rows = revenue.map(
+      (p) => `"${p.timestamp}",${p.revenue.toFixed(2)},${p.count},"${p.network}"`,
+    );
+    return [header, ...rows].join('\n');
   }
 
   private filterSince(since?: Date): PaymentRecord[] {

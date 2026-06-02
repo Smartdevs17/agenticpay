@@ -6,7 +6,11 @@
 // POST /api/v1/analytics/track — ingest a payment event
 
 import { Router, Request, Response } from 'express';
-import { analyticsService } from '../services/analytics.js';
+import {
+  analyticsService,
+  scheduleReport,
+  getReportSchedule,
+} from '../services/analytics.js';
 import type { AgenticPayWebSocketServer } from '../websocket/server.js';
 
 export function createAnalyticsRouter(wsServer: AgenticPayWebSocketServer) {
@@ -53,6 +57,49 @@ export function createAnalyticsRouter(wsServer: AgenticPayWebSocketServer) {
   router.get('/segmentation', (req: Request, res: Response) => {
     const field = req.query.by === 'currency' ? 'currency' : 'network';
     res.json({ data: analyticsService.buildSegmentation(field, parseSince(req)) });
+  });
+
+  // Merchant percentile comparison (simulated benchmarks)
+  router.get('/percentiles', (req: Request, res: Response) => {
+    const since = parseSince(req);
+    res.json(analyticsService.buildMerchantPercentiles(since));
+  });
+
+  // CSV export of revenue time-series
+  router.get('/export', (req: Request, res: Response) => {
+    const since = parseSince(req);
+    const csv = analyticsService.exportToCsv(since);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="analytics.csv"');
+    res.send(csv);
+  });
+
+  // Get scheduled report for a user
+  router.get('/schedule-report/:userId', (req: Request, res: Response) => {
+    const { userId } = req.params;
+    const schedule = getReportSchedule(userId);
+    if (!schedule) {
+      res.status(404).json({ error: 'No report schedule found for this user' });
+      return;
+    }
+    res.json(schedule);
+  });
+
+  // Schedule a recurring analytics report via email
+  router.post('/schedule-report', (req: Request, res: Response) => {
+    const { userId, email, frequencyHours } = req.body as Record<string, unknown>;
+
+    if (typeof userId !== 'string' || !userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+    if (typeof email !== 'string' || !email.includes('@')) {
+      res.status(400).json({ error: 'A valid email is required' });
+      return;
+    }
+    const hours = typeof frequencyHours === 'number' && frequencyHours > 0 ? frequencyHours : 24;
+    const schedule = scheduleReport(userId, email, hours);
+    res.json({ ok: true, schedule });
   });
 
   // Ingest a payment event and broadcast via WebSocket

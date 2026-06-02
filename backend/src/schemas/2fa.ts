@@ -12,12 +12,13 @@ export const Setup2FARequestSchema = z.object({
 
 export type Setup2FARequest = z.infer<typeof Setup2FARequestSchema>;
 
-// Verify 2FA request
+// Verify 2FA request — accepts 6-digit TOTP codes or 8-char alphanumeric backup codes
 export const Verify2FARequestSchema = z.object({
   userId: z.string().uuid('Invalid user ID'),
-  token: z.string()
-    .length(6, 'Token must be 6 digits')
-    .regex(/^\d{6}$/, 'Token must contain only digits'),
+  token: z.union([
+    z.string().length(6).regex(/^\d{6}$/, 'TOTP must be a 6-digit numeric code'),
+    z.string().length(8).regex(/^[A-Z0-9]{8}$/, 'Backup code must be 8 uppercase alphanumeric characters'),
+  ]),
   rememberDevice: z.boolean().optional(),
 });
 
@@ -34,12 +35,13 @@ export const Confirm2FASetupRequestSchema = z.object({
 
 export type Confirm2FASetupRequest = z.infer<typeof Confirm2FASetupRequestSchema>;
 
-// Disable 2FA request
+// Disable 2FA request — also accepts backup codes so users with lost authenticator can disable
 export const Disable2FARequestSchema = z.object({
   userId: z.string().uuid('Invalid user ID'),
-  token: z.string()
-    .length(6, 'Token must be 6 digits')
-    .regex(/^\d{6}$/, 'Token must contain only digits'),
+  token: z.union([
+    z.string().length(6).regex(/^\d{6}$/, 'TOTP must be a 6-digit numeric code'),
+    z.string().length(8).regex(/^[A-Z0-9]{8}$/, 'Backup code must be 8 uppercase alphanumeric characters'),
+  ]),
   reason: z.string().optional(),
 });
 

@@ -8,6 +8,7 @@ import { Router } from "express";
 import { container } from "../di/container.js";
 import { requireEnhancedPermission } from "../middleware/permissions.js";
 import { attachResponseHelpers } from "../middleware/responseFormatter.js";
+import { projectsService } from "../services/projects.js";
 
 export const projectsRouter = Router();
 
@@ -21,6 +22,23 @@ projectsRouter.post(
   "/",
   requireEnhancedPermission("projects", "write"),
   projectController.createProject,
+);
+
+// Overdue milestone alerts — must come before /:id to avoid param collision
+projectsRouter.get(
+  "/overdue-alerts",
+  requireEnhancedPermission("projects", "read"),
+  (req, res, next) => {
+    try {
+      const { projectId } = req.query;
+      const alerts = projectsService.getOverdueMilestones(
+        typeof projectId === 'string' ? projectId : undefined,
+      );
+      res.json({ alerts, count: alerts.length });
+    } catch (err) {
+      next(err);
+    }
+  },
 );
 
 // List all projects

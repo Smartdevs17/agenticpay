@@ -20,6 +20,8 @@ import {
   completeRecovery,
   rememberDevice,
   isDeviceRemembered,
+  getPolicy,
+  setPolicy,
 } from '../services/2fa-service.js';
 import {
   Setup2FARequestSchema,
@@ -433,3 +435,49 @@ twoFactorAuthRouter.post(
 
 // Constant for recovery token expiry
 const RECOVERY_TOKEN_EXPIRY_HOURS = 24;
+
+/**
+ * GET /api/v1/auth/2fa/policy/:userId
+ * Get 2FA enforcement policy for a user
+ */
+twoFactorAuthRouter.get(
+  '/policy/:userId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = req.params;
+    if (!userId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      res.status(400).json({ error: 'Invalid user ID' });
+      return;
+    }
+    res.status(200).json(getPolicy(userId));
+  })
+);
+
+/**
+ * POST /api/v1/auth/2fa/policy
+ * Update 2FA enforcement policy for a user
+ */
+twoFactorAuthRouter.post(
+  '/policy',
+  asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        userId: z.string().uuid('Invalid user ID'),
+        enforced: z.boolean().optional(),
+        enforceForTransactions: z.boolean().optional(),
+        transactionThreshold: z.number().positive().optional(),
+        gracePeriod: z.number().int().min(0).optional(),
+        rememberDeviceExpiry: z.number().int().min(0).optional(),
+      });
+      const body = schema.parse(req.body);
+      const { userId, ...patch } = body;
+      const policy = setPolicy(userId, patch);
+      res.status(200).json(policy);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: 'Invalid request', details: error.errors });
+      } else {
+        res.status(500).json({ error: 'Failed to update 2FA policy' });
+      }
+    }
+  })
+);
