@@ -22,7 +22,8 @@ import { onboardingRouter } from './routes/onboarding.js';
 import { splitsRouter } from './routes/splits.js';
 import { refundsRouter } from './routes/refunds.js';
 import allowancesRouter from './routes/allowances.js';
-import { formsRouter } from './routes/forms.ts';
+import { formsRouter } from './routes/forms.js';
+import { twoFactorAuthRouter } from './routes/2fa.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import { webhookHandlersRouter } from './routes/webhookHandlers.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
@@ -306,6 +307,9 @@ app.use('/api/v1/tax', taxRouter);
 
 // Project + milestone delivery approval workflow
 app.use('/api/v1/projects', projectsRouter);
+
+// Two-factor authentication
+app.use('/api/v1/auth/2fa', twoFactorAuthRouter);
 
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());

@@ -8,6 +8,7 @@ import { Router } from "express";
 import { container } from "../di/container.js";
 import { requireEnhancedPermission } from "../middleware/permissions.js";
 import { attachResponseHelpers } from "../middleware/responseFormatter.js";
+import { projectsService } from "../services/projects.js";
 
 export const projectsRouter = Router();
 
@@ -21,6 +22,25 @@ projectsRouter.post(
   "/",
   requireEnhancedPermission("projects", "write"),
   projectController.createProject,
+);
+
+// Overdue milestone alerts — must come before /:id to avoid param collision
+projectsRouter.get(
+  "/overdue-alerts",
+  requireEnhancedPermission("projects", "read"),
+  (req, res, next) => {
+    try {
+      const sessionUser = (req as typeof req & { user?: { id: string; role: string } }).user;
+      const { projectId } = req.query;
+      const targetProjectId = typeof projectId === 'string' ? projectId : undefined;
+      // Scope to the caller's own projects unless they have admin role
+      const ownerId = sessionUser?.role === 'admin' ? undefined : sessionUser?.id;
+      const alerts = projectsService.getOverdueMilestones(targetProjectId, ownerId);
+      res.json({ alerts, count: alerts.length });
+    } catch (err) {
+      next(err);
+    }
+  },
 );
 
 // List all projects

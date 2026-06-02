@@ -338,6 +338,40 @@ export class ProjectsService {
     return projectId ? this.releases.filter((release) => release.projectId === projectId) : [...this.releases];
   }
 
+  getOverdueMilestones(projectId?: string, ownerId?: string): Array<{
+    milestone: MilestoneRecord;
+    project: ProjectRecord;
+    overdueDays: number;
+  }> {
+    const now = new Date();
+    // If ownerId is provided, scope to that owner's projects only
+    const allIds = projectId ? [projectId] : [...this.projects.keys()];
+    const projectIds = ownerId
+      ? allIds.filter((pid) => {
+          const p = this.projects.get(pid);
+          return p && (p.ownerId === ownerId || p.clientId === ownerId);
+        })
+      : allIds;
+
+    const overdue: Array<{ milestone: MilestoneRecord; project: ProjectRecord; overdueDays: number }> = [];
+
+    for (const pid of projectIds) {
+      const project = this.projects.get(pid);
+      if (!project) continue;
+      const milestones = this.milestones.get(pid) ?? [];
+      for (const milestone of milestones) {
+        if (milestone.status === 'released') continue;
+        const due = new Date(milestone.dueDate);
+        if (due < now) {
+          const overdueDays = Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+          overdue.push({ milestone, project, overdueDays });
+        }
+      }
+    }
+
+    return overdue.sort((a, b) => b.overdueDays - a.overdueDays);
+  }
+
   resetForTests(): void {
     this.projects.clear();
     this.milestones.clear();

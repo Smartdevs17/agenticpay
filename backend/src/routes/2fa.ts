@@ -20,6 +20,8 @@ import {
   completeRecovery,
   rememberDevice,
   isDeviceRemembered,
+  getPolicy,
+  setPolicy,
 } from '../services/2fa-service.js';
 import {
   Setup2FARequestSchema,
@@ -433,3 +435,69 @@ twoFactorAuthRouter.post(
 
 // Constant for recovery token expiry
 const RECOVERY_TOKEN_EXPIRY_HOURS = 24;
+
+/**
+ * GET /api/v1/auth/2fa/policy/:userId
+ * Get 2FA enforcement policy — restricted to the authenticated user (or admin role).
+ */
+twoFactorAuthRouter.get(
+  '/policy/:userId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = req.params;
+    if (!userId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      res.status(400).json({ error: 'Invalid user ID' });
+      return;
+    }
+    const sessionUser = (req as Request & { user?: { id: string; role: string } }).user;
+    if (!sessionUser) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    if (sessionUser.id !== userId && sessionUser.role !== 'admin') {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+    res.status(200).json(getPolicy(userId));
+  })
+);
+
+/**
+ * POST /api/v1/auth/2fa/policy
+ * Update 2FA policy for the authenticated user only (or admin targeting another user).
+ */
+twoFactorAuthRouter.post(
+  '/policy',
+  asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const sessionUser = (req as Request & { user?: { id: string; role: string } }).user;
+      if (!sessionUser) {
+        res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
+      const schema = z.object({
+        userId: z.string().uuid('Invalid user ID').optional(),
+        enforced: z.boolean().optional(),
+        enforceForTransactions: z.boolean().optional(),
+        transactionThreshold: z.number().positive().optional(),
+        gracePeriod: z.number().int().min(0).optional(),
+        rememberDeviceExpiry: z.number().int().min(0).optional(),
+      });
+      const body = schema.parse(req.body);
+      // Only admins may set policy for a different user
+      const targetUserId = body.userId ?? sessionUser.id;
+      if (targetUserId !== sessionUser.id && sessionUser.role !== 'admin') {
+        res.status(403).json({ error: 'Access denied' });
+        return;
+      }
+      const { userId: _uid, ...patch } = body;
+      const policy = setPolicy(targetUserId, patch);
+      res.status(200).json(policy);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: 'Invalid request', details: error.errors });
+      } else {
+        res.status(500).json({ error: 'Failed to update 2FA policy' });
+      }
+    }
+  })
+);

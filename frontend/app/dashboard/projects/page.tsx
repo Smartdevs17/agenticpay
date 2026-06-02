@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Plus, ExternalLink, Clock, Folder, Loader2, Filter } from 'lucide-react';
+import { Plus, ExternalLink, Clock, Folder, Filter } from 'lucide-react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { ProjectCardSkeleton } from '@/components/ui/loading-skeletons';
@@ -28,6 +28,21 @@ type FilterPreset = {
   minAmount: string;
   maxAmount: string;
 };
+
+function getStatusColor(status: string): string {
+  switch (status) {
+    case 'active':
+      return 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800';
+    case 'completed':
+      return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800';
+    case 'verified':
+      return 'bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800';
+    case 'cancelled':
+      return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
+    default:
+      return 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700';
+  }
+}
 
 export default function ProjectsPage() {
   const router = useRouter();
@@ -69,32 +84,17 @@ export default function ProjectsPage() {
       if (statusFilter.length > 0 && !statusFilter.includes(project.status as StatusOption)) {
         return false;
       }
-
-      if (startDate && createdAt < targetStart) {
-        return false;
-      }
-
-      if (endDate && createdAt > targetEnd) {
-        return false;
-      }
-
-      if (minAmount && projectAmount < Number(minAmount)) {
-        return false;
-      }
-
-      if (maxAmount && projectAmount > Number(maxAmount)) {
-        return false;
-      }
+      if (startDate && createdAt < targetStart) return false;
+      if (endDate && createdAt > targetEnd) return false;
+      if (minAmount && projectAmount < Number(minAmount)) return false;
+      if (maxAmount && projectAmount > Number(maxAmount)) return false;
 
       return true;
     });
   }, [projects, statusFilter, startDate, endDate, minAmount, maxAmount]);
 
   const savePreset = () => {
-    if (!presetName.trim()) {
-      return;
-    }
-
+    if (!presetName.trim()) return;
     setPresets((current) => ({
       ...current,
       [presetName.trim()]: {
@@ -133,32 +133,14 @@ export default function ProjectsPage() {
     });
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active':
-        return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'completed':
-        return 'bg-green-100 text-green-700 border-green-200';
-      case 'cancelled':
-        return 'bg-red-100 text-red-700 border-red-200';
-      default:
-        return 'bg-gray-100 text-gray-700 border-gray-200';
-    }
-  };
-
   if (loading) {
     return (
       <div className="space-y-6">
         <div className="flex justify-between items-center">
-          <div>
-            <p className="text-gray-600 mt-1 dark:text-gray-400">Manage your projects and milestones</p>
-            <div className="mt-2 inline-flex items-center gap-2 text-sm text-gray-500">
-              Loading projects...
-            </div>
-          </div>
+          <p className="text-gray-600 mt-1 dark:text-gray-400">Loading projects…</p>
           <Skeleton className="h-10 w-32" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
           {[1, 2, 3, 4].map((i) => (
             <ProjectCardSkeleton key={i} />
           ))}
@@ -176,27 +158,11 @@ export default function ProjectsPage() {
     );
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-
-      case 'active': return 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800';
-      case 'completed': return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800';
-      case 'verified': return 'bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800';
-      case 'cancelled': return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
-      default: return 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700';
-      case 'active': return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'completed': return 'bg-green-100 text-green-700 border-green-200';
-      case 'cancelled': return 'bg-red-100 text-red-700 border-red-200';
-      default: return 'bg-gray-100 text-gray-700 border-gray-200';
-    }
-  };
-
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex justify-between items-center">
-        <div>
-          <p className="text-gray-600 mt-1 dark:text-gray-400">Manage your projects and milestones</p>
-        </div>
+        <p className="text-gray-600 mt-1 dark:text-gray-400">Manage your projects and milestones</p>
         <Link href="/dashboard/projects/new">
           <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
             <Plus className="h-4 w-4 mr-2" />
@@ -205,187 +171,191 @@ export default function ProjectsPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
-        {projects.map((project, index) => {
-          const completedMilestones = project.milestones.filter((m) => m.status === 'completed').length;
-          const totalMilestones = project.milestones.length;
-          const progressPercentage = totalMilestones > 0 ? (completedMilestones / totalMilestones) * 100 : 0;
-
-          return (
-            <motion.div
-              key={project.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-            >
-              <Card className="hover:shadow-lg transition-all duration-200 border border-gray-200">
-                <CardHeader>
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <CardTitle className="text-xl mb-2">{project.title}</CardTitle>
-                      <p className="text-sm text-gray-600">Client: {project.client.address.slice(0, 6)}...{project.client.address.slice(-4)}</p>
-                    </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(project.status)}`}>
-                      {project.status}
-                    </span>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Total Value</span>
-                      <span className="font-semibold text-gray-900">{project.totalAmount} {project.currency}</span>
-      <div className="grid gap-6 lg:grid-cols-[minmax(320px,360px)_1fr]">
-        <Card className="border border-gray-200">
+      {/* Two-column layout: filters | project cards */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(300px,340px)_1fr]">
+        {/* Filter Sidebar */}
+        <Card className="border border-gray-200 h-fit">
           <CardHeader>
-            <CardTitle>Advanced filters</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Filter className="h-4 w-4" />
+              Advanced Filters
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <Filter className="h-4 w-4" />
-              Use date, status, and amount filters to refine your projects.
+            {/* Status filter */}
+            <div>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Status</p>
+              <div className="flex flex-wrap gap-2">
+                {STATUS_OPTIONS.map((option) => (
+                  <Button
+                    key={option}
+                    variant={statusFilter.includes(option) ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() =>
+                      setStatusFilter((current) =>
+                        current.includes(option)
+                          ? current.filter((v) => v !== option)
+                          : [...current, option],
+                      )
+                    }
+                    className="capitalize"
+                  >
+                    {option}
+                  </Button>
+                ))}
+              </div>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-medium text-gray-700 mb-2">Status</p>
-                <div className="flex flex-wrap gap-2">
-                  {STATUS_OPTIONS.map((option) => (
-                    <Button
-                      key={option}
-                      variant={statusFilter.includes(option) ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => {
-                        setStatusFilter((current) =>
-                          current.includes(option)
-                            ? current.filter((value) => value !== option)
-                            : [...current, option]
-                        );
-                      }}
-                      className="capitalize"
+            {/* Date range */}
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                <span>Start date</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full rounded-md border border-gray-200 bg-white dark:bg-gray-800 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                <span>End date</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full rounded-md border border-gray-200 bg-white dark:bg-gray-800 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+            </div>
+
+            {/* Amount range */}
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                <span>Min amount</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={minAmount}
+                  onChange={(e) => setMinAmount(e.target.value)}
+                  className="w-full rounded-md border border-gray-200 bg-white dark:bg-gray-800 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                <span>Max amount</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={maxAmount}
+                  onChange={(e) => setMaxAmount(e.target.value)}
+                  className="w-full rounded-md border border-gray-200 bg-white dark:bg-gray-800 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+            </div>
+
+            {/* Preset controls */}
+            <div className="grid gap-2">
+              <input
+                type="text"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder="Preset name"
+                className="w-full rounded-md border border-gray-200 bg-white dark:bg-gray-800 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" onClick={savePreset} size="sm" className="w-full">
+                  Save preset
+                </Button>
+                <Button type="button" onClick={clearFilters} size="sm" variant="outline" className="w-full">
+                  Clear filters
+                </Button>
+              </div>
+            </div>
+
+            {/* Saved presets */}
+            {Object.keys(presets).length > 0 && (
+              <div className="space-y-2 pt-3 border-t border-gray-200 dark:border-gray-700">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Saved presets</p>
+                <div className="grid gap-2">
+                  {Object.values(presets).map((preset) => (
+                    <div
+                      key={preset.name}
+                      className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 dark:bg-gray-800 dark:border-gray-700 px-3 py-2"
                     >
-                      {option}
-                    </Button>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{preset.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {preset.status.length > 0 ? preset.status.join(', ') : 'Any status'} ·{' '}
+                          {preset.startDate || 'Any start'} – {preset.endDate || 'Any end'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button variant="outline" size="xs" onClick={() => applyPreset(preset)}>
+                          Apply
+                        </Button>
+                        <Button variant="ghost" size="xs" onClick={() => removePreset(preset.name)}>
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="space-y-2 text-sm text-gray-600">
-                  <span>Start date</span>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(event) => setStartDate(event.target.value)}
-                    className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
-                </label>
-                <label className="space-y-2 text-sm text-gray-600">
-                  <span>End date</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(event) => setEndDate(event.target.value)}
-                    className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
-                </label>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="space-y-2 text-sm text-gray-600">
-                  <span>Min amount</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={minAmount}
-                    onChange={(event) => setMinAmount(event.target.value)}
-                    className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
-                </label>
-                <label className="space-y-2 text-sm text-gray-600">
-                  <span>Max amount</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={maxAmount}
-                    onChange={(event) => setMaxAmount(event.target.value)}
-                    className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
-                </label>
-              </div>
-
-              <div className="grid gap-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" onClick={savePreset} className="w-full" size="sm">
-                    Save preset
-                  </Button>
-                  <Button type="button" onClick={clearFilters} className="w-full" variant="outline" size="sm">
-                    Clear filters
-                  </Button>
-                </div>
-                <input
-                  type="text"
-                  value={presetName}
-                  onChange={(event) => setPresetName(event.target.value)}
-                  placeholder="Preset name"
-                  className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
-
-              {Object.keys(presets).length > 0 && (
-                <div className="space-y-2 pt-4 border-t border-gray-200">
-                  <p className="text-sm font-medium text-gray-700">Saved presets</p>
-                  <div className="grid gap-2">
-                    {Object.values(presets).map((preset) => (
-                      <div key={preset.name} className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900">{preset.name}</p>
-                          <p className="text-xs text-gray-500">
-                            {preset.status.length > 0 ? preset.status.join(', ') : 'Any status'} • {preset.startDate || 'Any start'} – {preset.endDate || 'Any end'}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="xs" onClick={() => applyPreset(preset)}>
-                            Apply
-                          </Button>
-                          <Button variant="ghost" size="xs" onClick={() => removePreset(preset.name)}>
-                            Remove
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
           </CardContent>
         </Card>
 
-        <div className="space-y-6">
+        {/* Project cards */}
+        <div className="space-y-4">
+          {filteredProjects.length === 0 && (
+            <Card>
+              <CardContent className="pt-6">
+                <EmptyState
+                  icon={Folder}
+                  title={projects.length === 0 ? 'No projects found' : 'No projects match your filters'}
+                  description={
+                    projects.length === 0
+                      ? 'Create your first project or wait to be hired.'
+                      : 'Adjust the filters or clear them to see more projects.'
+                  }
+                  action={
+                    projects.length === 0
+                      ? { label: 'Create Project', onClick: () => router.push('/dashboard/projects/new') }
+                      : { label: 'Clear filters', onClick: clearFilters }
+                  }
+                />
+              </CardContent>
+            </Card>
+          )}
+
           {filteredProjects.map((project, index) => {
-            const completedMilestones = project.milestones.filter((m) => m.status === 'completed').length;
+            const completedMilestones = project.milestones.filter(
+              (m) => m.status === 'completed',
+            ).length;
             const totalMilestones = project.milestones.length;
-            const progressPercentage = totalMilestones > 0 ? (completedMilestones / totalMilestones) * 100 : 0;
+            const progressPercent =
+              totalMilestones > 0 ? (completedMilestones / totalMilestones) * 100 : 0;
 
             return (
               <motion.div
                 key={project.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
+                transition={{ delay: index * 0.05 }}
               >
-                <Card className="hover:shadow-lg transition-all duration-200 border border-gray-200">
+                <Card className="hover:shadow-lg transition-all duration-200 border border-gray-200 dark:border-gray-700">
                   <CardHeader>
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
-                        <CardTitle className="text-xl mb-2">{project.title}</CardTitle>
-                        <p className="text-sm text-gray-600">
-                          Client: {project.client.address.slice(0, 6)}...{project.client.address.slice(-4)}
+                        <CardTitle className="text-xl mb-1">{project.title}</CardTitle>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          Client: {project.client.address.slice(0, 6)}…{project.client.address.slice(-4)}
                         </p>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(project.status)}`}>
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(project.status)}`}
+                      >
                         {project.status}
                       </span>
                     </div>
@@ -393,23 +363,22 @@ export default function ProjectsPage() {
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Total Value</span>
-                        <span className="font-semibold text-gray-900">
+                        <span className="text-gray-600 dark:text-gray-400">Total Value</span>
+                        <span className="font-semibold text-gray-900 dark:text-white">
                           {project.totalAmount} {project.currency}
                         </span>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div className="bg-gradient-to-r from-blue-600 to-purple-600 h-2 rounded-full transition-all" style={{ width: `${progressPercentage}%` }} />
-
                       <div className="space-y-1">
                         <div className="flex justify-between text-xs text-gray-500">
-                          <span>Status</span>
-                          <span>{project.milestones[0]?.status.replace('_', ' ')}</span>
+                          <span>Progress</span>
+                          <span>
+                            {completedMilestones}/{totalMilestones} milestones
+                          </span>
                         </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                           <div
                             className="bg-gradient-to-r from-blue-600 to-purple-600 h-2 rounded-full transition-all"
-                            style={{ width: `${progressPercentage}%` }}
+                            style={{ width: `${progressPercent}%` }}
                           />
                         </div>
                       </div>
@@ -431,34 +400,6 @@ export default function ProjectsPage() {
               </motion.div>
             );
           })}
-
-      {projects.length === 0 && (
-        <Card>
-          <CardContent>
-            <EmptyState
-              icon={Folder}
-              title="No projects found"
-              description="Create your first project or wait to be hired."
-              action={{ label: 'Create Project', onClick: () => router.push('/dashboard/projects/new') }}
-            />
-          </CardContent>
-        </Card>
-      )}
-          {filteredProjects.length === 0 && (
-            <Card>
-              <CardContent>
-                <EmptyState
-                  icon={Folder}
-                  title="No projects match your filters"
-                  description="Adjust the filters or clear them to see more projects."
-                  action={{
-                    label: 'Clear filters',
-                    onClick: clearFilters,
-                  }}
-                />
-              </CardContent>
-            </Card>
-          )}
         </div>
       </div>
     </div>

@@ -15,6 +15,7 @@ import {
   BackupCodeValidation,
   RememberedDevice,
   TwoFactorRecovery,
+  TwoFactorPolicy,
 } from '../types/2fa.js';
 
 // In-memory storage (in production, use a database)
@@ -22,6 +23,17 @@ const twoFactorSetups = new Map<string, TwoFactorSetup>();
 const twoFactorLogs = new Map<string, TwoFactorLog[]>();
 const rememberedDevices = new Map<string, RememberedDevice[]>();
 const recoveryTokens = new Map<string, TwoFactorRecovery>();
+const twoFactorPolicies = new Map<string, TwoFactorPolicy>();
+
+const DEFAULT_POLICY: Omit<TwoFactorPolicy, 'userId'> = {
+  enforced: false,
+  enforceForTransactions: false,
+  transactionThreshold: 1000,
+  gracePeriod: 0,
+  rememberDeviceExpiry: 30,
+  maxBackupCodes: 10,
+  codesRequiredOnSetup: 10,
+};
 
 const BACKUP_CODE_COUNT = 10;
 const BACKUP_CODE_LENGTH = 8;
@@ -367,6 +379,23 @@ export function validateRecoveryToken(token: string): TwoFactorRecovery | null {
   }
 
   return recovery;
+}
+
+/**
+ * Get 2FA enforcement policy for a user (returns defaults if not configured)
+ */
+export function getPolicy(userId: string): TwoFactorPolicy {
+  return twoFactorPolicies.get(userId) ?? { userId, ...DEFAULT_POLICY };
+}
+
+/**
+ * Set (upsert) 2FA enforcement policy for a user
+ */
+export function setPolicy(userId: string, patch: Partial<Omit<TwoFactorPolicy, 'userId'>>): TwoFactorPolicy {
+  const existing = twoFactorPolicies.get(userId) ?? { userId, ...DEFAULT_POLICY };
+  const updated: TwoFactorPolicy = { ...existing, ...patch, userId };
+  twoFactorPolicies.set(userId, updated);
+  return updated;
 }
 
 /**
