@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { scoreTransaction, TransactionSample } from './fraud-detection.js';
+import { AppError } from '../middleware/errorHandler.js';
 
 export type BankVerificationMethod = 'plaid' | 'micro_deposit';
 export type BankAccountStatus = 'pending_verification' | 'verified' | 'failed_verification';
@@ -113,6 +115,13 @@ class FiatPaymentsService {
     return new Date().toISOString();
   }
 
+  private getPaymentVelocity(bankAccountId: string): number {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    return [...this.payments.values()].filter(
+      (p) => p.bankAccountId === bankAccountId && new Date(p.createdAt).getTime() >= oneHourAgo
+    ).length;
+  }
+
   private pushEvent(paymentId: string, eventType: string, details?: Record<string, string>): void {
     this.events.push({
       id: randomUUID(),
@@ -127,7 +136,6 @@ class FiatPaymentsService {
     if (method === 'ach') {
       return Math.min(25, Number((amount * 0.008).toFixed(2)));
     }
-
     return isInternational ? 35 : 15;
   }
 
@@ -195,22 +203,54 @@ class FiatPaymentsService {
     if (!bankAccount) {
       throw new Error('BANK_ACCOUNT_NOT_FOUND');
     }
-
     if (bankAccount.status !== 'verified') {
       throw new Error('BANK_ACCOUNT_NOT_VERIFIED');
     }
-
     if (input.method === 'wire' && input.isInternational && !input.recipient.swiftCode) {
       throw new Error('INTERNATIONAL_WIRE_REQUIRES_SWIFT');
     }
 
+    // --- FRAUD DETECTION INTERCEPTOR ---
+    const fraudSample: TransactionSample = {
+      transactionId: randomUUID(),
+      accountAgeDays: 30,
+      amountUsd: input.amount,
+      velocity1h: this.getPaymentVelocity(input.bankAccountId),
+      geoDistanceKm: 0, 
+      deviceRisk: 0.1, 
+      failedAttempts24h: 0,
+      chargebacks90d: 0,
+    };
+
+    const fraudAssessment = scoreTransaction(fraudSample);
+
+    if (fraudAssessment.action === 'block') {
+      this.pushEvent(fraudSample.transactionId, 'payment_blocked_fraud', { reasons: fraudAssessment.reasons.join(', ') });
+      throw new Error(`PAYMENT_BLOCKED: High risk of fraud detected. Score: ${fraudAssessment.riskScore}`);
+    }
+
+    // --- STATUS RESOLUTION ---
     const now = this.nowIso();
     const feeAmount = this.calculateFee(input.method, input.amount, input.isInternational);
     const requiresApproval = input.amount >= HIGH_VALUE_APPROVAL_THRESHOLD_USD;
-    const complianceHold = input.method === 'wire' && input.isInternational && input.amount >= 50_000;
+    const standardComplianceHold = input.method === 'wire' && input.isInternational && input.amount >= 50_000;
+    
+    const isComplianceHold = standardComplianceHold || fraudAssessment.action === 'review';
+    
+    let initialStatus: FiatPaymentStatus = 'processing';
+    const complianceNotes: string[] = [];
 
+    if (isComplianceHold) {
+      initialStatus = 'compliance_hold';
+      if (standardComplianceHold) complianceNotes.push('International high-value wire requires compliance review');
+      if (fraudAssessment.action === 'review') complianceNotes.push(`ML Fraud Review Flagged (Score: ${fraudAssessment.riskScore}): ${fraudAssessment.reasons.join(' | ')}`);
+    } else if (requiresApproval) {
+      initialStatus = 'pending_approval';
+    }
+
+    // --- RECORD CREATION ---
     const payment: FiatPaymentRecord = {
-      id: randomUUID(),
+      id: fraudSample.transactionId,
       method: input.method,
       bankAccountId: input.bankAccountId,
       recipient: input.recipient,
@@ -220,8 +260,8 @@ class FiatPaymentsService {
       netAmount: Number((input.amount - feeAmount).toFixed(2)),
       description: input.description,
       isInternational: input.isInternational,
-      status: complianceHold ? 'compliance_hold' : requiresApproval ? 'pending_approval' : 'processing',
-      complianceNotes: complianceHold ? ['International high-value wire requires compliance review'] : [],
+      status: initialStatus,
+      complianceNotes,
       bankReference: `BNK-${randomUUID().slice(0, 8).toUpperCase()}`,
       wireInstructions:
         input.method === 'wire'
@@ -238,6 +278,7 @@ class FiatPaymentsService {
 
     this.payments.set(payment.id, payment);
     this.pushEvent(payment.id, 'payment_created', { method: payment.method, status: payment.status });
+
     return payment;
   }
 
@@ -397,7 +438,7 @@ class FiatPaymentsService {
         },
       },
       byStatus,
-      discrepancies,
+      discreancies,
     };
   }
 
