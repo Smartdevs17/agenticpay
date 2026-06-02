@@ -338,15 +338,20 @@ export class ProjectsService {
     return projectId ? this.releases.filter((release) => release.projectId === projectId) : [...this.releases];
   }
 
-  getOverdueMilestones(projectId?: string): Array<{
+  getOverdueMilestones(projectId?: string, ownerId?: string): Array<{
     milestone: MilestoneRecord;
     project: ProjectRecord;
     overdueDays: number;
   }> {
     const now = new Date();
-    const projectIds = projectId
-      ? [projectId]
-      : [...this.projects.keys()];
+    // If ownerId is provided, scope to that owner's projects only
+    const allIds = projectId ? [projectId] : [...this.projects.keys()];
+    const projectIds = ownerId
+      ? allIds.filter((pid) => {
+          const p = this.projects.get(pid);
+          return p && (p.ownerId === ownerId || p.clientId === ownerId);
+        })
+      : allIds;
 
     const overdue: Array<{ milestone: MilestoneRecord; project: ProjectRecord; overdueDays: number }> = [];
 

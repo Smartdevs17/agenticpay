@@ -73,10 +73,14 @@ formsRouter.delete(
   }),
 );
 
-// Export form submissions as CSV or JSON
+// Export form submissions as CSV or JSON — requires an authenticated session
 formsRouter.get(
   '/:id/export',
   asyncHandler(async (req, res) => {
+    const sessionUser = (req as typeof req & { user?: { id: string } }).user;
+    if (!sessionUser) {
+      throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
+    }
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const format = req.query.format === 'csv' ? 'csv' : 'json';
     const data = exportFormSubmissions(id, format);

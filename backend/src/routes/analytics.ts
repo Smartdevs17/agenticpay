@@ -74,9 +74,18 @@ export function createAnalyticsRouter(wsServer: AgenticPayWebSocketServer) {
     res.send(csv);
   });
 
-  // Get scheduled report for a user
+  // Get scheduled report for the authenticated user
   router.get('/schedule-report/:userId', (req: Request, res: Response) => {
     const { userId } = req.params;
+    const sessionUser = (req as Request & { user?: { id: string; role: string } }).user;
+    if (!sessionUser) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    if (sessionUser.id !== userId && sessionUser.role !== 'admin') {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
     const schedule = getReportSchedule(userId);
     if (!schedule) {
       res.status(404).json({ error: 'No report schedule found for this user' });
@@ -85,20 +94,20 @@ export function createAnalyticsRouter(wsServer: AgenticPayWebSocketServer) {
     res.json(schedule);
   });
 
-  // Schedule a recurring analytics report via email
+  // Schedule a recurring analytics report — binds to the authenticated user, ignores any userId in body
   router.post('/schedule-report', (req: Request, res: Response) => {
-    const { userId, email, frequencyHours } = req.body as Record<string, unknown>;
-
-    if (typeof userId !== 'string' || !userId) {
-      res.status(400).json({ error: 'userId is required' });
+    const sessionUser = (req as Request & { user?: { id: string; role: string } }).user;
+    if (!sessionUser) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
+    const { email, frequencyHours } = req.body as Record<string, unknown>;
     if (typeof email !== 'string' || !email.includes('@')) {
       res.status(400).json({ error: 'A valid email is required' });
       return;
     }
     const hours = typeof frequencyHours === 'number' && frequencyHours > 0 ? frequencyHours : 24;
-    const schedule = scheduleReport(userId, email, hours);
+    const schedule = scheduleReport(sessionUser.id, email, hours);
     res.json({ ok: true, schedule });
   });
 

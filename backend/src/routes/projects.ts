@@ -30,10 +30,12 @@ projectsRouter.get(
   requireEnhancedPermission("projects", "read"),
   (req, res, next) => {
     try {
+      const sessionUser = (req as typeof req & { user?: { id: string; role: string } }).user;
       const { projectId } = req.query;
-      const alerts = projectsService.getOverdueMilestones(
-        typeof projectId === 'string' ? projectId : undefined,
-      );
+      const targetProjectId = typeof projectId === 'string' ? projectId : undefined;
+      // Scope to the caller's own projects unless they have admin role
+      const ownerId = sessionUser?.role === 'admin' ? undefined : sessionUser?.id;
+      const alerts = projectsService.getOverdueMilestones(targetProjectId, ownerId);
       res.json({ alerts, count: alerts.length });
     } catch (err) {
       next(err);

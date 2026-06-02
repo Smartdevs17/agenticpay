@@ -383,16 +383,23 @@ export function exportFormSubmissions(formId: string, format: 'csv' | 'json'): s
     .map((col) => `"${col}"`)
     .join(',');
 
+  // Prefix cells that start with formula-injection chars to prevent spreadsheet execution
+  const safeCsvCell = (raw: string): string => {
+    const escaped = raw.replace(/"/g, '""');
+    const safe = /^[=+\-@\t\r]/.test(escaped) ? `'${escaped}` : escaped;
+    return `"${safe}"`;
+  };
+
   const rows = formSubmissions.map((sub) => {
     const cells = [
-      `"${sub.id}"`,
-      `"${sub.submittedAt}"`,
-      `"${sub.success}"`,
+      safeCsvCell(sub.id),
+      safeCsvCell(sub.submittedAt),
+      safeCsvCell(String(sub.success)),
       ...fieldNames.map((name) => {
         const val = sub.values[name];
         if (val === undefined || val === null) return '""';
         const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
-        return `"${str.replace(/"/g, '""')}"`;
+        return safeCsvCell(str);
       }),
     ];
     return cells.join(',');
