@@ -3,31 +3,39 @@
  * Tests for the 2FA API endpoints
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { Express } from 'express';
+import { twoFactorAuthRouter } from '../2fa';
+import speakeasy from 'speakeasy';
 
 const TEST_USER_ID = '550e8400-e29b-41d4-a716-446655440000';
 
 describe('2FA Routes', () => {
   describe('POST /setup', () => {
     it('should generate TOTP secret and QR code', async () => {
+      // This test would require setting up an Express test server
+      // For now, we document the expected behavior
+
       const request = {
         method: 'POST',
         url: '/setup',
         body: { userId: TEST_USER_ID },
       };
 
+      // Expected response structure:
       const expectedResponse = {
-        secret: 'JBSWY3DPEHPK3PXP',
-        qrCode: 'data:image/png;base64,abc123',
-        backupCodes: ['code1', 'code2', 'code3', 'code4', 'code5', 'code6', 'code7', 'code8', 'code9', 'code10'],
+        secret: expect.any(String),
+        qrCode: expect.stringContaining('data:image/png;base64'),
+        backupCodes: expect.arrayContaining([expect.any(String)]),
       };
 
-      expect(expectedResponse.backupCodes).toBeDefined();
+      expect(expectedResponse.backupCodes).toHaveLength(10);
     });
   });
 
   describe('POST /confirm', () => {
     it('should confirm 2FA setup with valid token', async () => {
+      // Expected successful response:
       const expectedResponse = {
         success: true,
         message: '2FA has been successfully enabled',
@@ -37,6 +45,7 @@ describe('2FA Routes', () => {
     });
 
     it('should reject invalid token', async () => {
+      // Expected error response:
       const expectedError = {
         statusCode: 400,
         message: 'Invalid verification token',
@@ -48,19 +57,21 @@ describe('2FA Routes', () => {
 
   describe('POST /verify', () => {
     it('should verify valid TOTP token', async () => {
+      // Expected response:
       const expectedResponse = {
         success: true,
         message: '2FA verification successful',
-        backupCodesRemaining: 8,
+        backupCodesRemaining: expect.any(Number),
       };
 
       expect(expectedResponse.success).toBe(true);
     });
 
     it('should accept rememberDevice flag', async () => {
+      // Expected response with device hash:
       const expectedResponse = {
         success: true,
-        deviceHash: 'abc123def456',
+        deviceHash: expect.any(String),
       };
 
       expect(expectedResponse.deviceHash).toBeTruthy();
@@ -69,10 +80,11 @@ describe('2FA Routes', () => {
 
   describe('GET /status/:userId', () => {
     it('should return 2FA status', async () => {
+      // Expected response:
       const expectedResponse = {
         userId: TEST_USER_ID,
-        enabled: true,
-        backupCodesRemaining: 8,
+        enabled: expect.any(Boolean),
+        backupCodesRemaining: expect.any(Number),
       };
 
       expect(expectedResponse).toHaveProperty('userId');
@@ -80,6 +92,7 @@ describe('2FA Routes', () => {
     });
 
     it('should reject invalid userId', async () => {
+      // Expected error for invalid UUID:
       const expectedError = {
         statusCode: 400,
         message: 'Invalid user ID',
@@ -91,6 +104,7 @@ describe('2FA Routes', () => {
 
   describe('DELETE /:userId', () => {
     it('should disable 2FA with valid token', async () => {
+      // Expected response:
       const expectedResponse = {
         success: true,
         message: '2FA has been disabled',
@@ -100,6 +114,7 @@ describe('2FA Routes', () => {
     });
 
     it('should require valid verification token', async () => {
+      // Expected error:
       const expectedError = {
         statusCode: 401,
         message: 'Invalid verification token',
@@ -111,8 +126,9 @@ describe('2FA Routes', () => {
 
   describe('POST /backup-codes', () => {
     it('should return backup codes with valid token', async () => {
-      const expectedResponse: { backupCodes: string[] } = {
-        backupCodes: ['code1', 'code2'],
+      // Expected response:
+      const expectedResponse = {
+        backupCodes: expect.arrayContaining([expect.any(String)]),
       };
 
       expect(Array.isArray(expectedResponse.backupCodes)).toBe(true);
@@ -121,8 +137,9 @@ describe('2FA Routes', () => {
 
   describe('POST /regenerate-backup-codes', () => {
     it('should regenerate backup codes', async () => {
-      const expectedResponse: { backupCodes: string[]; message: string } = {
-        backupCodes: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10'],
+      // Expected response:
+      const expectedResponse = {
+        backupCodes: expect.arrayContaining([expect.any(String)]),
         message: 'Backup codes have been regenerated',
       };
 
@@ -133,44 +150,56 @@ describe('2FA Routes', () => {
 
   describe('GET /logs/:userId', () => {
     it('should return 2FA activity logs', async () => {
+      // Expected response:
       const expectedResponse = {
-        logs: [
-          { id: '1', action: '2fa_verified', success: true, createdAt: '2024-01-01' },
-        ],
-        total: 1,
+        logs: expect.arrayContaining([
+          expect.objectContaining({
+            id: expect.any(String),
+            action: expect.any(String),
+            success: expect.any(Boolean),
+            createdAt: expect.any(String),
+          }),
+        ]),
+        total: expect.any(Number),
       };
 
       expect(Array.isArray(expectedResponse.logs)).toBe(true);
     });
 
     it('should support filtering by action', async () => {
+      // Query: ?action=2fa_verified
+      // Expected: Only logs with action 2fa_verified
       const expectedResponse = {
-        logs: [
-          { action: '2fa_verified' },
-        ],
+        logs: expect.arrayContaining([
+          expect.objectContaining({
+            action: '2fa_verified',
+          }),
+        ]),
       };
 
-      expectedResponse.logs.forEach((log: { action: string }) => {
+      expectedResponse.logs.forEach((log) => {
         expect(log.action).toBe('2fa_verified');
       });
     });
 
     it('should support pagination', async () => {
-      const expectedResponse: { logs: unknown[]; total: number } = {
-        logs: [],
-        total: 5,
+      // Query: ?limit=10&offset=20
+      // Expected: Page of results with max 10 items
+      const expectedResponse = {
+        logs: expect.any(Array),
+        total: expect.any(Number),
       };
 
-      expect(expectedResponse.total).toBeDefined();
-      expect(typeof expectedResponse.total).toBe('number');
+      expect(expectedResponse.logs.length).toBeLessThanOrEqual(10);
     });
   });
 
   describe('POST /recovery', () => {
     it('should generate recovery token via email', async () => {
+      // Expected response:
       const expectedResponse = {
-        recoveryToken: 'rec-token-123',
-        message: 'Recovery email sent',
+        recoveryToken: expect.any(String),
+        message: expect.stringContaining('email'),
         expiresIn: 24,
       };
 
@@ -178,9 +207,10 @@ describe('2FA Routes', () => {
     });
 
     it('should generate recovery token via support ticket', async () => {
+      // Expected response:
       const expectedResponse = {
-        recoveryToken: 'rec-token-456',
-        message: 'Support ticket created',
+        recoveryToken: expect.any(String),
+        message: expect.stringContaining('support'),
       };
 
       expect(expectedResponse.recoveryToken).toBeTruthy();
@@ -189,6 +219,7 @@ describe('2FA Routes', () => {
 
   describe('POST /complete-recovery', () => {
     it('should complete recovery with valid token', async () => {
+      // Expected response:
       const expectedResponse = {
         success: true,
         message: 'Account recovery completed successfully',
@@ -199,6 +230,7 @@ describe('2FA Routes', () => {
     });
 
     it('should reject invalid recovery token', async () => {
+      // Expected error:
       const expectedError = {
         statusCode: 400,
         message: 'Invalid or expired recovery token',
@@ -210,8 +242,9 @@ describe('2FA Routes', () => {
 
   describe('POST /check-device', () => {
     it('should verify remembered device', async () => {
-      const expectedResponse: { isRemembered: boolean } = {
-        isRemembered: true,
+      // Expected response:
+      const expectedResponse = {
+        isRemembered: expect.any(Boolean),
       };
 
       expect(typeof expectedResponse.isRemembered).toBe('boolean');
@@ -220,6 +253,7 @@ describe('2FA Routes', () => {
 
   describe('Error Handling', () => {
     it('should return 400 for invalid request body', async () => {
+      // Invalid token (not 6 digits)
       const expectedError = {
         statusCode: 400,
         error: 'Invalid request',
@@ -229,6 +263,7 @@ describe('2FA Routes', () => {
     });
 
     it('should return 401 for unauthorized access', async () => {
+      // Missing or invalid verification token
       const expectedError = {
         statusCode: 401,
         error: 'Invalid verification token',
@@ -238,6 +273,7 @@ describe('2FA Routes', () => {
     });
 
     it('should return 500 for server errors', async () => {
+      // Unexpected server error
       const expectedError = {
         statusCode: 500,
         error: 'Failed to setup 2FA',

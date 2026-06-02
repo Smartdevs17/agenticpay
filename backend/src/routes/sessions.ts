@@ -9,8 +9,6 @@ import {
   createSession
 } from '../services/session.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { bruteForceProtection, recordLoginAttempt } from '../middleware/brute-force.js';
-import { lockoutManager } from '../services/auth/lockout-manager.js';
 
 export const sessionsRouter = Router();
 
@@ -33,9 +31,7 @@ sessionsRouter.get('/history', asyncHandler(async (req, res) => {
 }));
 
 // Create a new session (Mock login)
-sessionsRouter.post('/login', bruteForceProtection({
-  accountResolver: (req) => String(req.headers['x-user-id'] ?? req.body?.email ?? 'user_default'),
-}), asyncHandler(async (req, res) => {
+sessionsRouter.post('/login', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { deviceId, browser, os } = req.body;
   
@@ -47,38 +43,8 @@ sessionsRouter.post('/login', bruteForceProtection({
     os: os || 'unknown',
     ip
   });
-
-  await recordLoginAttempt(req, true);
   
   res.json({ session });
-}));
-
-sessionsRouter.post('/login/failure', bruteForceProtection({
-  accountResolver: (req) => String(req.headers['x-user-id'] ?? req.body?.email ?? 'user_default'),
-}), asyncHandler(async (req, res) => {
-  const result = await recordLoginAttempt(req, false, 'invalid_credentials');
-  res.status(result.lockedUntil ? 423 : 401).json({
-    error: result.lockedUntil ? 'Account locked' : 'Invalid credentials',
-    lockedUntil: result.lockedUntil ? new Date(result.lockedUntil).toISOString() : undefined,
-    captchaRequired: res.locals.lockoutStatus?.captchaRequired ?? false,
-    unlockToken: process.env.NODE_ENV === 'production' ? undefined : result.unlockToken,
-  });
-}));
-
-sessionsRouter.post('/unlock', asyncHandler(async (req, res) => {
-  const userId = String(req.body?.userId ?? getUserId(req));
-  const unlocked = lockoutManager.unlockAccount(userId, typeof req.body?.token === 'string' ? req.body.token : undefined);
-  if (!unlocked) throw new AppError(404, 'No lockout found for account', 'LOCKOUT_NOT_FOUND');
-  res.json({ success: true });
-}));
-
-// Terminate all other sessions
-sessionsRouter.delete('/others/:currentId', asyncHandler(async (req, res) => {
-  const userId = getUserId(req);
-  const currentId = req.params.currentId as string;
-
-  const count = terminateOtherSessions(userId, currentId);
-  res.json({ success: true, terminatedCount: count });
 }));
 
 // Terminate a specific session
@@ -91,6 +57,15 @@ sessionsRouter.delete('/:id', asyncHandler(async (req, res) => {
   }
   
   res.json({ success: true });
+}));
+
+// Terminate all other sessions
+sessionsRouter.delete('/others/:currentId', asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const currentId = req.params.currentId as string;
+  
+  const count = terminateOtherSessions(userId, currentId);
+  res.json({ success: true, terminatedCount: count });
 }));
 
 // Trust a device

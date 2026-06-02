@@ -16,8 +16,6 @@ import {
   listScheduledBatches,
   cancelScheduledBatch,
   getScheduledBatch,
-  rollbackBatch,
-  getBatchHistory,
 } from '../services/batch.js';
 import { batchSubmitSchema, batchPaymentRowSchema } from '../schemas/batch.js';
 import type { BatchPaymentRow } from '../schemas/batch.js';
@@ -84,20 +82,12 @@ batchRouter.post(
     const { payments, label } = req.body;
 
     const duplicates = detectDuplicates(payments);
+    if (duplicates.length > 0) {
+      // Warn but don't block — caller can use /parse to preview first
+    }
 
     const record = executeBatch(payments, label);
-    res.status(201).json({
-      ...record,
-      // Warn but don't block — caller can use /parse to preview first.
-      ...(duplicates.length > 0
-        ? {
-            warnings: [
-              `${duplicates.length} duplicate recipient/asset ${duplicates.length === 1 ? 'pair' : 'pairs'} detected`,
-            ],
-            duplicateIndices: duplicates,
-          }
-        : {}),
-    });
+    res.status(201).json(record);
   })
 );
 
@@ -191,33 +181,5 @@ batchRouter.delete(
     const batch = cancelScheduledBatch(id);
     if (!batch) throw new AppError(404, 'Scheduled batch not found or not cancellable', 'NOT_FOUND');
     res.json(batch);
-  })
-);
-
-// POST /:id/rollback — roll back a completed or partially failed batch
-batchRouter.post(
-  '/:id/rollback',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const result = rollbackBatch(id);
-    if (!result) throw new AppError(404, 'Batch not found', 'NOT_FOUND');
-    res.json(result);
-  })
-);
-
-// GET /history/all — batch history with optional status/date filters
-const historyQuerySchema = z.object({
-  status: z.enum(['pending', 'processing', 'completed', 'partial_failure', 'failed']).optional(),
-  from: z.string().optional(),
-  to: z.string().optional(),
-});
-
-batchRouter.get(
-  '/history/all',
-  validate(historyQuerySchema),
-  asyncHandler(async (req, res) => {
-    const { status, from, to } = req.body;
-    const history = getBatchHistory({ status, from, to } as any);
-    res.json({ batches: history, total: history.length });
   })
 );

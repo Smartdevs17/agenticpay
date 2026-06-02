@@ -1,8 +1,11 @@
-const SHELL_CACHE = 'agenticpay_shell_v1';
-const RUNTIME_CACHE = 'agenticpay_runtime_v1';
-const OFFLINE_QUEUE_NAME = 'offline_payment_queue';
+/// <reference lib="webworker" />
 
-const APP_SHELL_URLS = [
+const CACHE_PREFIX = 'agenticpay';
+const SW_VERSION = 'v2';
+const PRECACHE_KEY = `${CACHE_PREFIX}-precache-${SW_VERSION}`;
+const RUNTIME_CACHE_KEY = `${CACHE_PREFIX}-runtime-${SW_VERSION}`;
+
+const PRECACHE_URLS = [
   '/',
   '/auth',
   '/dashboard',
@@ -12,6 +15,20 @@ const APP_SHELL_URLS = [
 ];
 
 declare const self: ServiceWorkerGlobalScope;
+
+interface BackgroundSyncEvent extends ExtendableEvent {
+  readonly tag: string;
+}
+
+interface BackgroundPeriodicSyncEvent extends ExtendableEvent {
+  readonly tag: string;
+}
+
+interface SyncCapableServiceWorkerRegistration extends ServiceWorkerRegistration {
+  sync?: {
+    register(tag: string): Promise<void>;
+  };
+}
 
 interface PaymentRequest {
   id: string;
@@ -25,16 +42,11 @@ interface PaymentRequest {
   error?: string;
 }
 
-interface SyncStatus {
-  isOnline: boolean;
-  lastSyncAt?: number;
-  pendingCount: number;
-  failedCount: number;
-}
+const OFFLINE_QUEUE_NAME = 'offline_payment_queue';
 
 async function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('agenticpay_offline', 1);
+    const request = indexedDB.open('agenticpay_offline', 2);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = () => {
@@ -93,7 +105,7 @@ async function removeFromQueue(id: string): Promise<void> {
 async function syncPayments(): Promise<{ success: number; failed: number }> {
   const queue = await getPaymentQueue();
   const pending = queue.filter(p => p.status === 'pending' || p.status === 'failed');
-  
+
   let success = 0;
   let failed = 0;
 
@@ -136,48 +148,78 @@ async function syncPayments(): Promise<{ success: number; failed: number }> {
   return { success, failed };
 }
 
-function cacheFirst(request: Request): Promise<Response> {
-  return caches.match(request).then(cached => {
-    if (cached) return cached;
-    return fetch(request).then(response => {
-      if (response.ok) {
-        caches.open(RUNTIME_CACHE).then(cache => cache.put(request, response.clone()));
-      }
-      return response;
-    });
-  });
-}
-
-function networkFirst(request: Request): Promise<Response> {
-  return fetch(request)
-    .then(response => {
-      if (response.ok) {
-        caches.open(RUNTIME_CACHE).then(cache => cache.put(request, response.clone()));
-      }
-      return response;
-    })
-    .catch(() => caches.match(request).then(cached => cached || new Response('Offline', { status: 503 })));
-}
-
 self.addEventListener('install', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE).then(cache => cache.addAll(APP_SHELL_URLS))
+    (async () => {
+      const cache = await caches.open(PRECACHE_KEY);
+      await cache.addAll(PRECACHE_URLS);
+    })(),
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(key => key !== SHELL_CACHE && key !== RUNTIME_CACHE)
-          .map(key => caches.delete(key))
-      )
-    )
+    (async () => {
+      const cacheKeys = await caches.keys();
+      await Promise.all(
+        cacheKeys
+          .filter(key => key !== PRECACHE_KEY && key !== RUNTIME_CACHE_KEY)
+          .map(key => caches.delete(key)),
+      );
+      await self.clients.claim();
+    })(),
   );
-  self.clients.claim();
 });
+
+async function cacheFirst(request: Request): Promise<Response> {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(RUNTIME_CACHE_KEY);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    return new Response('Offline', { status: 503 });
+  }
+}
+
+async function networkFirst(request: Request): Promise<Response> {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(RUNTIME_CACHE_KEY);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    return new Response('Offline', { status: 503 });
+  }
+}
+
+async function staleWhileRevalidate(request: Request): Promise<Response> {
+  const cache = await caches.open(RUNTIME_CACHE_KEY);
+  const cached = await cache.match(request);
+
+  const fetchPromise = fetch(request).then(response => {
+    if (response.ok) {
+      cache.put(request, response.clone());
+    }
+    return response;
+  });
+
+  return cached || fetchPromise;
+}
+
+async function networkOnly(request: Request): Promise<Response> {
+  return fetch(request);
+}
 
 self.addEventListener('fetch', (event: FetchEvent) => {
   const { request } = event;
@@ -185,46 +227,57 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 
   if (url.origin !== self.location.origin) return;
 
+  const pathname = url.pathname;
+
   if (request.method !== 'GET') {
     if (navigator.onLine) {
-      event.respondWith(networkFirst(request));
+      event.respondWith(networkOnly(request));
     } else {
       event.respondWith(
         new Response(JSON.stringify({ error: 'offline', queued: true }), {
           status: 202,
           headers: { 'Content-Type': 'application/json' },
-        })
+        }),
       );
     }
     return;
   }
 
-  if (request.mode === 'navigate') {
+  const requestDestination = request.destination;
+
+  if (requestDestination === 'document' || request.mode === 'navigate') {
     event.respondWith(networkFirst(request));
     return;
   }
 
-  if (
-    ['script', 'style', 'image', 'font'].includes(request.destination) ||
-    APP_SHELL_URLS.includes(url.pathname)
-  ) {
+  if (['script', 'style', 'image', 'font'].includes(requestDestination)) {
     event.respondWith(cacheFirst(request));
+    return;
   }
+
+  if (pathname.startsWith('/api/')) {
+    event.respondWith(staleWhileRevalidate(request));
+    return;
+  }
+
+  event.respondWith(networkFirst(request));
 });
 
-self.addEventListener('sync', (event: SyncEvent) => {
-  if (event.tag === 'sync-payments') {
-    event.waitUntil(syncPayments());
+self.addEventListener('sync', ((event: Event) => {
+  const syncEvent = event as BackgroundSyncEvent;
+  if (syncEvent.tag === 'sync-payments') {
+    syncEvent.waitUntil(syncPayments());
   }
-});
+}) as EventListener);
 
-self.addEventListener('periodicsync', (event: PeriodicSyncEvent) => {
-  if (event.tag === 'health-check') {
-    event.waitUntil(
+self.addEventListener('periodicsync', ((event: Event) => {
+  const periodicEvent = event as BackgroundPeriodicSyncEvent;
+  if (periodicEvent.tag === 'health-check') {
+    periodicEvent.waitUntil(
       fetch('/api/v1/health').catch(() => {})
     );
   }
-});
+}) as EventListener);
 
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   const { type, payload } = event.data || {};
@@ -238,10 +291,11 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
         status: 'pending',
         retryCount: 0,
       }).then(() => {
-        if (self.registration.sync) {
-          self.registration.sync.register('sync-payments');
+        const registration = self.registration as SyncCapableServiceWorkerRegistration;
+        if (registration.sync) {
+          registration.sync.register('sync-payments');
         }
-      })
+      }),
     );
   }
 
@@ -256,6 +310,138 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
   if (type === 'SYNC_NOW') {
     event.waitUntil(syncPayments());
   }
+
+  if (type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
+
+// ─── Push Notification Handlers ─────────────────────────────────────────────
+
+interface PushMessage {
+  title: string;
+  body: string;
+  icon?: string;
+  badge?: string;
+  tag?: string;
+  data?: {
+    deepLink?: string;
+    category?: string;
+    [key: string]: any;
+  };
+}
+
+self.addEventListener('push', (event: PushEvent) => {
+  if (!event.data) {
+    console.warn('[SW] Push event without data');
+    return;
+  }
+
+  try {
+    const message: PushMessage = event.data.json();
+
+    // Set default values
+    const options: NotificationOptions = {
+      body: message.body || 'You have a new notification',
+      icon: message.icon || '/icons/notification.png',
+      badge: message.badge || '/icons/badge.png',
+      tag: message.tag || 'notification',
+      requireInteraction:
+        message.data?.category === 'dispute_alert' ||
+        message.data?.category === 'security_alert',
+      data: {
+        ...message.data,
+        timestamp: Date.now(),
+      },
+    };
+
+    // Handle notification grouping
+    if (message.tag) {
+      options.tag = message.tag;
+    }
+
+    event.waitUntil(
+      self.registration.showNotification(message.title || 'Notification', options)
+    );
+  } catch (error) {
+    console.error('[SW] Error handling push event:', error);
+    
+    // Fallback: show generic notification
+    event.waitUntil(
+      self.registration.showNotification('New Notification', {
+        body: 'You have a new message',
+        icon: '/icons/notification.png',
+        badge: '/icons/badge.png',
+      })
+    );
+  }
+});
+
+self.addEventListener('notificationclick', (event: NotificationEvent) => {
+  const notification = event.notification;
+  const deepLink = notification.data?.deepLink;
+
+  // Mark notification as clicked via API
+  if (notification.data?.notificationId) {
+    markNotificationAsClicked(notification.data.notificationId).catch(err =>
+      console.error('[SW] Error marking notification as clicked:', err)
+    );
+  }
+
+  event.notification.close();
+
+  // Handle deep link navigation
+  const targetUrl = deepLink || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      // Check if already a window open
+      for (let i = 0; i < clientList.length; i++) {
+        const client = clientList[i];
+        if (client.url === targetUrl && 'focus' in client) {
+          return client.focus();
+        }
+      }
+
+      // Open new window with deep link
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
+  );
+});
+
+self.addEventListener('notificationclose', (event: NotificationEvent) => {
+  const notification = event.notification;
+
+  // Log notification dismissal (optional)
+  console.log('[SW] Notification closed:', notification.data?.tag);
+
+  // You can send analytics here
+  if (notification.data?.notificationId) {
+    // Could send a dismissal event to analytics service
+  }
+});
+
+/**
+ * Helper function to mark notification as clicked in the backend
+ */
+async function markNotificationAsClicked(notificationId: string): Promise<void> {
+  try {
+    const response = await fetch(`/api/v1/push/mark-clicked/${notificationId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn('[SW] Failed to mark notification as clicked:', response.statusText);
+    }
+  } catch (error) {
+    console.error('[SW] Error marking notification as clicked:', error);
+    // Silently fail - this is not critical
+  }
+}
 
 export default null;

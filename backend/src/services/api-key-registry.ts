@@ -1,6 +1,4 @@
 import type { UserTier } from '../middleware/rate-limit.js';
-import { prisma } from '../lib/prisma.js';
-import { settleGracePeriod } from './keys/rotation.js';
 
 export interface ApiKeyRecord {
   key: string;
@@ -37,28 +35,9 @@ export function lookupApiKey(rawKey: string): ApiKeyRecord | null {
   return KEY_REGISTRY[normalized] ?? null;
 }
 
-export async function lookupApiKeyRecord(rawKey: string): Promise<ApiKeyRecord | null> {
-  const normalized = rawKey.trim();
-  const demo = lookupApiKey(normalized);
-  if (demo) return demo;
-
-  const record = await prisma.apiKey.findUnique({ where: { keyId: normalized } });
-  if (!record) return null;
-
-  const settled = await settleGracePeriod(record);
-  if (!settled.isActive) return null;
-  if (settled.expiresAt && settled.expiresAt.getTime() <= Date.now()) return null;
-
-  return {
-    key: settled.keyId,
-    tier: 'enterprise',
-    label: settled.description ?? settled.keyId,
-  };
-}
-
 export function maskApiKey(key: string): string {
   if (key.length <= 8) return '***';
   return `${key.slice(0, 4)}…${key.slice(-4)}`;
 }
 
-export default { lookupApiKey, lookupApiKeyRecord, maskApiKey };
+export default { lookupApiKey, maskApiKey };

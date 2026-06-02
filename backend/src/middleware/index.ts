@@ -3,10 +3,10 @@ export { circuitBreaker, getCircuitState, getAllCircuits, resetCircuit } from '.
 export { deprecationMiddleware, type DeprecationOptions } from './deprecation.js';
 export { AppError, asyncHandler, notFoundHandler, errorHandler } from './errorHandler.js';
 export { idempotency, clearIdempotencyCache } from './idempotency.js';
-export { initIpAllowlist, addBypassCode, removeBypassCode, setAdminIpAllowlist, clearAdminIpAllowlist, ipAllowlistMiddleware, adminIpAllowlistMiddleware, apiIpAllowlistMiddleware, config as ipAllowlistConfig } from './ip-allowlist.js';
+export { initIpAllowlist, addBypassCode, removeBypassCode, ipAllowlistMiddleware, adminIpAllowlistMiddleware, apiIpAllowlistMiddleware, config as ipAllowlistConfig } from './ip-allowlist.js';
 export { logger, httpLogger } from './logger.js';
 export { type Role, type Action, type AbacContext, roleAtLeast, PermissionEngine, permissionEngine, requirePermission, attachAbacCtx } from './permissions.js';
-export { tokenBucketRateLimit, rateLimit, resolveUserTier, resolveClientKey, getAnalyticsSummary, setQuotaOverride, removeQuotaOverride, listQuotaOverrides, type UserTier, type TokenBucketConfig, type RateLimitOptions, type QuotaOverride, DEFAULT_TIER_CONFIGS, SANDBOX_TIER_CONFIGS, ENDPOINT_CONFIGS } from './rate-limit.js';
+export { tokenBucketRateLimit, resolveUserTier, resolveClientKey, getAnalyticsSummary, type UserTier, type TokenBucketConfig, type RateLimitOptions, DEFAULT_TIER_CONFIGS, SANDBOX_TIER_CONFIGS, ENDPOINT_CONFIGS } from './rate-limit.js';
 export { requestIdMiddleware, REQUEST_ID_HEADER } from './requestId.js';
 export { requireFlag } from './requireFlag.js';
 export { sanitizeInput, contentSecurityPolicy, validateInput, InputSanitizer, createSecurityRateLimit, type SanitizeOptions } from './sanitize.js';
@@ -15,31 +15,7 @@ export { sessionMiddleware } from './session.js';
 export { slaTrackingMiddleware } from './slaTracking.js';
 export { traceMiddleware, TRACE_ID_HEADER } from './trace.js';
 export { cacheControlNoStore, CACHE_NOSTORE_HEADER, VARY_HEADER } from './cache-control.js';
-export { createCorsMiddleware, cors, type CorsMiddlewareOptions, DEFAULT_METHODS, DEFAULT_ALLOWED_HEADERS } from './cors.js';
 export { validate } from './validate.js';
-export {
-  validateAndSanitize,
-  validateRequest as validateRequestWithSanitization,
-  validateBody,
-  commonSchemas,
-  type ValidationOptions,
-  type ValidationSchemas,
-} from './validation.js';
 export { versionMiddleware } from './versioning.js';
-export { verifyWebhookProvider, verifyCustomProviderWebhookWithKeys, webhookVerifiers, captureRawBody, webhookJsonParser, configureWebhookVerification, resetWebhookVerificationConfig, type WebhookVerificationConfig } from './webhookVerification.js';
+export { verifyWebhook, webhookVerifiers, rawBodyCapture, type WebhookVerificationConfig } from './webhookVerification.js';
 export { composeMiddleware, type MiddlewareFunction, type MiddlewareChain } from './compose.js';
-export { tokenAuthMiddleware } from './token-auth.js';
-export { hmacAuthMiddleware, invalidateKeyCache, HEADER_SIGNATURE, HEADER_TIMESTAMP, HEADER_NONCE } from './hmac-auth.js';
-export {
-  authMiddleware,
-  createAuthMiddleware,
-  DEFAULT_AUTH_STRATEGIES,
-  sessionStrategy,
-  hmacStrategy,
-  tokenStrategy,
-  apiKeyStrategy,
-  type AuthStrategy,
-  type AuthPrincipal,
-  type AuthMethod,
-} from './auth.js';
-export { requestCoalescer, getCoalesceMetrics, setCoalesceConfig, resetCoalesceStore } from './request-coalescer.js';

@@ -7,7 +7,6 @@ import {
 } from './helpers/test-data';
 import {
   cleanupTestState,
-  mockDisputesApi,
   mockOnboardingApi,
   mockSandboxPaymentsApi,
 } from './helpers/api-mocks';
@@ -17,7 +16,6 @@ type Fixtures = {
   authenticatedPage: Page;
   withOnboardingMocks: void;
   withPaymentMocks: void;
-  withDisputesMocks: void;
 };
 
 export const test = base.extend<Fixtures>({
@@ -51,11 +49,6 @@ export const test = base.extend<Fixtures>({
 
   withPaymentMocks: async ({ page }, use) => {
     await mockSandboxPaymentsApi(page);
-    await use();
-  },
-
-  withDisputesMocks: async ({ page }, use) => {
-    await mockDisputesApi(page);
     await use();
   },
 });

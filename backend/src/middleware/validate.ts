@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodSchema, ZodError, ZodIssue } from 'zod';
-import { AppError } from '../types/errors.js';
 
 export interface ValidationTargets {
   body?: ZodSchema;
@@ -13,15 +12,6 @@ function formatIssues(issues: ZodIssue[]) {
     path: err.path.join('.') || 'root',
     message: err.message,
   }));
-}
-
-function isZodError(error: unknown): error is ZodError {
-  return error instanceof ZodError || (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as { name?: string }).name === 'ZodError' &&
-    Array.isArray((error as { errors?: unknown }).errors)
-  );
 }
 
 /**
@@ -42,8 +32,12 @@ export const validateRequest = (targets: ValidationTargets) => {
       }
       next();
     } catch (error) {
-      if (isZodError(error)) {
-        return next(new AppError(400, 'Request validation failed', 'ERR_VALIDATION_FAILED', formatIssues(error.errors)));
+      if (error instanceof ZodError) {
+        return res.status(400).json({
+          error: 'VALIDATION_FAILED',
+          message: 'Request validation failed',
+          details: formatIssues(error.errors),
+        });
       }
       next(error);
     }

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { MessageQueue, QueueJob } from './queue.js';
+import { messageQueue, QueueJob } from '../services/queue.js';
 import {
-  messageQueue,
   queueEmail,
   queueNotification,
   queueWebhook,
@@ -9,20 +8,11 @@ import {
   processNotificationJob,
   processWebhookJob,
   registerDefaultProcessors,
-} from './queue-producers.js';
+} from '../services/queue-producers.js';
 
 describe('Message Queue', () => {
   beforeEach(() => {
     messageQueue.stop();
-    messageQueue.updateConfig({
-      maxAttempts: 3,
-      retryDelayMs: 1000,
-      retryBackoffMultiplier: 2,
-      maxRetryDelayMs: 60 * 1000,
-      pollIntervalMs: 1000,
-      batchSize: 10,
-      enableDlq: true,
-    });
     // Clear all jobs
     const jobs = messageQueue.getAllJobs();
     jobs.forEach((job) => {
@@ -170,7 +160,7 @@ describe('Message Queue', () => {
       const failingProcessor = vi.fn().mockRejectedValue(new Error('Processing failed'));
       messageQueue.registerProcessor('test-queue', failingProcessor);
 
-      const job = await messageQueue.enqueue('test-queue', { test: true }, { maxAttempts: 3 });
+      const job = await messageQueue.enqueue('test-queue', { test: true }, 3);
 
       messageQueue.start();
 
@@ -186,9 +176,9 @@ describe('Message Queue', () => {
     it('should fail after max attempts', async () => {
       const failingProcessor = vi.fn().mockRejectedValue(new Error('Processing failed'));
       messageQueue.registerProcessor('test-queue', failingProcessor);
-      messageQueue.updateConfig({ maxAttempts: 2, retryDelayMs: 100, enableDlq: false });
+      messageQueue.updateConfig({ maxAttempts: 2, retryDelayMs: 100 });
 
-      const job = await messageQueue.enqueue('test-queue', { test: true }, { maxAttempts: 2 });
+      const job = await messageQueue.enqueue('test-queue', { test: true }, 2);
 
       messageQueue.start();
 
@@ -263,37 +253,6 @@ describe('Message Queue', () => {
   });
 
   describe('Job Management', () => {
-    it('processes higher priority jobs first within a batch', async () => {
-      const queue = new MessageQueue({ batchSize: 2 });
-      const processed: string[] = [];
-      queue.registerProcessor('priority-test', async (job) => {
-        processed.push(String((job.data as { label: string }).label));
-      });
-
-      await queue.enqueue('priority-test', { label: 'low' }, { priority: 'low' });
-      await queue.enqueue('priority-test', { label: 'critical' }, { priority: 'critical' });
-
-      await queue.processNextBatch();
-
-      expect(processed).toEqual(['critical', 'low']);
-    });
-
-    it('does not process delayed jobs before their scheduled time', async () => {
-      vi.useFakeTimers();
-      const queue = new MessageQueue({ batchSize: 1 });
-      const processor = vi.fn();
-      queue.registerProcessor('delayed', processor);
-
-      await queue.enqueue('delayed', { ok: true }, { delayMs: 1000 });
-      await queue.processNextBatch();
-      expect(processor).not.toHaveBeenCalled();
-
-      vi.advanceTimersByTime(1000);
-      await queue.processNextBatch();
-      expect(processor).toHaveBeenCalledOnce();
-      vi.useRealTimers();
-    });
-
     it('should retry a failed job', async () => {
       const job = await messageQueue.enqueue('test-queue', { test: true });
       const updatedJob = messageQueue.getJob(job.id)!;

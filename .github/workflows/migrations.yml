@@ -1,6 +1,16 @@
 name: Database Migrations
 
-on: workflow_dispatch
+on:
+  pull_request:
+    paths:
+      - 'backend/prisma/**'
+      - 'backend/migrations/**'
+      - '.github/workflows/migrations.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'backend/prisma/**'
+      - 'backend/migrations/**'
 
 concurrency:
   group: migrations-${{ github.ref }}

@@ -3,19 +3,151 @@
 #[cfg(test)]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec};
 
-pub mod common;
-pub mod dispute;
-pub mod escrow;
-pub mod htlc;
-pub mod multisig;
-pub mod storage;
+// ---------------------------------------------------------------------------
+// Multi-signature wallet types
+// ---------------------------------------------------------------------------
 
-pub use common::*;
-pub use storage::{
-    ApprovalBitmap, LazyKey, LazyValue, PackedProjectHeader, ProjectStatusV2, ProjectV2, StorageKey,
-};
+/// On-chain status for a multisig transaction proposal.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum MultisigProposalStatus {
+    Pending,
+    Executed,
+    Rejected,
+    Expired,
+    Cancelled,
+}
+
+/// A multisig wallet configuration stored on-chain.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct MultisigWallet {
+    /// Unique wallet id (same as the storage counter key).
+    pub id: u64,
+    /// Ordered list of signer addresses.
+    pub signers: Vec<Address>,
+    /// Minimum number of approvals needed to execute a proposal.
+    pub threshold: u32,
+    /// Ledger timestamp after which new proposals auto-expire (0 = no timeout).
+    pub timeout_ledgers: u64,
+    /// Whether the wallet is active.
+    pub active: bool,
+}
+
+/// An on-chain multisig transaction proposal.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct MultisigProposal {
+    pub id: u64,
+    pub wallet_id: u64,
+    /// Amount in stroops (or smallest denomination).
+    pub amount: i128,
+    pub recipient: Address,
+    pub description: String,
+    pub status: MultisigProposalStatus,
+    /// Addresses that have approved this proposal.
+    pub approvals: Vec<Address>,
+    /// Addresses that have rejected this proposal.
+    pub rejections: Vec<Address>,
+    pub created_at: u64,
+    /// Ledger timestamp at which the proposal expires (0 = never).
+    pub expires_at: u64,
+}
+
+#[contracttype]
+pub enum MultisigDataKey {
+    WalletCount,
+    Wallet(u64),
+    ProposalCount,
+    Proposal(u64),
+}
+
+// ---------------------------------------------------------------------------
+// Reentrancy guard key
+// ---------------------------------------------------------------------------
+// Soroban's execution model is single-threaded and does not allow re-entrant
+// calls into the same contract instance within a single transaction. However,
+// cross-contract calls can still create logical reentrancy if state is not
+// committed before the call. We enforce the checks-effects-interactions (CEI)
+// pattern throughout and additionally maintain an explicit reentrancy latch in
+// instance storage so that any future cross-contract path is blocked.
+//
+// The latch is stored under `DataKey::ReentrancyLock` and is set to `true`
+// while a mutative function body is executing. Any re-entrant call that
+// reaches the `_acquire_lock` helper will panic with "reentrant call".
+// ---------------------------------------------------------------------------
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProjectStatus {
+    Created,
+    Funded,
+    InProgress,
+    WorkSubmitted,
+    Verified,
+    Completed,
+    Disputed,
+    Cancelled,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Project {
+    pub id: u64,
+    pub client: Address,
+    pub freelancer: Address,
+    pub amount: i128,
+    pub deposited: i128,
+    pub status: ProjectStatus,
+    pub github_repo: String,
+    pub description: String,
+    pub created_at: u64,
+    /// Unix timestamp deadline. 0 means no deadline.
+    pub deadline: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Receipt {
+    pub id: u64,
+    pub project_id: u64,
+    pub amount: i128,
+    pub currency: String,
+    pub sender: Address,
+    pub recipient: Address,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Project(u64),
+    ProjectCount,
+    Receipt(u64),
+    ReceiptCount,
+    Admin,
+    Metadata(String),
+    /// Reentrancy latch: `true` while a mutative function is executing.
+    ReentrancyLock,
+    /// Emergency circuit breaker: `true` means the contract is paused.
+    Paused,
+    // Multisig wallet storage
+    MultisigWalletCount,
+    MultisigWallet(u64),
+    MultisigProposalCount,
+    MultisigProposal(u64),
+}
+
+/// Input parameters for batch project creation.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ProjectInput {
+    pub freelancer: Address,
+    pub amount: i128,
+    pub description: String,
+    pub github_repo: String,
+}
 
 #[contract]
 pub struct AgenticPayContract;
@@ -23,38 +155,29 @@ pub struct AgenticPayContract;
 #[contractimpl]
 impl AgenticPayContract {
     // -----------------------------------------------------------------------
-    // Gas-optimised lazy storage helpers
-    // -----------------------------------------------------------------------
-    // ReentrancyLock and Paused are read on every mutative call but written
-    // only during initialise / pause / unpause.  We use `LazyValue` to avoid
-    // paying the initialise SSTORE cost for paths that never toggle the
-    // circuit breaker or trigger reentrancy — the first read returns the
-    // default without a storage write.
-
-    fn _lock() -> LazyValue<bool> {
-        LazyValue::new(LazyKey::ReentrancyLock, false)
-    }
-
-    fn _pause_flag() -> LazyValue<bool> {
-        LazyValue::new(LazyKey::Paused, false)
-    }
-
-    // -----------------------------------------------------------------------
     // Internal reentrancy guard helpers
     // -----------------------------------------------------------------------
 
     /// Acquire the reentrancy latch. Panics with "reentrant call" if already
     /// held, providing cross-function and cross-contract reentrancy protection.
     fn _acquire_lock(env: &Env) {
-        let locked = Self::_lock().get(env);
+        let locked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReentrancyLock)
+            .unwrap_or(false);
         assert!(!locked, "reentrant call");
-        Self::_lock().set(env, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyLock, &true);
     }
 
     /// Release the reentrancy latch. Must be called at the end of every
     /// mutative function that called `_acquire_lock`.
     fn _release_lock(env: &Env) {
-        Self::_lock().set(env, &false);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyLock, &false);
     }
 
     // -----------------------------------------------------------------------
@@ -63,7 +186,11 @@ impl AgenticPayContract {
 
     /// Panic with "contract paused" when the emergency circuit breaker is on.
     fn _require_not_paused(env: &Env) {
-        let paused = Self::_pause_flag().get(env);
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
         assert!(!paused, "contract paused");
     }
 
@@ -77,10 +204,9 @@ impl AgenticPayContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::ProjectCount, &0u64);
         env.storage().instance().set(&DataKey::ReceiptCount, &0u64);
-        // ReentrancyLock and Paused are lazily initialised via LazyValue —
-        // the first read returns `false` without a storage write.  This saves
-        // two SSTORE operations (~40,000 gas) for contracts that never pause
-        // or trigger the reentrancy latch.
+        // Reentrancy latch starts unlocked; circuit breaker starts unpaused.
+        env.storage().instance().set(&DataKey::ReentrancyLock, &false);
+        env.storage().instance().set(&DataKey::Paused, &false);
     }
 
     fn get_admin(env: &Env) -> Address {
@@ -104,8 +230,10 @@ impl AgenticPayContract {
         // Acquire lock so pause cannot be called re-entrantly.
         Self::_acquire_lock(&env);
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events()
-            .publish((symbol_short!("circuit"), symbol_short!("paused")), true);
+        env.events().publish(
+            (symbol_short!("circuit"), symbol_short!("paused")),
+            true,
+        );
         Self::_release_lock(&env);
     }
 
@@ -117,8 +245,10 @@ impl AgenticPayContract {
         // Acquire lock so unpause cannot be called re-entrantly.
         Self::_acquire_lock(&env);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.events()
-            .publish((symbol_short!("circuit"), symbol_short!("paused")), false);
+        env.events().publish(
+            (symbol_short!("circuit"), symbol_short!("paused")),
+            false,
+        );
         Self::_release_lock(&env);
     }
 
@@ -420,9 +550,7 @@ impl AgenticPayContract {
             timestamp: env.ledger().timestamp(),
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Receipt(count), &receipt);
+        env.storage().persistent().set(&DataKey::Receipt(count), &receipt);
         env.storage().instance().set(&DataKey::ReceiptCount, &count);
         env.events().publish(
             (symbol_short!("receipt"), symbol_short!("issued")),
@@ -434,7 +562,36 @@ impl AgenticPayContract {
 
     /// Raise a dispute on a project.
     pub fn raise_dispute(env: Env, project_id: u64, caller: Address) {
-        dispute::raise_dispute(&env, project_id, caller)
+        // --- Checks ---
+        Self::_require_not_paused(&env);
+        caller.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut project: Project = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Project(project_id))
+            .expect("Project not found");
+
+        assert!(
+            caller == project.client || caller == project.freelancer,
+            "Only client or freelancer can dispute"
+        );
+
+        // --- Effects ---
+        project.status = ProjectStatus::Disputed;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Project(project_id), &project);
+
+        // --- Interactions (events only) ---
+        env.events().publish(
+            (symbol_short!("project"), symbol_short!("disputed")),
+            (project_id, caller),
+        );
+
+        Self::_release_lock(&env);
     }
 
     /// Admin resolves a dispute.
@@ -443,7 +600,49 @@ impl AgenticPayContract {
     /// transfer interaction (currently stubbed; the TODO comments mark where
     /// Stellar token calls will be inserted).
     pub fn resolve_dispute(env: Env, project_id: u64, admin: Address, release_to_freelancer: bool) {
-        dispute::resolve_dispute(&env, project_id, admin, release_to_freelancer)
+        // --- Checks ---
+        Self::_require_not_paused(&env);
+        admin.require_auth();
+        Self::_acquire_lock(&env);
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        assert!(admin == stored_admin, "Only admin can resolve disputes");
+
+        let mut project: Project = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Project(project_id))
+            .expect("Project not found");
+
+        assert!(
+            project.status == ProjectStatus::Disputed,
+            "Project must be disputed"
+        );
+
+        // --- Effects (zero deposited BEFORE any token transfer interaction) ---
+        let _refund_amount = project.deposited;
+        project.deposited = 0;
+
+        if release_to_freelancer {
+            project.status = ProjectStatus::Completed;
+        } else {
+            project.status = ProjectStatus::Cancelled;
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Project(project_id), &project);
+
+        // --- Interactions ---
+        // TODO: Transfer `_refund_amount` to freelancer or client via
+        //       Stellar token contract. The state is already committed above
+        //       so any re-entrant call will see deposited == 0.
+
+        Self::_release_lock(&env);
     }
 
     /// Check if a project's deadline has expired and auto-cancel if so.
@@ -555,8 +754,10 @@ impl AgenticPayContract {
             .persistent()
             .set(&DataKey::Metadata(key.clone()), &value);
 
-        env.events()
-            .publish((symbol_short!("meta"), symbol_short!("set")), (key, value));
+        env.events().publish(
+            (symbol_short!("meta"), symbol_short!("set")),
+            (key, value),
+        );
 
         Self::_release_lock(&env);
     }
@@ -574,12 +775,12 @@ impl AgenticPayContract {
         let stored_admin = Self::get_admin(&env);
         assert!(admin == stored_admin, "Only admin can remove metadata");
 
-        env.storage()
-            .persistent()
-            .remove(&DataKey::Metadata(key.clone()));
+        env.storage().persistent().remove(&DataKey::Metadata(key.clone()));
 
-        env.events()
-            .publish((symbol_short!("meta"), symbol_short!("del")), key);
+        env.events().publish(
+            (symbol_short!("meta"), symbol_short!("del")),
+            key,
+        );
 
         Self::_release_lock(&env);
     }
@@ -610,76 +811,12 @@ impl AgenticPayContract {
 
     /// Return the contract version for tracking upgrades.
     pub fn version(_env: Env) -> u32 {
-        2
-    }
-
-    // -----------------------------------------------------------------------
-    // Storage migration (v1 → v2 packed layout)
-    // -----------------------------------------------------------------------
-
-    /// Migrate all existing projects from the v1 DataKey layout to the
-    /// v2 packed StorageKey layout.  Admin-only.  Call this once after an
-    /// upgrade to realise gas savings on existing data.
-    ///
-    /// # Arguments
-    /// * `admin` - Must match the stored admin address
-    /// * `project_count` - The current `ProjectCount` value (all projects
-    ///   1..=project_count will be migrated)
-    pub fn migrate_storage(env: Env, admin: Address, project_count: u64) {
-        admin.require_auth();
-        let stored_admin = Self::get_admin(&env);
-        assert!(admin == stored_admin, "Only admin can migrate storage");
-
-        for id in 1..=project_count {
-            if env.storage().persistent().has(&DataKey::Project(id)) {
-                let old: crate::Project = env
-                    .storage()
-                    .persistent()
-                    .get(&DataKey::Project(id))
-                    .expect("Project not found during migration");
-
-                let new = ProjectV2 {
-                    id: old.id,
-                    client: old.client,
-                    freelancer: old.freelancer,
-                    amount: old.amount,
-                    deposited: old.deposited,
-                    header: PackedProjectHeader::new(
-                        match old.status {
-                            crate::ProjectStatus::Created => ProjectStatusV2::Created,
-                            crate::ProjectStatus::Funded => ProjectStatusV2::Funded,
-                            crate::ProjectStatus::InProgress => ProjectStatusV2::InProgress,
-                            crate::ProjectStatus::WorkSubmitted => ProjectStatusV2::WorkSubmitted,
-                            crate::ProjectStatus::Verified => ProjectStatusV2::Verified,
-                            crate::ProjectStatus::Completed => ProjectStatusV2::Completed,
-                            crate::ProjectStatus::Disputed => ProjectStatusV2::Disputed,
-                            crate::ProjectStatus::Cancelled => ProjectStatusV2::Cancelled,
-                        },
-                        old.created_at,
-                        old.deadline,
-                    ),
-                    github_repo: old.github_repo,
-                    description: old.description,
-                };
-
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::V2(StorageKey::Project(id)), &new);
-                env.storage().persistent().remove(&DataKey::Project(id));
-            }
-        }
-
-        env.events().publish(
-            (symbol_short!("storage"), symbol_short!("migrated")),
-            project_count,
-        );
+        1
     }
 
     // -----------------------------------------------------------------------
     // Multi-signature wallet management
     // -----------------------------------------------------------------------
-    // Business logic lives in the `multisig` module; these entry points only
-    // adapt the `#[contractimpl]` calling convention (owned `Env`) to it.
 
     /// Create a new multisig wallet with the given signers and threshold.
     ///
@@ -698,12 +835,54 @@ impl AgenticPayContract {
         threshold: u32,
         timeout_ledgers: u64,
     ) -> u64 {
-        multisig::create_wallet(&env, creator, signers, threshold, timeout_ledgers)
+        Self::_require_not_paused(&env);
+        creator.require_auth();
+        Self::_acquire_lock(&env);
+
+        assert!(signers.len() >= 2, "At least 2 signers required");
+        assert!(threshold >= 1, "Threshold must be at least 1");
+        assert!(
+            threshold as u32 <= signers.len(),
+            "Threshold cannot exceed number of signers"
+        );
+
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigWalletCount)
+            .unwrap_or(0);
+        count += 1;
+
+        let wallet = MultisigWallet {
+            id: count,
+            signers,
+            threshold,
+            timeout_ledgers,
+            active: true,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigWallet(count), &wallet);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigWalletCount, &count);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("created")),
+            (count, threshold),
+        );
+
+        Self::_release_lock(&env);
+        count
     }
 
     /// Retrieve a multisig wallet by id.
     pub fn get_multisig_wallet(env: Env, wallet_id: u64) -> MultisigWallet {
-        multisig::get_wallet(&env, wallet_id)
+        env.storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found")
     }
 
     /// Add a new signer to an existing wallet.
@@ -711,8 +890,45 @@ impl AgenticPayContract {
     /// Requires the caller to already be a signer (one-of-N consensus is
     /// enforced off-chain via the proposal flow; this entry-point is for
     /// direct admin-level additions authorized by the wallet creator).
-    pub fn add_multisig_signer(env: Env, authorizer: Address, wallet_id: u64, new_signer: Address) {
-        multisig::add_signer(&env, authorizer, wallet_id, new_signer)
+    pub fn add_multisig_signer(
+        env: Env,
+        authorizer: Address,
+        wallet_id: u64,
+        new_signer: Address,
+    ) {
+        Self::_require_not_paused(&env);
+        authorizer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found");
+
+        assert!(wallet.active, "Wallet is inactive");
+
+        // Ensure authorizer is an existing signer.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == authorizer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Authorizer is not a signer");
+
+        wallet.signers.push_back(new_signer.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigWallet(wallet_id), &wallet);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("sgn_add")),
+            (wallet_id, new_signer),
+        );
+
+        Self::_release_lock(&env);
     }
 
     /// Remove a signer from an existing wallet.
@@ -724,7 +940,58 @@ impl AgenticPayContract {
         wallet_id: u64,
         signer_to_remove: Address,
     ) {
-        multisig::remove_signer(&env, authorizer, wallet_id, signer_to_remove)
+        Self::_require_not_paused(&env);
+        authorizer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found");
+
+        assert!(wallet.active, "Wallet is inactive");
+
+        let mut is_authorizer_signer = false;
+        let mut remove_idx: Option<u32> = None;
+        for i in 0..wallet.signers.len() {
+            let s = wallet.signers.get(i).unwrap();
+            if s == authorizer {
+                is_authorizer_signer = true;
+            }
+            if s == signer_to_remove {
+                remove_idx = Some(i);
+            }
+        }
+        assert!(is_authorizer_signer, "Authorizer is not a signer");
+        assert!(remove_idx.is_some(), "Signer to remove not found");
+
+        let new_len = wallet.signers.len() - 1;
+        assert!(new_len >= 2, "Cannot reduce below 2 signers");
+        assert!(
+            wallet.threshold as u32 <= new_len,
+            "Removal would make threshold unreachable"
+        );
+
+        // Rebuild signers vec without the removed address.
+        let mut new_signers = Vec::new(&env);
+        for i in 0..wallet.signers.len() {
+            if Some(i) != remove_idx {
+                new_signers.push_back(wallet.signers.get(i).unwrap());
+            }
+        }
+        wallet.signers = new_signers;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigWallet(wallet_id), &wallet);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("sgn_rem")),
+            (wallet_id, signer_to_remove),
+        );
+
+        Self::_release_lock(&env);
     }
 
     /// Create a transaction proposal for a multisig wallet.
@@ -739,115 +1006,315 @@ impl AgenticPayContract {
         recipient: Address,
         description: String,
     ) -> u64 {
-        multisig::create_proposal(&env, proposer, wallet_id, amount, recipient, description)
+        Self::_require_not_paused(&env);
+        proposer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found");
+        assert!(wallet.active, "Wallet is inactive");
+        assert!(amount > 0, "Amount must be positive");
+
+        // Ensure proposer is a signer.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == proposer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Proposer is not a signer of this wallet");
+
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigProposalCount)
+            .unwrap_or(0);
+        count += 1;
+
+        let now = env.ledger().timestamp();
+        let expires_at = if wallet.timeout_ledgers > 0 {
+            now + wallet.timeout_ledgers
+        } else {
+            0
+        };
+
+        // Proposer's approval is implicit.
+        let mut initial_approvals = Vec::new(&env);
+        initial_approvals.push_back(proposer.clone());
+
+        let proposal = MultisigProposal {
+            id: count,
+            wallet_id,
+            amount,
+            recipient: recipient.clone(),
+            description,
+            status: MultisigProposalStatus::Pending,
+            approvals: initial_approvals,
+            rejections: Vec::new(&env),
+            created_at: now,
+            expires_at,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(count), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigProposalCount, &count);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("prop")),
+            (count, wallet_id, amount, recipient),
+        );
+
+        Self::_release_lock(&env);
+        count
     }
 
     /// Approve a multisig proposal.
     ///
     /// When the approval count reaches the wallet threshold the proposal is
     /// automatically marked Executed and a payment event is emitted.
-    pub fn approve_multisig_proposal(env: Env, signer: Address, proposal_id: u64) {
-        multisig::approve_proposal(&env, signer, proposal_id)
+    pub fn approve_multisig_proposal(
+        env: Env,
+        signer: Address,
+        proposal_id: u64,
+    ) {
+        Self::_require_not_paused(&env);
+        signer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        assert!(
+            proposal.status == MultisigProposalStatus::Pending,
+            "Proposal is not pending"
+        );
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(proposal.wallet_id))
+            .expect("Wallet not found");
+
+        // Auto-expire check.
+        if proposal.expires_at > 0 && env.ledger().timestamp() >= proposal.expires_at {
+            proposal.status = MultisigProposalStatus::Expired;
+            env.storage()
+                .persistent()
+                .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+            Self::_release_lock(&env);
+            panic!("Proposal has expired");
+        }
+
+        // Verify signer membership.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == signer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Not a signer of this wallet");
+
+        // Idempotency: skip if already approved.
+        for i in 0..proposal.approvals.len() {
+            if proposal.approvals.get(i).unwrap() == signer {
+                Self::_release_lock(&env);
+                return;
+            }
+        }
+
+        proposal.approvals.push_back(signer.clone());
+
+        if proposal.approvals.len() >= wallet.threshold {
+            proposal.status = MultisigProposalStatus::Executed;
+            env.events().publish(
+                (symbol_short!("msig"), symbol_short!("exec")),
+                (proposal_id, proposal.wallet_id, proposal.amount, proposal.recipient.clone()),
+            );
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+
+        Self::_release_lock(&env);
     }
 
     /// Reject a multisig proposal.
     ///
     /// If the number of rejections makes the threshold unreachable the
     /// proposal is marked Rejected immediately.
-    pub fn reject_multisig_proposal(env: Env, signer: Address, proposal_id: u64) {
-        multisig::reject_proposal(&env, signer, proposal_id)
+    pub fn reject_multisig_proposal(
+        env: Env,
+        signer: Address,
+        proposal_id: u64,
+    ) {
+        Self::_require_not_paused(&env);
+        signer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        assert!(
+            proposal.status == MultisigProposalStatus::Pending,
+            "Proposal is not pending"
+        );
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(proposal.wallet_id))
+            .expect("Wallet not found");
+
+        // Verify signer membership.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == signer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Not a signer of this wallet");
+
+        // Idempotency.
+        for i in 0..proposal.rejections.len() {
+            if proposal.rejections.get(i).unwrap() == signer {
+                Self::_release_lock(&env);
+                return;
+            }
+        }
+
+        proposal.rejections.push_back(signer);
+
+        // If enough rejections to block the threshold, finalize.
+        let blocking = wallet.signers.len() - wallet.threshold + 1;
+        if proposal.rejections.len() >= blocking {
+            proposal.status = MultisigProposalStatus::Rejected;
+            env.events().publish(
+                (symbol_short!("msig"), symbol_short!("reject")),
+                (proposal_id, proposal.wallet_id),
+            );
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+
+        Self::_release_lock(&env);
     }
 
     /// Cancel a pending proposal (any signer may cancel).
-    pub fn cancel_multisig_proposal(env: Env, signer: Address, proposal_id: u64) {
-        multisig::cancel_proposal(&env, signer, proposal_id)
+    pub fn cancel_multisig_proposal(
+        env: Env,
+        signer: Address,
+        proposal_id: u64,
+    ) {
+        Self::_require_not_paused(&env);
+        signer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        assert!(
+            proposal.status == MultisigProposalStatus::Pending,
+            "Only pending proposals can be cancelled"
+        );
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(proposal.wallet_id))
+            .expect("Wallet not found");
+
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == signer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Not a signer of this wallet");
+
+        proposal.status = MultisigProposalStatus::Cancelled;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("cancel")),
+            (proposal_id, proposal.wallet_id),
+        );
+
+        Self::_release_lock(&env);
     }
 
     /// Retrieve a multisig proposal by id.
     pub fn get_multisig_proposal(env: Env, proposal_id: u64) -> MultisigProposal {
-        multisig::get_proposal(&env, proposal_id)
+        env.storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found")
     }
 
     /// Check and auto-expire a proposal whose timeout has passed.
     ///
     /// Returns `true` if the proposal was expired, `false` otherwise.
     pub fn check_multisig_expiry(env: Env, proposal_id: u64) -> bool {
-        multisig::check_expiry(&env, proposal_id)
-    }
+        Self::_acquire_lock(&env);
 
-    // -----------------------------------------------------------------------
-    // HTLC bridge functions
-    // -----------------------------------------------------------------------
-    // Business logic lives in the `htlc` module; these entry points only
-    // adapt the `#[contractimpl]` calling convention (owned `Env`) to it.
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
 
-    /// Initialize the bridge configuration. Admin-only.
-    pub fn init_bridge_config(env: Env, admin: Address, fee_bps: u32, fee_collector: Address) {
-        htlc::init_bridge_config(&env, admin, fee_bps, fee_collector)
-    }
+        if proposal.status != MultisigProposalStatus::Pending || proposal.expires_at == 0 {
+            Self::_release_lock(&env);
+            return false;
+        }
 
-    /// Update bridge configuration. Admin-only.
-    pub fn update_bridge_config(
-        env: Env,
-        admin: Address,
-        fee_bps: Option<u32>,
-        fee_collector: Option<Address>,
-        paused: Option<bool>,
-    ) {
-        htlc::update_bridge_config(&env, admin, fee_bps, fee_collector, paused)
-    }
+        if env.ledger().timestamp() < proposal.expires_at {
+            Self::_release_lock(&env);
+            return false;
+        }
 
-    /// Create an HTLC lock for a cross-chain atomic swap.
-    ///
-    /// The sender locks native tokens on Stellar. The recipient on the
-    /// destination chain can claim by revealing the preimage. If the timelock
-    /// expires without a claim, the sender can reclaim.
-    ///
-    /// # Arguments
-    /// * `sender` - Address locking the tokens (must authorize)
-    /// * `input` - HtlcLockInput with recipient, amount, hashlock, timelock, etc.
-    ///
-    /// # Returns
-    /// The HTLC lock id.
-    pub fn create_htlc_lock(env: Env, sender: Address, input: HtlcLockInput) -> u64 {
-        htlc::create_lock(&env, sender, input)
-    }
+        proposal.status = MultisigProposalStatus::Expired;
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
 
-    /// Claim an HTLC lock by revealing the secret preimage.
-    ///
-    /// The recipient provides the secret whose SHA-256 hash matches the
-    /// hashlock. Tokens are transferred to the recipient minus any fee.
-    pub fn claim_htlc(env: Env, lock_id: u64, secret: BytesN<32>) {
-        htlc::claim_lock(&env, lock_id, secret)
-    }
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("expired")),
+            (proposal_id, proposal.wallet_id),
+        );
 
-    /// Refund an HTLC lock after the timelock (and dispute window) has expired.
-    ///
-    /// The sender can reclaim their tokens if the recipient did not claim
-    /// within the allowed time window.
-    pub fn refund_htlc(env: Env, lock_id: u64) {
-        htlc::refund_lock(&env, lock_id)
-    }
-
-    /// Retrieve an HTLC lock by id.
-    pub fn get_htlc_lock(env: Env, lock_id: u64) -> HtlcLock {
-        htlc::get_lock(&env, lock_id)
-    }
-
-    /// Retrieve the bridge configuration.
-    pub fn get_bridge_config(env: Env) -> BridgeConfigData {
-        htlc::get_bridge_config(&env)
+        Self::_release_lock(&env);
+        true
     }
 }
 
 // Bring in the property-based security tests (proptest suite).
 #[cfg(test)]
 mod security_properties;
-
-// Bring in gas benchmarks (requires --features gas_benchmarks).
-#[cfg(feature = "gas_benchmarks")]
-#[cfg(test)]
-mod benchmarks;
 
 #[cfg(test)]
 mod test {
@@ -1151,7 +1618,7 @@ mod test {
         let contract_id = env.register_contract(None, AgenticPayContract);
         let client = AgenticPayContractClient::new(&env, &contract_id);
 
-        assert_eq!(client.version(), 2);
+        assert_eq!(client.version(), 1);
     }
 
     #[test]
@@ -1398,157 +1865,5 @@ mod test {
         let project = client.get_project(&id);
         assert_eq!(project.deposited, 0);
         assert_eq!(project.status, ProjectStatus::Completed);
-    }
-
-    // -----------------------------------------------------------------------
-    // HTLC bridge tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_htlc_lock_and_claim() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let contract_id = env.register_contract(None, AgenticPayContract);
-        let client = AgenticPayContractClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let sender = Address::generate(&env);
-        let recipient = Address::generate(&env);
-
-        client.initialize(&admin);
-        client.init_bridge_config(&admin, &30, &admin);
-
-        let secret: BytesN<32> = BytesN::from_array(&env, &[42u8; 32]);
-        let hashlock: BytesN<32> = env.crypto().sha256(&secret.clone().into()).into();
-
-        let lock_id = client.create_htlc_lock(
-            &sender,
-            &HtlcLockInput {
-                recipient: recipient.clone(),
-                amount: 1000,
-                hashlock,
-                timelock: env.ledger().timestamp() + 1000,
-                dispute_window: 100,
-                target_chain: String::from_str(&env, "ethereum-mainnet"),
-                target_lock_id: String::from_str(&env, "0xabc123"),
-            },
-        );
-
-        let lock = client.get_htlc_lock(&lock_id);
-        assert_eq!(lock.status, HtlcStatus::Pending);
-        assert_eq!(lock.amount, 1000);
-        assert_eq!(lock.sender, sender);
-        assert_eq!(lock.recipient, recipient);
-
-        client.claim_htlc(&lock_id, &secret);
-
-        let lock = client.get_htlc_lock(&lock_id);
-        assert_eq!(lock.status, HtlcStatus::Claimed);
-    }
-
-    #[test]
-    fn test_htlc_refund_after_timelock() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let contract_id = env.register_contract(None, AgenticPayContract);
-        let client = AgenticPayContractClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let sender = Address::generate(&env);
-        let recipient = Address::generate(&env);
-
-        client.initialize(&admin);
-        client.init_bridge_config(&admin, &30, &admin);
-
-        let secret: BytesN<32> = BytesN::from_array(&env, &[42u8; 32]);
-        let hashlock: BytesN<32> = env.crypto().sha256(&secret.clone().into()).into();
-
-        let timelock = env.ledger().timestamp() + 10;
-        let lock_id = client.create_htlc_lock(
-            &sender,
-            &HtlcLockInput {
-                recipient,
-                amount: 500,
-                hashlock,
-                timelock,
-                dispute_window: 5,
-                target_chain: String::from_str(&env, "ethereum-mainnet"),
-                target_lock_id: String::from_str(&env, "0xdef456"),
-            },
-        );
-
-        // Advance ledger past timelock.
-        env.ledger().with_mut(|li| {
-            li.timestamp = timelock + 1;
-        });
-
-        client.refund_htlc(&lock_id);
-
-        let lock = client.get_htlc_lock(&lock_id);
-        assert_eq!(lock.status, HtlcStatus::Refunded);
-    }
-
-    #[test]
-    #[should_panic(expected = "Invalid secret")]
-    fn test_htlc_claim_wrong_secret() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let contract_id = env.register_contract(None, AgenticPayContract);
-        let client = AgenticPayContractClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let sender = Address::generate(&env);
-        let recipient = Address::generate(&env);
-
-        client.initialize(&admin);
-        client.init_bridge_config(&admin, &30, &admin);
-
-        let secret: BytesN<32> = BytesN::from_array(&env, &[42u8; 32]);
-        let hashlock: BytesN<32> = env.crypto().sha256(&secret.clone().into()).into();
-
-        let lock_id = client.create_htlc_lock(
-            &sender,
-            &HtlcLockInput {
-                recipient,
-                amount: 100,
-                hashlock,
-                timelock: env.ledger().timestamp() + 1000,
-                dispute_window: 100,
-                target_chain: String::from_str(&env, "ethereum-mainnet"),
-                target_lock_id: String::from_str(&env, "0x000"),
-            },
-        );
-
-        let wrong_secret: BytesN<32> = BytesN::from_array(&env, &[99u8; 32]);
-        client.claim_htlc(&lock_id, &wrong_secret);
-    }
-
-    #[test]
-    fn test_bridge_config_init_and_update() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let contract_id = env.register_contract(None, AgenticPayContract);
-        let client = AgenticPayContractClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let collector = Address::generate(&env);
-
-        client.initialize(&admin);
-        client.init_bridge_config(&admin, &50, &collector);
-
-        let config = client.get_bridge_config();
-        assert_eq!(config.fee_bps, 50);
-        assert_eq!(config.fee_collector, collector);
-        assert_eq!(config.paused, false);
-
-        client.update_bridge_config(&admin, &Some(100), &None, &Some(true));
-
-        let config = client.get_bridge_config();
-        assert_eq!(config.fee_bps, 100);
-        assert_eq!(config.paused, true);
     }
 }

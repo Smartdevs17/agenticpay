@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Folder, FileText, Wallet, Menu, X, Shield } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { LayoutDashboard, Folder, FileText, Wallet, Scale, Menu, X, QrCode } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -12,11 +12,13 @@ const navigation = [
   { name: 'Projects', href: '/dashboard/projects', icon: Folder },
   { name: 'Invoices', href: '/dashboard/invoices', icon: FileText },
   { name: 'Payments', href: '/dashboard/payments', icon: Wallet },
-  { name: 'Allowances', href: '/dashboard/allowances', icon: Shield },
+  { name: 'QR / NFC Pay', href: '/dashboard/payments/qr', icon: QrCode },
+  { name: 'Disputes', href: '/dashboard/disputes', icon: Scale },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   return (
@@ -71,6 +73,8 @@ export function Sidebar() {
                 <Link
                   key={item.name}
                   href={item.href}
+                  onMouseEnter={() => router.prefetch(item.href)}
+                  onFocus={() => router.prefetch(item.href)}
                   onClick={() => setIsMobileOpen(false)}
                   className={cn(
                     'flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500',

@@ -73,7 +73,6 @@ export type FeatureFlagName =
   | 'message-queue'
   | 'rate-limit-tiering'
   | 'sla-tracking'
-  | 'escalation-automation'
   | 'response-caching'
   | 'multi-level-cache'
   | 'single-flight'
@@ -158,12 +157,6 @@ const FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
   {
     name: 'sla-tracking',
     description: 'SLA tracking middleware — records request latencies for SLA reporting',
-    defaultEnabled: true,
-    strategy: 'all',
-  },
-  {
-    name: 'escalation-automation',
-    description: 'Automated escalation with SLA tracking per issue type — Issue #646',
     defaultEnabled: true,
     strategy: 'all',
   },

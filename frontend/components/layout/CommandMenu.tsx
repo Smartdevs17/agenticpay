@@ -1,22 +1,33 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCommandStore } from '@/store/useCommandStore';
-import { KEYBOARD_SHORTCUTS, detectIsMac, formatCombo } from '@/src/lib/keyboard-shortcuts';
 
-/** The ⌘K / Ctrl+K combo, declared once in the shared shortcut registry. */
-const COMMAND_PALETTE = KEYBOARD_SHORTCUTS.find((shortcut) => shortcut.id === 'command-palette')!;
-
-/**
- * Presentational command palette. The ⌘K / Ctrl+K and Escape bindings are
- * owned globally by `KeyboardShortcutsProvider` so there is exactly one
- * listener per combo across the whole app.
- */
 export function CommandMenu() {
-  const { isOpen, open, close } = useCommandStore();
-  const isMac = detectIsMac();
-  const shortcutCaps = formatCombo(COMMAND_PALETTE.combo, isMac).join('');
+  const { isOpen, open, close, toggle } = useCommandStore();
+
+  // 1. Listen for Cmd+K or Ctrl+K
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        toggle();
+      }
+    };
+    document.addEventListener('keydown', down);
+    return () => document.removeEventListener('keydown', down);
+  }, [toggle]);
+
+  // 2. Listen for Escape to close 
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', down);
+    return () => document.removeEventListener('keydown', down);
+  }, [close]);
 
   return (
     <>
@@ -25,14 +36,13 @@ export function CommandMenu() {
         variant="outline" 
         className="hidden md:flex items-center gap-2 text-gray-500 bg-gray-50 w-64 justify-between" 
         onClick={open}
-        data-testid="command-menu-trigger"
       >
         <div className="flex items-center gap-2">
           <Search className="h-4 w-4" />
           <span className="font-normal">Search...</span>
         </div>
         <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border border-gray-200 bg-white px-1.5 font-mono text-[10px] font-medium text-gray-500">
-          {shortcutCaps}
+          <span className="text-xs">⌘</span>K
         </kbd>
       </Button>
 

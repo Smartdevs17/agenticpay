@@ -1,13 +1,10 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
-import { applyEnvironmentFileDefaults } from './config/environments/index.js';
 
 dotenv.config();
-// Apply environment-specific defaults before validation (environment file < process.env)
-applyEnvironmentFileDefaults();
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'staging', 'production', 'test']).default('development'),
+  NODE_ENV: z.enum(['development', 'staging', 'production']).default('development'),
   PORT: z.string().default('3001'),
   CORS_ALLOWED_ORIGINS: z.string().default('*'),
   JOBS_ENABLED: z.enum(['true', 'false']).default('true'),
@@ -18,22 +15,8 @@ const envSchema = z.object({
   RATE_LIMIT_ENTERPRISE: z.string().default('1000'),
   RATE_LIMIT_WINDOW_MS: z.string().default(String(15 * 60 * 1000)),
   COMPRESSION_THRESHOLD: z.string().default('1024'),
-  DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/agenticpay'),
-  PGBOUNCER_ENABLED: z.enum(['true', 'false']).default('false'),
-  DB_POOL_MIN: z.string().default('2'),
-  DB_POOL_MAX: z.string().default('10'),
-  DB_POOL_IDLE_TIMEOUT_MS: z.string().default('10000'),
-  DB_POOL_ACQUIRE_TIMEOUT_MS: z.string().default('30000'),
-  DB_POOL_MAX_USES: z.string().default('7500'),
-  DB_STATEMENT_TIMEOUT_MS: z.string().default('30000'),
-  DB_READ_REPLICA_URLS: z.string().default(''),
-  DB_REPLICA_MAX_LAG_MS: z.string().default('5000'),
-  DB_REPLICA_HEALTH_CHECK_INTERVAL_MS: z.string().default('30000'),
-  DB_REPLICA_FAILOVER_COOLDOWN_MS: z.string().default('15000'),
-  HSTS_MAX_AGE_SECONDS: z.string().default('31536000'),
-  PERMISSIONS_POLICY: z
-    .string()
-    .default('camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), interest-cohort=()'),
+  VAPID_PUBLIC_KEY: z.string().default(''),
+  VAPID_PRIVATE_KEY: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -74,34 +57,9 @@ export const config = {
   compression: {
     threshold: Number(env.COMPRESSION_THRESHOLD),
   },
-  db: {
-    url: env.DATABASE_URL,
-    pgbouncer: {
-      enabled: env.PGBOUNCER_ENABLED === 'true',
-    },
-    pool: {
-      min: Number(env.DB_POOL_MIN),
-      max: Number(env.DB_POOL_MAX),
-      idleTimeoutMs: Number(env.DB_POOL_IDLE_TIMEOUT_MS),
-      acquireTimeoutMs: Number(env.DB_POOL_ACQUIRE_TIMEOUT_MS),
-      maxUses: Number(env.DB_POOL_MAX_USES),
-      statementTimeoutMs: Number(env.DB_STATEMENT_TIMEOUT_MS),
-    },
-    replicas: {
-      urls: env.DB_READ_REPLICA_URLS.split(',').map((url) => url.trim()).filter(Boolean),
-      maxLagMs: Number(env.DB_REPLICA_MAX_LAG_MS),
-      healthCheckIntervalMs: Number(env.DB_REPLICA_HEALTH_CHECK_INTERVAL_MS),
-      failoverCooldownMs: Number(env.DB_REPLICA_FAILOVER_COOLDOWN_MS),
-    },
-  },
-  security: {
-    hsts: {
-      maxAge: Number(env.HSTS_MAX_AGE_SECONDS),
-      includeSubDomains: true,
-      preload: true,
-    },
-    permissionsPolicy: env.PERMISSIONS_POLICY,
-  },
+  vapidKeys: env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY
+    ? { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY }
+    : null,
 } as const;
 
 export type Config = typeof config;

@@ -1,7 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import type { Components } from 'react-markdown';
+import { useMemo, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -22,6 +21,7 @@ const sanitizeSchema = {
 export interface MarkdownContentProps {
   content: string;
   className?: string;
+  /** Show Edit / Preview toggle */
   previewMode?: boolean;
 }
 
@@ -32,10 +32,9 @@ export function MarkdownContent({
 }: MarkdownContentProps) {
   const [showPreview, setShowPreview] = useState(true);
 
-  const components = useMemo<Components>(
+  const components = useMemo(
     () => ({
-      code(props) {
-        const { className: codeClassName, children } = props;
+      code({ className: codeClassName, children, ...props }: { className?: string; children?: ReactNode }) {
         const match = /language-(\w+)/.exec(codeClassName ?? '');
         const code = String(children).replace(/\n$/, '');
         if (match) {
@@ -47,35 +46,26 @@ export function MarkdownContent({
               customStyle={{ margin: 0, borderRadius: '0.375rem', fontSize: '0.8125rem' }}
             >
               {code}
-            </SyntaxHighlighter>
+            SyntaxHighlighter>
           );
         }
         return (
-          <code className={cn('rounded bg-muted px-1 py-0.5 text-sm', codeClassName)}>
+          <code className={cn('rounded bg-muted px-1 py-0.5 text-sm', codeClassName)} {...props}>
             {children}
           </code>
         );
       },
-      a(props) {
-        const { href, children } = props;
-        const safe =
-          href?.startsWith('http://') ||
-          href?.startsWith('https://') ||
-          href?.startsWith('/');
+      a({ href, children, ...props }: { href?: string; children?: ReactNode }) {
+        const safe = href?.startsWith('http://') || href?.startsWith('https://') || href?.startsWith('/');
         if (!safe) return <span>{children}</span>;
         return (
-          <a
-            href={href}
-            rel="noopener noreferrer"
-            target="_blank"
-            className="text-blue-600 hover:underline"
-          >
+          <a href={href} rel="noopener noreferrer" target="_blank" className="text-blue-600 hover:underline" {...props}>
             {children}
           </a>
         );
       },
     }),
-    [],
+    []
   );
 
   return (
