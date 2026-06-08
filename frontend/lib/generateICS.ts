@@ -1,8 +1,10 @@
+/** A single calendar event to be included in an .ics export. */
 interface ICSEvent {
   uid: string;
   summary: string;
   description?: string;
   start: Date;
+  /** Defaults to start + 1 day (all-day event) when omitted. */
   end?: Date;
 }
 
@@ -10,6 +12,7 @@ function formatICSDate(date: Date): string {
   return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 }
 
+/** Generates a valid iCalendar (.ics) string from a list of events. */
 export function generateICS(events: ICSEvent[]): string {
   const lines = [
     'BEGIN:VCALENDAR',
