@@ -17,7 +17,15 @@
     "sandbox:reset": "npm run sandbox:down && npm run sandbox:up",
     "sandbox:logs": "docker compose -f docker-compose.yml -f docker-compose.sandbox.yml logs -f",
     "sandbox:seed": "node scripts/sandbox/seed.js",
-    "sandbox:faucet": "node scripts/sandbox/faucet.js"
+    "sandbox:faucet": "node scripts/sandbox/faucet.js",
+    "dev:contracts": "bash scripts/dev/watch-contracts.sh",
+    "dev:contracts:evm": "bash scripts/dev/watch-contracts.sh --evm-only",
+    "dev:contracts:soroban": "bash scripts/dev/watch-contracts.sh --soroban-only",
+    "generate:api-hooks": "node packages/api-hooks-generator/dist/cli.js",
+    "generate:api-hooks:watch": "node packages/api-hooks-generator/dist/cli.js --watch",
+    "analyze:bundle": "bash scripts/analyze-bundle.sh",
+    "lighthouse:ci": "lhci autorun --config=./lighthouse/lighthouse.config.json",
+    "log-viewer": "node packages/log-viewer/dist/cli.js"
   },
   "devDependencies": {
     "turbo": "^1.10.16"

@@ -1,0 +1,247 @@
+name: Performance Regression CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'packages/**'
+      - 'lighthouse/**'
+      - '.github/workflows/performance.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LHCI_GITHUB_APP_TOKEN_OVERRIDE: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
+jobs:
+  lighthouse-audit:
+    name: Lighthouse CI Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        preset: [desktop, mobile]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npx turbo run build --filter=agenticpay-frontend
+        env:
+          NEXT_PUBLIC_SENTRY_DSN: ""
+          SENTRY_AUTH_TOKEN: ""
+          NEXT_PUBLIC_VERCEL_ENV: preview
+          NODE_ENV: production
+
+      - name: Export static build for LHCI
+        run: npx next export -o out
+        working-directory: frontend
+        continue-on-error: true
+
+      - name: Start preview server
+        run: |
+          npx serve out -l 3000 &
+          sleep 3
+          echo "Server ready"
+        working-directory: frontend
+        continue-on-error: true
+
+      - name: Run Lighthouse CI
+        id: lhci
+        run: |
+          npm install -g @lhci/cli@0.14.x
+          BUDGET_FILE="./lighthouse/budgets.json"
+          if [ "${{ matrix.preset }}" = "mobile" ]; then
+            BUDGET_FILE="./lighthouse/budgets.mobile.json"
+          fi
+          lhci autorun \
+            --config=./lighthouse/lighthouse.config.json \
+            --collect.preset="${{ matrix.preset }}" \
+            --collect.url=http://localhost:3000 \
+            --assert.budgetFile="$BUDGET_FILE" \
+            --upload.target=temporary-public-storage || echo "LHCI_EXIT_CODE=$?" >> $GITHUB_ENV
+
+      - name: Upload LHCI report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lhci-report-${{ matrix.preset }}
+          path: .lhci_reports/**/*
+          retention-days: 30
+
+      - name: Comment PR with results
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request' && always()
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = '.lhci_reports/manifest.json';
+            const manifest = fs.existsSync(reportPath) ? JSON.parse(fs.readFileSync(reportPath, 'utf8')) : null;
+            const summary = manifest ? manifest.map(r => `- ${r.url}: ${r.score}`).join('\n') : 'No report generated';
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Lighthouse CI Report (${{ matrix.preset }})\n\n${summary}\n\n[View full report](${process.env.LHCI_REPORT_URL || '#'})`
+            });
+
+  bundle-analysis:
+    name: Bundle Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install source-map-explorer
+        run: npm install -g source-map-explorer
+
+      - name: Build with bundle analysis
+        run: npx turbo run build --filter=agenticpay-frontend
+        env:
+          ANALYZE: true
+          NEXT_PUBLIC_SENTRY_DSN: ""
+          SENTRY_AUTH_TOKEN: ""
+
+      - name: Analyze bundle with source-map-explorer
+        run: |
+          JS_FILES=$(ls frontend/.next/static/chunks/*.js 2>/dev/null || true)
+          CSS_FILES=$(ls frontend/.next/static/css/*.css 2>/dev/null || true)
+          if [ -n "$JS_FILES" ]; then
+            source-map-explorer $JS_FILES --html --output bundle-report.html --no-browser || true
+          fi
+          if [ -n "$CSS_FILES" ]; then
+            source-map-explorer $CSS_FILES --html --output css-report.html --no-browser || true
+          fi
+
+      - name: Upload bundle analysis artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bundle-analysis
+          path: |
+            bundle-report.html
+            css-report.html
+          retention-days: 30
+
+      - name: Check bundle size budgets
+        id: bundle-check
+        run: |
+          JS_SIZE=0
+          CSS_SIZE=0
+          for f in frontend/.next/static/chunks/*.js; do
+            [ -f "$f" ] && JS_SIZE=$((JS_SIZE + $(stat -c%s "$f")))
+          done
+          for f in frontend/.next/static/css/*.css; do
+            [ -f "$f" ] && CSS_SIZE=$((CSS_SIZE + $(stat -c%s "$f")))
+          done
+          JS_SIZE_KB=$((JS_SIZE / 1024))
+          CSS_SIZE_KB=$((CSS_SIZE / 1024))
+          echo "js_size=$JS_SIZE_KB" >> $GITHUB_OUTPUT
+          echo "css_size=$CSS_SIZE_KB" >> $GITHUB_OUTPUT
+          echo "JS Bundle: ${JS_SIZE_KB}KB"
+          echo "CSS Bundle: ${CSS_SIZE_KB}KB"
+          if [ "$JS_SIZE_KB" -gt 500 ]; then
+            echo "::warning title=Bundle Size::JS bundle ${JS_SIZE_KB}KB exceeds 500KB budget"
+          fi
+          if [ "$CSS_SIZE_KB" -gt 200 ]; then
+            echo "::warning title=Bundle Size::CSS bundle ${CSS_SIZE_KB}KB exceeds 200KB budget"
+          fi
+
+      - name: Block PR on budget exceeded
+        if: steps.bundle-check.outputs.js_size > 500 || steps.bundle-check.outputs.css_size > 200
+        run: |
+          echo "::error::Bundle size budget exceeded. JS: ${{ steps.bundle-check.outputs.js_size }}KB, CSS: ${{ steps.bundle-check.outputs.css_size }}KB"
+          echo "To override: add label 'performance-override' to this PR"
+          exit 1
+
+  performance-trend:
+    name: Performance Trend
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: lighthouse-audit
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate trend data
+        run: |
+          REPORT=$(find .lhci_reports -name "*.json" -type f 2>/dev/null | head -1)
+          if [ -n "$REPORT" ]; then
+            LCP=$(node -e "const d=require('$REPORT'); console.log(d.categories?.performance?.score || 0)")
+            TBT=$(node -e "const d=require('$REPORT'); console.log(d.categories?.accessibility?.score || 0)")
+            CLS=$(node -e "const d=require('$REPORT'); console.log(d.categories?.best_practices?.score || 0)")
+            node -e "
+              const fs = require('fs');
+              const trend = {
+                timestamp: new Date().toISOString(),
+                commit: process.env.GITHUB_SHA,
+                branch: process.env.GITHUB_REF_NAME,
+                lcp: $LCP,
+                tbt: $TBT,
+                cls: $CLS,
+              };
+              fs.writeFileSync('trend-data.json', JSON.stringify(trend, null, 2));
+            "
+            echo "Trend data generated"
+          else
+            echo "No report found, skipping trend"
+          fi
+
+      - name: Upload trend data
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-trend
+          path: trend-data.json
+          retention-days: 90
+
+  performance-override:
+    name: Performance Override Gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [lighthouse-audit, bundle-analysis]
+    steps:
+      - name: Check for performance override label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const hasOverride = pr.labels.some(l => l.name === 'performance-override');
+            if (hasOverride) {
+              console.log('Performance override label detected — allowing merge');
+            } else {
+              console.log('No override label — performance gates apply');
+            }

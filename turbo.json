@@ -25,6 +25,15 @@
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "generate:api-hooks": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "src/generated/**"
+      ],
+      "cache": false
     }
   }
 }

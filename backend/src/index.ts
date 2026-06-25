@@ -104,6 +104,7 @@ import zkIdentityRouter from './routes/zk-identity.js';
 import { coldStartMonitorRouter } from './routes/cold-start-monitor.js';
 import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
 import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
+import devDevRouter from './routes/dev/reload.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -322,6 +323,19 @@ app.use('/api/v2/email', emailV2Router);
 app.use('/graphql', graphQLRouter);
 app.use('/graphql/ws', graphQLWsRouter);
 
+// Dev tooling routes (only in development)
+if (env.NODE_ENV === 'development') {
+  app.use('/api/dev', devDevRouter);
+  
+  // Initialize dev log WebSocket transport
+  import('./logger/dev-transport.js').then(({ createDevLogTransport }) => {
+    createDevLogTransport(server, '/ws/logs');
+    console.log('[DevLog] Log viewer WebSocket transport initialized');
+  }).catch((err) => {
+    console.warn('[DevLog] Failed to init dev transport:', err.message);
+  });
+}
+
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
     return next();
@@ -387,6 +401,7 @@ getRedisCache().connect().then(() => {
 const server = http.createServer(app);
 const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
 bindWebSocketServer(wsServer);
+app.set('wsServer', wsServer);
 app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
 app.use('/api/v1/analytics', createAnalyticsRouter(wsServer));
 

@@ -14,7 +14,9 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:install": "playwright install --with-deps",
     "test:e2e:update-snapshots": "playwright test --update-snapshots",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "generate:api-hooks": "node ../packages/api-hooks-generator/dist/cli.js",
+    "generate:api-hooks:watch": "node ../packages/api-hooks-generator/dist/cli.js --watch"
   },
   "dependencies": {
     "workbox-precaching": "^7.3.0",

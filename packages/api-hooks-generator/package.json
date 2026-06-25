@@ -1,0 +1,32 @@
+{
+  "name": "@agenticpay/api-hooks-generator",
+  "version": "0.1.0",
+  "description": "Generate type-safe API client hooks from OpenAPI spec",
+  "main": "dist/index.js",
+  "bin": {
+    "generate-api-hooks": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "echo 'No lint yet'",
+    "generate": "node dist/cli.js",
+    "generate:watch": "node dist/cli.js --watch"
+  },
+  "dependencies": {
+    "openapi-typescript": "^7.4.4",
+    "openapi-fetch": "^0.13.5",
+    "zod": "^3.23.8",
+    "prettier": "^3.0.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@agenticpay/typescript-config": "*",
+    "@agenticpay/eslint-config": "*",
+    "@types/node": "^22.5.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

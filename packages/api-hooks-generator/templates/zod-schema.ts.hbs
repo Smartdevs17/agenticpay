@@ -1,0 +1,11 @@
+// Auto-generated Zod schema for {{schemaName}}
+
+import { z } from 'zod';
+
+export const {{schemaName}}Schema = z.object({
+  {{#each fields}}
+  {{name}}: {{zodType}},
+  {{/each}}
+});
+
+export type {{schemaName}} = z.infer<typeof {{schemaName}}Schema>;

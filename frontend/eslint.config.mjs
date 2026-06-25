@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "blob-report/**",
     "test-results/**",
     "e2e/__snapshots__/**",
+    "src/generated/**",
   ]),
   {
     // Playwright's fixture API names its callback `use`, which confuses
