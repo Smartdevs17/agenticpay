@@ -1,0 +1,34 @@
+{
+  "openapi": "docs/api/openapi/openapi.json",
+  "outputDir": "dist/sdk",
+  "packageName": "agenticpay",
+  "packageVersion": "0.1.0",
+  "apiBaseUrl": "https://api.agenticpay.com",
+  "supportedLanguages": ["typescript", "python", "go", "rust"],
+  "generatorConfig": {
+    "typescript": {
+      "packageName": "@agenticpay/sdk",
+      "packageScope": "@agenticpay",
+      "registryUrl": "https://registry.npmjs.org"
+    },
+    "python": {
+      "packageName": "agenticpay",
+      "registryUrl": "https://pypi.org/project/agenticpay"
+    },
+    "go": {
+      "module": "github.com/agenticpay/sdk-go",
+      "registryUrl": "https://pkg.go.dev/github.com/agenticpay/sdk-go"
+    },
+    "rust": {
+      "packageName": "agenticpay",
+      "registryUrl": "https://crates.io/crates/agenticpay"
+    }
+  },
+  "documentationUrl": "https://docs.agenticpay.com",
+  "publishConfig": {
+    "npm": true,
+    "pypi": true,
+    "crates": true,
+    "goProxy": true
+  }
+}

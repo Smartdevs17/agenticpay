@@ -11,7 +11,13 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "turbo run lint",
-    "dev": "turbo run dev"
+    "dev": "turbo run dev",
+    "sandbox:up": "docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d && npm run sandbox:seed",
+    "sandbox:down": "docker compose -f docker-compose.yml -f docker-compose.sandbox.yml down",
+    "sandbox:reset": "npm run sandbox:down && npm run sandbox:up",
+    "sandbox:logs": "docker compose -f docker-compose.yml -f docker-compose.sandbox.yml logs -f",
+    "sandbox:seed": "node scripts/sandbox/seed.js",
+    "sandbox:faucet": "node scripts/sandbox/faucet.js"
   },
   "devDependencies": {
     "turbo": "^1.10.16"

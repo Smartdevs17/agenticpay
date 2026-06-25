@@ -583,3 +583,68 @@ model NotificationLog {
   @@map("notification_logs")
 }
 
+// ─── API Versioning Models ────────────────────────────────────────────────────
+
+enum ApiVersionStatus {
+  active
+  deprecated
+  sunset
+  removed
+}
+
+model ApiVersion {
+  id              String          @id @default(uuid())
+  version         String          @unique // e.g., "v1", "v2"
+  status          ApiVersionStatus @default(active)
+  releaseDate     DateTime        @default(now()) @map("release_date")
+  deprecationDate DateTime?       @map("deprecation_date")
+  sunsetDate      DateTime?       @map("sunset_date")
+  description     String?
+  changelogUrl    String?         @map("changelog_url")
+  migrationGuideUrl String?       @map("migration_guide_url")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  usage           ApiVersionUsage[]
+  endpoints       ApiVersionEndpoint[]
+
+  @@index([status])
+  @@index([releaseDate])
+  @@map("api_versions")
+}
+
+model ApiVersionUsage {
+  id              String    @id @default(uuid())
+  versionId       String    @map("version_id")
+  date            DateTime  @db.Date
+  requestCount    Int       @map("request_count") @default(0)
+  uniqueClients   Int       @map("unique_clients") @default(0)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  version         ApiVersion @relation(fields: [versionId], references: [id])
+
+  @@unique([versionId, date])
+  @@index([versionId])
+  @@index([date])
+  @@map("api_version_usage")
+}
+
+model ApiVersionEndpoint {
+  id              String    @id @default(uuid())
+  versionId       String    @map("version_id")
+  path            String    // e.g., "/payments", "/invoices"
+  method          String    // GET, POST, PUT, DELETE
+  status          ApiVersionStatus @default(active)
+  changes         String?   // Summary of changes from previous version
+  migrationNotes  String?   @map("migration_notes")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  version         ApiVersion @relation(fields: [versionId], references: [id])
+
+  @@unique([versionId, path, method])
+  @@index([versionId])
+  @@index([path])
+  @@map("api_version_endpoints")
+}
+
