@@ -84,9 +84,13 @@ contract SplitterV1 is
         if (bps > 10_000) revert InvalidFee(bps);
 
         Recipient memory next = Recipient(wallet, bps, minThreshold, active);
-        if (index < recipients.length) {
+        uint256 len;
+        assembly {
+            len := sload(recipients.slot)
+        }
+        if (index < len) {
             recipients[index] = next;
-        } else if (index == recipients.length) {
+        } else if (index == len) {
             recipients.push(next);
         } else {
             revert InvalidIndex(index);
@@ -95,62 +99,67 @@ contract SplitterV1 is
         emit RecipientConfigured(index, wallet, bps, minThreshold, active);
     }
 
-    function recipientsCount() external view returns (uint256) {
-        return recipients.length;
+    function recipientsCount() external view returns (uint256 count) {
+        assembly {
+            count := sload(recipients.slot)
+        }
     }
 
     function splitPayment() external payable virtual nonReentrant {
         _splitPayment();
     }
 
-    /// @dev Core distribution logic, factored out so V2+ can layer
-    ///      additional checks (pause, allowlist, etc.) in front of the
-    ///      same accounting code.
     function _splitPayment() internal {
         if (msg.value == 0) revert NoPayment();
 
-        uint256 platformFee = (msg.value * platformFeeBps) / 10_000;
+        uint16 _platformFeeBps;
+        assembly {
+            _platformFeeBps := sload(platformFeeBps.slot)
+        }
+        uint256 platformFee = (msg.value * _platformFeeBps) / 10_000;
         uint256 distributable = msg.value - platformFee;
         uint256 distributed;
 
-        uint256 len = recipients.length;
-        for (uint256 i = 0; i < len; i++) {
-            Recipient memory recipient = recipients[i];
-            if (!recipient.active || recipient.bps == 0) continue;
-
-            uint256 amount = (distributable * recipient.bps) / 10_000;
-            if (amount < recipient.minThreshold) continue;
-            distributed += amount;
-
-            (bool ok, ) = recipient.wallet.call{value: amount}("");
-            if (!ok) revert TransferFailed(recipient.wallet, amount);
+        uint256 len;
+        assembly {
+            len := sload(recipients.slot)
+        }
+        for (uint256 i; i < len; ) {
+            Recipient storage r = recipients[i];
+            if (r.active && r.bps != 0) {
+                uint256 amount = (distributable * r.bps) / 10_000;
+                if (amount >= r.minThreshold) {
+                    distributed += amount;
+                    (bool ok, ) = r.wallet.call{value: amount}("");
+                    if (!ok) revert TransferFailed(r.wallet, amount);
+                }
+            }
+            unchecked {
+                ++i;
+            }
         }
 
-        // Platform fee and any undistributed dust remain in the contract
-        // and are withdrawable by the owner.
         emit PaymentSplit(msg.value, platformFee, distributed);
     }
 
     function withdraw(address payable to, uint256 amount) external onlyOwner nonReentrant {
         if (to == address(0)) revert InvalidRecipient();
-        uint256 available = address(this).balance;
+        uint256 available;
+        assembly {
+            available := selfbalance()
+        }
         if (amount > available) revert InsufficientBalance(amount, available);
 
         (bool ok, ) = to.call{value: amount}("");
         if (!ok) revert TransferFailed(to, amount);
     }
 
-    /// @notice Human-readable version string, also used by upgrade tests to
-    ///         detect which implementation the proxy currently points at.
     function version() external pure virtual returns (string memory) {
         return "1.0.0";
     }
 
-    /// @dev UUPS requires the implementation to decide who may upgrade.
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
-    /// @dev Reserved storage slots for future versions to consume without
-    ///      shifting the layout of V1-era fields.
     uint256[48] private __gap;
 
     receive() external payable {}

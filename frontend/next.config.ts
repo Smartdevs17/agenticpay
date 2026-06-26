@@ -41,6 +41,13 @@ const nextConfig: NextConfig = {
         cacheGroups: {
           default: false,
           vendors: false,
+          abi: {
+            name: "abi",
+            chunks: "async",
+            test: /[\\/]lib[\\/]abi[\\/]/,
+            priority: 50,
+            enforce: true,
+          },
           framework: {
             name: "framework",
             chunks: "all",
@@ -114,17 +121,31 @@ const nextConfig: NextConfig = {
   headers: async () => {
     return [
       {
-        // HTTP/2 server push hints for critical assets on every page load
         source: "/(.*)",
         headers: [
           {
             key: "Link",
             value: [
-              // Critical fonts — pushed before HTML is parsed
-              "</fonts/inter-var.woff2>; rel=preload; as=font; type=\"font/woff2\"; crossorigin=anonymous",
-              // Critical CSS — pushed alongside the document
+              "</fonts/inter-var.woff2>; rel=preload; as=font; type=\"font/woff2\"; crossorigin=anonymous; fetchpriority=high",
               "</_next/static/css/app/layout.css>; rel=preload; as=style",
             ].join(", "),
+          },
+          {
+            key: "Critical-CH",
+            value: "sec-ch-prefers-color-scheme, sec-ch-viewport-width",
+          },
+        ],
+      },
+      {
+        source: "/fonts/(.*)",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
           },
         ],
       },
@@ -161,6 +182,42 @@ const nextConfig: NextConfig = {
           {
             key: "Cache-Control",
             value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/:path*.png",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/:path*.jpg",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/:path*.svg",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/manifest.webmanifest",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400",
           },
         ],
       },

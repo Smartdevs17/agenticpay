@@ -74,61 +74,52 @@ contract EmergencyPause {
     constructor(uint256 _threshold, address[] memory _guardians) {
         threshold = _threshold;
         admin = msg.sender;
-        for (uint256 i; i < _guardians.length; ) {
-            guardians[_guardians[i]] = true;
+        uint256 len = _guardians.length;
+        for (uint256 i; i < len; ) {
+            address g = _guardians[i];
+            assembly {
+                sstore(add(guardians.slot, keccak256(0, 0x20)), g)
+            }
             unchecked { ++i; }
         }
     }
 
     // ── Pause Lifecycle ──────────────────────────────────────────────────────
 
-    /// @notice Request an emergency pause for a proxy.
-    /// @param proxy The proxy contract to pause.
-    /// @param pauseImplementation Address of the "paused" stub implementation.
-    /// @return pauseId The ID of the pause request.
     function requestPause(
         address proxy,
         address pauseImplementation
     ) external onlyGuardian returns (uint256 pauseId) {
         if (proxy == address(0) || pauseImplementation == address(0)) revert ZeroAddress();
 
-        pauseId = pauseCount++;
+        unchecked {
+            pauseId = pauseCount++;
+        }
 
-        // Read current implementation from proxy EIP-1967 slot
-        bytes32 implSlot = bytes32(uint256(keccak256("eip1967.proxy.implementation")) - 1);
-        address currentImpl;
-        // Note: We can't read proxy storage directly, so caller must track the previous impl.
-        // For safety, store address(0) and let activatePause set the real previous impl.
-        currentImpl = address(0);
+        PauseRecord storage pr = pauseRecords[pauseId];
+        pr.proxy = proxy;
+        pr.pauseImplementation = pauseImplementation;
+        pr.approvalCount = 1;
 
-        pauseRecords[pauseId] = PauseRecord({
-            proxy: proxy,
-            previousImplementation: currentImpl,
-            pauseImplementation: pauseImplementation,
-            activatedAt: 0,
-            expiresAt: 0,
-            active: false,
-            approvalCount: 1 // requester auto-approves
-        });
         hasGuardianApproved[pauseId][msg.sender] = true;
 
         emit PauseRequested(pauseId, proxy, msg.sender);
 
-        if (pauseRecords[pauseId].approvalCount >= threshold) {
-            _activatePause(pauseId, currentImpl);
+        if (pr.approvalCount >= threshold) {
+            _activatePause(pauseId, address(0));
         }
     }
 
-    /// @notice A guardian approves a pending pause request.
     function approvePause(uint256 pauseId, address previousImplementation) external onlyGuardian {
         PauseRecord storage pr = pauseRecords[pauseId];
         if (pr.proxy == address(0)) revert PauseNotFound();
         if (hasGuardianApproved[pauseId][msg.sender]) revert AlreadyApproved();
 
         hasGuardianApproved[pauseId][msg.sender] = true;
-        pr.approvalCount++;
+        unchecked {
+            pr.approvalCount++;
+        }
 
-        // Store the real previous implementation if not yet set
         if (pr.previousImplementation == address(0) && previousImplementation != address(0)) {
             pr.previousImplementation = previousImplementation;
         }
@@ -140,23 +131,22 @@ contract EmergencyPause {
         }
     }
 
-    /// @notice Resume (unpause) a proxy after emergency is resolved.
+    error ResumeFailed();
+
     function resume(uint256 pauseId) external onlyAdmin {
         PauseRecord storage pr = pauseRecords[pauseId];
         if (pr.proxy == address(0)) revert PauseNotFound();
         if (!pr.active) revert PauseNotActive();
 
-        // Check if expired
         if (block.timestamp >= pr.expiresAt) {
             pr.active = false;
             emit PauseExpired(pauseId, pr.proxy);
         }
 
-        // Swap back to the previous implementation
         (bool ok, ) = pr.proxy.call(
             abi.encodeWithSignature("upgradeTo(address)", pr.previousImplementation)
         );
-        require(ok, "Resume upgrade failed");
+        if (!ok) revert ResumeFailed();
 
         pr.active = false;
         emit PauseResumed(pauseId, pr.proxy);
@@ -194,20 +184,23 @@ contract EmergencyPause {
 
     // ── Internal ─────────────────────────────────────────────────────────────
 
+    error PauseUpgradeFailed();
+
     function _activatePause(uint256 pauseId, address previousImpl) internal {
         PauseRecord storage pr = pauseRecords[pauseId];
         pr.active = true;
-        pr.activatedAt = block.timestamp;
-        pr.expiresAt = block.timestamp + MAX_PAUSE_DURATION;
+        unchecked {
+            pr.activatedAt = block.timestamp;
+            pr.expiresAt = block.timestamp + MAX_PAUSE_DURATION;
+        }
         if (pr.previousImplementation == address(0)) {
             pr.previousImplementation = previousImpl;
         }
 
-        // Upgrade proxy to the pause stub
         (bool ok, ) = pr.proxy.call(
             abi.encodeWithSignature("upgradeTo(address)", pr.pauseImplementation)
         );
-        require(ok, "Pause upgrade failed");
+        if (!ok) revert PauseUpgradeFailed();
 
         emit PauseActivated(pauseId, pr.proxy, pr.expiresAt);
     }

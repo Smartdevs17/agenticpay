@@ -292,16 +292,133 @@ resource "aws_apprunner_vpc_connector" "connector" {
 }
 
 # ------------------------------------------------------------------------------
+# HTTP/3 (QUIC) CONFIGURATION
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudfront_origin_access_control" "default" {
+  name                              = "agenticpay-${var.environment}-oac"
+  description                       = "OAC for AgenticPay ${var.environment}"
+  origin_access_control_origin_type = "mediapackagev2"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+# Frontend CloudFront distribution with HTTP/3 support
+resource "aws_cloudfront_distribution" "frontend" {
+  enabled         = true
+  is_ipv6_enabled = true
+  http_version    = var.enable_http3 ? "http3" : "http2"
+  price_class     = "PriceClass_100"
+  aliases         = var.domain_aliases
+
+  origin {
+    domain_name = aws_amplify_app.frontend.default_domain
+    origin_id   = "amplify-frontend"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD", "OPTIONS"]
+    target_origin_id = "amplify-frontend"
+    compress         = true
+
+    forwarded_values {
+      query_string = true
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 3600
+    max_ttl                = 86400
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+    minimum_protocol_version       = "TLSv1.2_2021"
+  }
+
+  tags = {
+    Name = "agenticpay-${var.environment}-frontend-cf"
+  }
+}
+
+# Backend API CloudFront distribution with HTTP/3 support
+resource "aws_cloudfront_distribution" "backend" {
+  enabled         = true
+  is_ipv6_enabled = true
+  http_version    = var.enable_http3 ? "http3" : "http2"
+  price_class     = "PriceClass_100"
+
+  origin {
+    domain_name = aws_apprunner_service.backend.service_url
+    origin_id   = "apprunner-backend"
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD", "OPTIONS"]
+    target_origin_id = "apprunner-backend"
+    compress         = true
+
+    forwarded_values {
+      query_string = true
+      cookies {
+        forward = "all"
+      }
+      headers = ["Authorization", "Content-Type", "X-API-Key", "X-HMAC-Signature"]
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 60
+    max_ttl                = 3600
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+    minimum_protocol_version       = "TLSv1.2_2021"
+  }
+
+  tags = {
+    Name = "agenticpay-${var.environment}-backend-cf"
+  }
+}
+
+# ------------------------------------------------------------------------------
 # FRONTEND RESOURCES (Next.js)
 # ------------------------------------------------------------------------------
 resource "aws_amplify_app" "frontend" {
   name       = "agenticpay-frontend-${var.environment}"
   repository = "https://github.com/Smartdevs17/agenticpay"
 
-  # HTTP/2 is enabled by default on AWS Amplify (ALPN negotiation via CloudFront).
-  # custom_headers propagates Link preload hints so CloudFront can issue
-  # HTTP/2 PUSH_PROMISE frames for critical fonts and CSS before the HTML
-  # has been parsed by the browser.
   custom_headers = <<-EOT
     customHeaders:
       - pattern: '**'
@@ -310,6 +427,8 @@ resource "aws_amplify_app" "frontend" {
             value: 'SAMEORIGIN'
           - key: 'Link'
             value: '</fonts/inter-var.woff2>; rel=preload; as=font; type="font/woff2"; crossorigin=anonymous'
+          - key: 'Alt-Svc'
+            value: 'h3=":443"; ma=86400'
   EOT
 
   build_spec = <<-EOT
@@ -333,7 +452,7 @@ resource "aws_amplify_app" "frontend" {
   EOT
 
   environment_variables = {
-    NEXT_PUBLIC_API_URL = "https://${aws_apprunner_service.backend.service_url}/api/v1"
+    NEXT_PUBLIC_API_URL = "https://${aws_cloudfront_distribution.backend.domain_name}/api/v1"
     NODE_ENV            = var.environment
   }
 }

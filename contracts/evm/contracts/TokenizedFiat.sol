@@ -10,7 +10,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 contract TokenizedFiat is ERC20, Ownable, Pausable {
     mapping(address => bool) public minters;
     uint256 public collateralLocked;
-    uint256 public minCollateralBps = 10_500; // 105%
+    uint256 public minCollateralBps;
 
     event MinterUpdated(address indexed minter, bool enabled);
     event CollateralUpdated(uint256 collateralLocked, uint256 totalSupply);
@@ -19,6 +19,7 @@ contract TokenizedFiat is ERC20, Ownable, Pausable {
 
     error NotMinter();
     error CollateralRatioTooLow();
+    error BelowMinimumCollateral();
 
     constructor(
         string memory name_,
@@ -27,6 +28,7 @@ contract TokenizedFiat is ERC20, Ownable, Pausable {
         uint256 initialCollateral
     ) ERC20(name_, symbol_) Ownable(owner_) {
         collateralLocked = initialCollateral;
+        minCollateralBps = 10_500;
     }
 
     modifier onlyMinter() {
@@ -45,16 +47,21 @@ contract TokenizedFiat is ERC20, Ownable, Pausable {
     }
 
     function setMinCollateralBps(uint256 value) external onlyOwner {
-        require(value >= 10_000, "below 100%");
+        if (value < 10_000) revert BelowMinimumCollateral();
         minCollateralBps = value;
         emit MinCollateralBpsUpdated(value);
     }
 
     function mint(address to, uint256 amount) external onlyMinter whenNotPaused {
-        uint256 nextSupply = totalSupply() + amount;
+        uint256 supplyCache = totalSupply();
+        uint256 nextSupply;
+        unchecked {
+            nextSupply = supplyCache + amount;
+        }
         if (nextSupply > 0) {
             uint256 requiredCollateral = (nextSupply * minCollateralBps) / 10_000;
-            if (collateralLocked < requiredCollateral) revert CollateralRatioTooLow();
+            uint256 locked = collateralLocked;
+            if (locked < requiredCollateral) revert CollateralRatioTooLow();
         }
         _mint(to, amount);
         emit CollateralUpdated(collateralLocked, totalSupply());
@@ -71,5 +78,11 @@ contract TokenizedFiat is ERC20, Ownable, Pausable {
 
     function emergencyUnpause() external onlyOwner {
         _unpause();
+    }
+
+    function collateralRatio() external view returns (uint256) {
+        uint256 supply = totalSupply();
+        if (supply == 0) return type(uint256).max;
+        return (collateralLocked * 10_000) / supply;
     }
 }

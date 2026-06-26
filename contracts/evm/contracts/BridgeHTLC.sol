@@ -40,6 +40,10 @@ contract BridgeHTLC is Ownable, Pausable, ReentrancyGuard {
         feeCollector = feeCollector_;
     }
 
+    error TransferToRecipientFailed();
+    error TransferFeeFailed();
+    error TransferRefundFailed();
+
     function setFeeConfig(uint16 nextFeeBps, address nextCollector) external onlyOwner {
         if (nextFeeBps > 1000) revert InvalidFee();
         feeBps = nextFeeBps;
@@ -59,16 +63,15 @@ contract BridgeHTLC is Ownable, Pausable, ReentrancyGuard {
         }
         if (locks[lockId].sender != address(0)) revert InvalidLock();
 
-        locks[lockId] = Lock({
-            sender: msg.sender,
-            recipient: recipient,
-            amount: msg.value,
-            hashlock: hashlock,
-            timelock: timelock,
-            claimed: false,
-            refunded: false,
-            disputeDeadline: block.timestamp + disputeWindowSeconds
-        });
+        Lock storage l = locks[lockId];
+        l.sender = msg.sender;
+        l.recipient = recipient;
+        l.amount = msg.value;
+        l.hashlock = hashlock;
+        l.timelock = timelock;
+        unchecked {
+            l.disputeDeadline = block.timestamp + disputeWindowSeconds;
+        }
 
         emit Locked(lockId, msg.sender, recipient, msg.value);
     }
@@ -80,14 +83,20 @@ contract BridgeHTLC is Ownable, Pausable, ReentrancyGuard {
         if (keccak256(abi.encodePacked(secret)) != userLock.hashlock) revert InvalidSecret();
 
         userLock.claimed = true;
-        uint256 fee = (userLock.amount * feeBps) / 10_000;
-        uint256 payout = userLock.amount - fee;
+        uint256 fee;
+        unchecked {
+            fee = (userLock.amount * feeBps) / 10_000;
+        }
+        uint256 payout;
+        unchecked {
+            payout = userLock.amount - fee;
+        }
 
         (bool okRecipient, ) = userLock.recipient.call{value: payout}("");
-        require(okRecipient, "recipient transfer failed");
+        if (!okRecipient) revert TransferToRecipientFailed();
         if (fee > 0 && feeCollector != address(0)) {
             (bool okFee, ) = feeCollector.call{value: fee}("");
-            require(okFee, "fee transfer failed");
+            if (!okFee) revert TransferFeeFailed();
         }
 
         emit Claimed(lockId, keccak256(abi.encodePacked(secret)));
@@ -102,7 +111,7 @@ contract BridgeHTLC is Ownable, Pausable, ReentrancyGuard {
 
         userLock.refunded = true;
         (bool ok, ) = userLock.sender.call{value: userLock.amount}("");
-        require(ok, "refund transfer failed");
+        if (!ok) revert TransferRefundFailed();
         emit Refunded(lockId);
     }
 
@@ -110,7 +119,9 @@ contract BridgeHTLC is Ownable, Pausable, ReentrancyGuard {
         Lock storage userLock = locks[lockId];
         if (userLock.sender == address(0)) revert InvalidLock();
         if (userLock.claimed || userLock.refunded) revert AlreadySettled();
-        userLock.disputeDeadline = block.timestamp + 1 days;
+        unchecked {
+            userLock.disputeDeadline = block.timestamp + 1 days;
+        }
         emit Disputed(lockId, msg.sender);
     }
 

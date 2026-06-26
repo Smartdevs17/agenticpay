@@ -108,3 +108,23 @@ variable "db_proxy_pool_min" {
   type        = number
   default     = 2
 }
+
+# ── HTTP/3 (QUIC) Variables ────────────────────────────────────────────────────
+
+variable "domain_aliases" {
+  description = "Domain aliases for the CloudFront distributions"
+  type        = list(string)
+  default     = []
+}
+
+variable "enable_http3" {
+  description = "Enable HTTP/3 (QUIC) support on CloudFront distributions"
+  type        = bool
+  default     = true
+}
+
+variable "quic_monitoring_enabled" {
+  description = "Enable QUIC connection metrics monitoring"
+  type        = bool
+  default     = true
+}
