@@ -5,6 +5,19 @@ export const queryKeys = {
     lists: () => [...queryKeys.payments.all(), 'list'] as const,
     list: (filters: Record<string, unknown> = {}) => [...queryKeys.payments.lists(), filters] as const,
     detail: (id: string) => [...queryKeys.payments.all(), 'detail', id] as const,
+    infinite: (filters: Record<string, unknown> = {}) => [...queryKeys.payments.lists(), 'infinite', filters] as const,
+  },
+  invoices: {
+    all: () => [...queryKeys.all, 'invoices'] as const,
+    lists: () => [...queryKeys.invoices.all(), 'list'] as const,
+    list: (filters: Record<string, unknown> = {}) => [...queryKeys.invoices.lists(), filters] as const,
+    detail: (id: string) => [...queryKeys.invoices.all(), 'detail', id] as const,
+  },
+  webhooks: {
+    all: () => [...queryKeys.all, 'webhooks'] as const,
+    lists: () => [...queryKeys.webhooks.all(), 'list'] as const,
+    list: (filters: Record<string, unknown> = {}) => [...queryKeys.webhooks.lists(), filters] as const,
+    detail: (id: string) => [...queryKeys.webhooks.all(), 'detail', id] as const,
   },
   disputes: {
     all: () => [...queryKeys.all, 'disputes'] as const,
