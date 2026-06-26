@@ -177,6 +177,10 @@ app.use(
       'Stripe-Signature',
       'X-Hub-Signature-256',
       'X-Webhook-Key-Id',
+      'X-Signature',
+      'X-Timestamp',
+      'X-Nonce',
+      'X-Tenant-Id',
     ],
   })
 );
@@ -202,6 +206,7 @@ app.use(
 
 app.use(slaTrackingMiddleware);
 app.use(sessionMiddleware);
+app.use(tokenAuthMiddleware);
 app.use(cacheControlNoStore);
 
 app.use(healthRouter);
@@ -219,6 +224,9 @@ app.use('/api/', apiRateLimiter);
 // warning/throttle/block penalties, layered on top of the token-bucket
 // limiter above (Issue #520).
 app.use('/api/', slidingWindowRateLimit({ keyPrefix: 'sw:api' }));
+
+// Request coalescing: merge identical concurrent GET requests (#509)
+app.use('/api/', requestCoalescer());
 
 // Apply sandbox-aware rate limiting for sandbox endpoints
 const sandboxRateLimiter = tokenBucketRateLimit({ 
@@ -275,6 +283,9 @@ apiV1Router.get('/compression/metrics', (_req, res) => {
 apiV1Router.get('/pool/metrics', (_req, res) => {
   res.json(poolMetrics.snapshot());
 });
+apiV1Router.get('/coalesce/metrics', (_req, res) => {
+  res.json(getCoalesceMetrics());
+});
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
@@ -323,6 +334,15 @@ app.use('/api/v1/projects', projectsRouter);
 // Two-factor authentication
 app.use('/api/v1/auth/2fa', twoFactorAuthRouter);
 app.use('/api/v1/auth/sessions', sessionsRouter);
+
+// Token refresh & revocation — Issue #512
+app.use('/api/v1/auth', tokenRefreshRouter);
+
+// Session management UI — Issue #512
+app.use('/api/v1/auth/sessions', sessionsRouter);
+
+// HMAC signing key management — Issue #510
+app.use('/api/v1/developers/signing-keys', signingKeysRouter);
 
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());

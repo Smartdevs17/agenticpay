@@ -4,6 +4,7 @@
 import { PrismaClient } from '@prisma/client';
 import { SLOW_QUERY_THRESHOLD_MS, VERY_SLOW_QUERY_THRESHOLD_MS } from '../config/database.js';
 import { withTenantIsolationGuard } from '../security/tenant-isolation/guard.js';
+import { withEncryptionMiddleware } from '../encryption/index.js';
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
@@ -20,7 +21,8 @@ const basePrismaClient =
 // Cross-tenant isolation enforcement (Issue #522) — throws instead of
 // silently leaking data when a query targets a tenant other than the
 // caller's active tenant context.
-export const prisma = withTenantIsolationGuard(basePrismaClient);
+// Column-level AES-256-GCM encryption for PII fields (Issue #511).
+export const prisma = withEncryptionMiddleware(withTenantIsolationGuard(basePrismaClient));
 
 // Attach slow-query detection to Prisma query events (must be registered on
 // the base client — extended clients don't re-expose $on).
