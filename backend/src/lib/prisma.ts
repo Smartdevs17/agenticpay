@@ -3,10 +3,11 @@
 
 import { PrismaClient } from '@prisma/client';
 import { SLOW_QUERY_THRESHOLD_MS, VERY_SLOW_QUERY_THRESHOLD_MS } from '../config/database.js';
+import { withTenantIsolationGuard } from '../security/tenant-isolation/guard.js';
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-export const prisma =
+const basePrismaClient =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: [
@@ -16,8 +17,14 @@ export const prisma =
     ],
   });
 
-// Attach slow-query detection to Prisma query events
-(prisma.$on as Function)('query', (e: { query: string; duration: number }) => {
+// Cross-tenant isolation enforcement (Issue #522) — throws instead of
+// silently leaking data when a query targets a tenant other than the
+// caller's active tenant context.
+export const prisma = withTenantIsolationGuard(basePrismaClient);
+
+// Attach slow-query detection to Prisma query events (must be registered on
+// the base client — extended clients don't re-expose $on).
+(basePrismaClient.$on as Function)('query', (e: { query: string; duration: number }) => {
   if (e.duration >= VERY_SLOW_QUERY_THRESHOLD_MS) {
     console.warn(`[db] 🔴 CRITICAL query ${e.duration}ms: ${e.query.slice(0, 120)}…`);
   } else if (e.duration >= SLOW_QUERY_THRESHOLD_MS) {
@@ -26,7 +33,7 @@ export const prisma =
 });
 
 if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = prisma;
+  globalForPrisma.prisma = basePrismaClient;
 }
 
 // Graceful disconnect helper — call in server shutdown handler

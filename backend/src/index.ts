@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import { tokenBucketRateLimit } from './middleware/rate-limit.js';
 import { apiExpressRateLimit } from './middleware/express-api-rate-limit.js';
+import { slidingWindowRateLimit } from './middleware/sliding-window-rate-limit.js';
 import { compressionMiddleware, getCompressionMetrics } from './middleware/compression.js';
 import { poolMetrics } from './config/database.js';
 import { config } from './config.js';
@@ -79,6 +80,8 @@ import { bridgeRouter } from './routes/bridge.js';
 import { tokenizationRouter } from './routes/tokenization.js';
 import { routingRouter } from './routes/routing.js';
 import { disputesRouter } from './routes/disputes.js';
+import { withdrawalsRouter } from './routes/withdrawals.js';
+import { swapSimulationRouter } from './routes/swap-simulation.js';
 import { startWebhookWorker, stopWebhookWorker } from './services/webhooks.js';
 import { analyticsService } from './services/analytics.js';
 import { createAnalyticsRouter } from './routes/analytics.js';
@@ -211,6 +214,11 @@ app.use('/api', apiExpressRateLimit);
 
 app.use('/api/', apiRateLimiter);
 
+// Sliding-window rate limiter: per-endpoint granularity with graduated
+// warning/throttle/block penalties, layered on top of the token-bucket
+// limiter above (Issue #520).
+app.use('/api/', slidingWindowRateLimit({ keyPrefix: 'sw:api' }));
+
 // Apply sandbox-aware rate limiting for sandbox endpoints
 const sandboxRateLimiter = tokenBucketRateLimit({ 
   keyPrefix: 'rl:sandbox',
@@ -258,6 +266,8 @@ apiV1Router.use('/tokenization', tokenizationRouter);
 apiV1Router.use('/routing', routingRouter);
 apiV1Router.use('/escrow', escrowRouter);
 apiV1Router.use('/disputes', disputesRouter);
+apiV1Router.use('/withdrawals', withdrawalsRouter);
+apiV1Router.use('/swap', swapSimulationRouter);
 apiV1Router.get('/compression/metrics', (_req, res) => {
   res.json(getCompressionMetrics());
 });

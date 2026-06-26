@@ -1,0 +1,52 @@
+name: Cross-Tenant Isolation Audit
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'backend/src/routes/**'
+      - 'backend/src/services/**'
+      - 'backend/src/repositories/**'
+      - 'backend/src/security/tenant-isolation/**'
+      - 'backend/prisma/schema.prisma'
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'backend/src/routes/**'
+      - 'backend/src/services/**'
+      - 'backend/src/repositories/**'
+      - 'backend/src/security/tenant-isolation/**'
+      - 'backend/prisma/schema.prisma'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tenant-isolation-audit:
+    name: Static scan + runtime tenant boundary tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Run static cross-tenant isolation scan
+        run: npm run tenant-isolation:scan
+
+      - name: Run runtime tenant-boundary tests
+        run: npm run tenant-isolation:test

@@ -263,3 +263,55 @@ export const rejectMultisigPaymentSchema = z.object({
   signature: z.string().min(1, 'Signature is required'),
   reason: z.string().optional(),
 });
+
+// ── Withdrawal allowlist (Issue #519) ───────────────────────────────────────
+
+export const configureWalletWithdrawalSchema = z.object({
+  approvalThreshold: z.number().int().min(1).optional(),
+  approvers: z.array(z.string().min(1)).optional(),
+  velocityLimits: z
+    .object({
+      maxAmountPerDay: z.number().positive().optional(),
+      maxAmountPerHour: z.number().positive().optional(),
+      maxCountPerHour: z.number().int().positive().optional(),
+    })
+    .optional(),
+});
+
+export const addWithdrawalAllowlistEntrySchema = z.object({
+  address: z.string().min(1, 'Address is required'),
+  label: z.string().optional(),
+  addedBy: z.string().min(1, 'addedBy is required'),
+});
+
+export const createWithdrawalRequestSchema = z.object({
+  toAddress: z.string().min(1, 'Destination address is required'),
+  amount: z.number().positive('Amount must be positive'),
+  currency: z.string().min(1).default('XLM'),
+  requestedBy: z.string().min(1, 'requestedBy is required'),
+});
+
+export const approveWithdrawalRequestSchema = z.object({
+  approver: z.string().min(1, 'Approver is required'),
+});
+
+export const rejectWithdrawalRequestSchema = z.object({
+  approver: z.string().min(1, 'Approver is required'),
+});
+
+// ── Slippage protection (Issue #521) ────────────────────────────────────────
+
+export const simulateSwapSchema = z.object({
+  amountIn: z.number().positive('amountIn must be positive'),
+  quotedPrice: z.number().positive('quotedPrice must be positive'),
+  priceHistory: z
+    .array(
+      z.object({
+        price: z.number().positive(),
+        timestampMs: z.number().int().positive(),
+      })
+    )
+    .min(1, 'priceHistory must include at least one sample'),
+  slippageBps: z.number().int().min(0).optional(),
+  poolLiquidity: z.number().positive().optional(),
+});
