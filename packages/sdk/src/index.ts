@@ -8,6 +8,7 @@ import { AgenticPayClientOptions } from './types.js';
 export * from './types.js';
 export * from './errors.js';
 export * from './auth.js';
+export * from './webhooks/verifier.js';
 
 export class AgenticPaySDK {
   readonly client: AgenticPayClient;

@@ -74,6 +74,41 @@ updates:
       - "root"
     versioning-strategy: "increase"
 
+  - package-ecosystem: "npm"
+    directory: "/packages/sdk"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "sdk"
+    versioning-strategy: "increase"
+
+  - package-ecosystem: "npm"
+    directory: "/contracts/evm"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "solidity"
+    versioning-strategy: "increase"
+
+  - package-ecosystem: "cargo"
+    directory: "/contracts"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "rust"
+
 # Enable security updates
 security-updates:
   - package-ecosystem: "npm"

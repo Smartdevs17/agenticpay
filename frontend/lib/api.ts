@@ -142,6 +142,29 @@ export interface RotateWebhookSecretRequest {
   gracePeriodHours?: number;
 }
 
+export interface AuditLogEntry {
+  id: string;
+  timestamp: number;
+  userId?: string;
+  action: string;
+  resource: string;
+  resourceId?: string;
+  details?: Record<string, unknown>;
+  previousHash: string;
+  hash: string;
+  suspicious?: boolean;
+}
+
+export interface AuditEntriesResponse {
+  entries: AuditLogEntry[];
+  total: number;
+}
+
+export interface AuditVerifyResponse {
+  valid: boolean;
+  brokenAt?: string;
+}
+
 export interface BatchPaymentItem {
   recipient: string;
   amount: string;
@@ -290,6 +313,22 @@ export const api = {
       markEventProcessed: async (eventId: string) => apiCall(`/webhooks/events/${eventId}/process`, {
         method: 'POST',
       }),
+    },
+
+    audit: {
+      listEntries: async (query?: { userId?: string; action?: string; resource?: string; limit?: number }) => {
+        const params = new URLSearchParams();
+        if (query?.userId) params.set('userId', query.userId);
+        if (query?.action) params.set('action', query.action);
+        if (query?.resource) params.set('resource', query.resource);
+        if (query?.limit) params.set('limit', String(query.limit));
+        return apiCall<AuditEntriesResponse>(`/audit/entries${params.size ? `?${params}` : ''}`, { method: 'GET' });
+      },
+      verify: async () => apiCall<AuditVerifyResponse>('/audit/verify', { method: 'GET' }),
+      anchor: async () => apiCall('/audit/anchor', { method: 'POST' }),
+      listAnchors: async () => apiCall<{ anchors: unknown[] }>('/audit/anchors', { method: 'GET' }),
+      exportJsonUrl: '/api/v1/audit/export/json',
+      exportCsvUrl: '/api/v1/audit/export/csv',
     },
 
     /**

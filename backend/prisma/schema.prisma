@@ -201,6 +201,10 @@ model Webhook {
   url       String
   events    String[]
   secret    String
+  signatureVersion String   @default("v1") @map("signature_version")
+  secretExpiresAt  DateTime? @map("secret_expires_at")
+  rotatedAt        DateTime? @map("rotated_at")
+  encryptionPublicKey String? @map("encryption_public_key")
   status    WebhookStatus @default(active)
   failCount Int           @default(0) @map("fail_count")
   lastFired DateTime?     @map("last_fired")
@@ -234,21 +238,132 @@ model PaymentLink {
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  entityId   String   @map("entity_id")
-  entityType String   @map("entity_type")
-  action     String
-  userId     String?  @map("user_id")
-  metadata   Json?
-  ipAddress  String?  @map("ip_address")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id           String   @id @default(uuid())
+  timestamp    DateTime @default(now())
+  actor        String
+  action       String
+  resource     String
+  details      Json?
+  previousHash String   @map("previous_hash")
+  hash         String   @unique
+  anchorId     String?  @map("anchor_id")
+  archivedAt   DateTime? @map("archived_at")
+  coldArchivedAt DateTime? @map("cold_archived_at")
+  entityId     String?  @map("entity_id")
+  entityType   String?  @map("entity_type")
+  userId       String?  @map("user_id")
+  metadata     Json?
+  ipAddress    String?  @map("ip_address")
+  createdAt    DateTime @default(now()) @map("created_at")
 
   user User? @relation(fields: [userId], references: [id])
 
+  @@index([timestamp])
+  @@index([actor])
+  @@index([action])
+  @@index([actor, action, timestamp])
   @@index([entityId, createdAt])
   @@index([userId])
   @@index([entityType, action])
   @@map("audit_logs")
+}
+
+model AuditAnchor {
+  id              String   @id @default(uuid())
+  latestHash      String   @map("latest_hash")
+  chain           String
+  transactionHash String?  @map("transaction_hash")
+  blockNumber     String?  @map("block_number")
+  status          String   @default("pending")
+  error           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([latestHash])
+  @@index([createdAt])
+  @@map("audit_anchors")
+}
+
+model AccountLockout {
+  id             String   @id @default(uuid())
+  accountId      String   @map("account_id")
+  ipAddress      String?  @map("ip_address")
+  failedAttempts Int      @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until")
+  unlockTokenHash String? @map("unlock_token_hash")
+  lastFailedAt   DateTime? @map("last_failed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([accountId, ipAddress])
+  @@index([accountId])
+  @@index([ipAddress])
+  @@index([lockedUntil])
+  @@map("account_lockouts")
+}
+
+model LoginAttempt {
+  id          String   @id @default(uuid())
+  accountId   String   @map("account_id")
+  ipAddress   String   @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  success     Boolean
+  reason      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([accountId, createdAt])
+  @@index([ipAddress, createdAt])
+  @@index([success])
+  @@map("login_attempts")
+}
+
+model WebhookSecret {
+  id          String   @id @default(uuid())
+  merchantId  String   @map("merchant_id")
+  keyId       String   @map("key_id")
+  secretHash  String   @map("secret_hash")
+  version     String   @default("v1")
+  activeFrom  DateTime @default(now()) @map("active_from")
+  expiresAt   DateTime @map("expires_at")
+  rotatedAt   DateTime? @map("rotated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([merchantId, keyId])
+  @@index([merchantId, expiresAt])
+  @@map("webhook_secrets")
+}
+
+model VulnerabilityReport {
+  id          String   @id @default(uuid())
+  source      String
+  scannedAt   DateTime @default(now()) @map("scanned_at")
+  summary     Json
+  artifactUrl String?  @map("artifact_url")
+
+  vulnerabilities DependencyVulnerability[]
+
+  @@index([source, scannedAt])
+  @@map("vulnerability_reports")
+}
+
+model DependencyVulnerability {
+  id              String   @id @default(uuid())
+  reportId        String   @map("report_id")
+  ecosystem       String
+  packageName     String   @map("package_name")
+  installedVersion String? @map("installed_version")
+  fixedVersion    String?  @map("fixed_version")
+  severity        String
+  advisoryId      String?  @map("advisory_id")
+  title           String
+  remediation     String?
+  dueAt           DateTime? @map("due_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  report VulnerabilityReport @relation(fields: [reportId], references: [id])
+
+  @@index([ecosystem, severity])
+  @@index([packageName])
+  @@map("dependency_vulnerabilities")
 }
 
 model GasEstimate {
@@ -647,4 +762,3 @@ model ApiVersionEndpoint {
   @@index([path])
   @@map("api_version_endpoints")
 }
-

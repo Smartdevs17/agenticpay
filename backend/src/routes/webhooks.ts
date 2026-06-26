@@ -36,6 +36,7 @@ const webhookConfigSchema = z.object({
   url: z.string().url(),
   secret: z.string().min(16),
   enabled: z.boolean().optional(),
+  encryptionPublicKey: z.string().optional(),
 });
 
 const webhookEventSchema = z.object({

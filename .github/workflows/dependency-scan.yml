@@ -1,0 +1,109 @@
+name: Dependency Vulnerability Scan
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  SECURITY_REPORT_DIR: security-reports/dependencies
+  DEPENDENCY_POLICY_PATH: scripts/security/dependency-policy.json
+
+jobs:
+  dependency-scan:
+    name: npm, Cargo, Solidity, and License Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
+            packages/sdk/package-lock.json
+            contracts/evm/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install scan tools
+        run: |
+          mkdir -p "$SECURITY_REPORT_DIR"
+          cargo install cargo-audit --locked
+          npm install -g license-checker
+
+      - name: npm audit
+        continue-on-error: true
+        run: |
+          for dir in . backend frontend packages/sdk contracts/evm; do
+            if [ -f "$dir/package-lock.json" ]; then
+              name=$(echo "$dir" | sed 's#^\.$#root#;s#[/.]#-#g')
+              npm audit --json --prefix "$dir" > "$SECURITY_REPORT_DIR/${name}-npm-audit.json" || true
+              license-checker --json --start "$dir" > "$SECURITY_REPORT_DIR/${name}-licenses.json" || true
+            fi
+          done
+
+      - name: Cargo audit
+        continue-on-error: true
+        working-directory: contracts
+        run: |
+          cargo audit --json > "../$SECURITY_REPORT_DIR/cargo-audit.json" || true
+
+      - name: Solidity dependency/static scan
+        continue-on-error: true
+        run: |
+          python -m pip install --user slither-analyzer
+          "$HOME/.local/bin/slither" contracts --json "$SECURITY_REPORT_DIR/slither.json" --exclude-dependencies || true
+
+      - name: Aggregate and enforce policy
+        run: node scripts/security/aggregate-vulnerability-reports.mjs
+
+      - name: Upload vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-vulnerability-report
+          path: ${{ env.SECURITY_REPORT_DIR }}/
+          retention-days: 90
+
+      - name: Notify Slack on critical vulnerabilities
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL is not configured; skipping Slack notification."
+            exit 0
+          fi
+          curl -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\":\"Critical/high dependency vulnerabilities detected in ${GITHUB_REPOSITORY}. See workflow run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}.\"}" \
+            "$SLACK_WEBHOOK_URL"
+
+      - name: Create issue for scheduled scan failures
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.existsSync(`${process.env.SECURITY_REPORT_DIR}/dependency-vulnerability-report.md`)
+              ? fs.readFileSync(`${process.env.SECURITY_REPORT_DIR}/dependency-vulnerability-report.md`, 'utf8')
+              : 'Dependency scan failed. See workflow artifacts for details.';
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Dependency vulnerabilities detected - ${new Date().toISOString().slice(0, 10)}`,
+              body,
+              labels: ['security', 'dependencies']
+            });
