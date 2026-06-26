@@ -9,6 +9,22 @@ export * from './types.js';
 export * from './errors.js';
 export * from './auth.js';
 export * from './webhooks/verifier.js';
+export type {
+  ApiResponse,
+  CurrencyCode,
+  Dispute,
+  DomainEvent,
+  DomainEventType,
+  Invoice,
+  Merchant,
+  PaginatedResult,
+  Payment,
+  Project,
+  StoredEvent,
+  Transaction,
+  UUID,
+} from '@agenticpay/types';
+export type * as AgenticPayTypes from '@agenticpay/types';
 
 export class AgenticPaySDK {
   readonly client: AgenticPayClient;

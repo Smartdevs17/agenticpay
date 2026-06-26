@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0 - 2026-06-26
+
+### Changed
+
+- Updated packages/types/src
+
 ## [0.1.0] - 2025-05-30
 
 ### Added

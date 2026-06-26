@@ -73,6 +73,20 @@ enum PaymentLinkStatus {
   disabled
 }
 
+enum OutboxEventStatus {
+  pending
+  publishing
+  published
+  dead_letter
+}
+
+enum PluginStatus {
+  installed
+  enabled
+  disabled
+  error
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -266,6 +280,74 @@ model AuditLog {
   @@index([userId])
   @@index([entityType, action])
   @@map("audit_logs")
+}
+
+model OutboxEvent {
+  id            String            @id @default(uuid())
+  aggregateType String            @map("aggregate_type")
+  aggregateId   String            @map("aggregate_id")
+  eventType     String            @map("event_type")
+  payload       Json
+  status        OutboxEventStatus @default(pending)
+  attempts      Int               @default(0)
+  lastError     String?           @map("last_error")
+  publishedAt   DateTime?         @map("published_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+  @@index([publishedAt])
+  @@map("outbox_events")
+}
+
+model Plugin {
+  id            String       @id @default(uuid())
+  name          String       @unique
+  version       String
+  source        String
+  status        PluginStatus @default(installed)
+  compatibility Json
+  health        Json
+  installedAt   DateTime     @default(now()) @map("installed_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  disabledAt    DateTime?    @map("disabled_at")
+
+  configs   PluginConfig[]
+  auditLogs PluginAuditLog[]
+
+  @@index([status])
+  @@index([name, version])
+  @@map("plugins")
+}
+
+model PluginConfig {
+  id          String   @id @default(uuid())
+  pluginId    String   @map("plugin_id")
+  environment String   @default("default")
+  config      Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  plugin Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  @@unique([pluginId, environment])
+  @@map("plugin_configs")
+}
+
+model PluginAuditLog {
+  id        String   @id @default(uuid())
+  pluginId  String   @map("plugin_id")
+  actorId   String?  @map("actor_id")
+  action    String
+  details   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  plugin Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  @@index([pluginId, createdAt])
+  @@map("plugin_audit_logs")
 }
 
 model AuditAnchor {

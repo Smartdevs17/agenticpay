@@ -3,8 +3,37 @@
   "version": "0.1.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./domain": {
+      "types": "./dist/domain/index.d.ts",
+      "default": "./dist/domain/index.js"
+    },
+    "./api": {
+      "types": "./dist/api/index.d.ts",
+      "default": "./dist/api/index.js"
+    },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "default": "./dist/events/index.js"
+    },
+    "./generated/prisma": {
+      "types": "./dist/generated/prisma.d.ts",
+      "default": "./dist/generated/prisma.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
+    "generate:prisma-types": "node scripts/generate-prisma-types.mjs",
+    "check:duplicates": "node scripts/check-type-duplication.mjs",
+    "check:breaking": "node scripts/detect-breaking-changes.mjs",
+    "changelog": "node scripts/generate-changelog.mjs",
+    "migration-guide": "node scripts/generate-migration-guide.mjs",
     "docs": "typedoc --options typedoc.json",
     "lint": "echo 'No lint yet'"
   },
