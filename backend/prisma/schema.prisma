@@ -762,3 +762,49 @@ model ApiVersionEndpoint {
   @@index([path])
   @@map("api_version_endpoints")
 }
+
+// ─── Payment Categories — Issue #251 ─────────────────────────────────────────
+
+enum PaymentCategoryType {
+  subscription
+  invoice
+  donation
+  refund
+  escrow
+  milestone
+  other
+}
+
+model PaymentCategory {
+  id          String              @id @default(uuid())
+  tenantId    String              @map("tenant_id")
+  name        String
+  type        PaymentCategoryType @default(other)
+  description String?
+  color       String?             // hex color for UI display
+  isDefault   Boolean             @default(false) @map("is_default")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  payments    PaymentCategoryAssignment[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([type])
+  @@map("payment_categories")
+}
+
+model PaymentCategoryAssignment {
+  id          String          @id @default(uuid())
+  paymentId   String          @map("payment_id")
+  categoryId  String          @map("category_id")
+  assignedBy  String?         @map("assigned_by")  // userId; null = auto-assigned
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  category    PaymentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, categoryId])
+  @@index([paymentId])
+  @@index([categoryId])
+  @@map("payment_category_assignments")
+}

@@ -11,6 +11,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    setupFiles: ['./vitest.setup.ts'],
     // Only unit/integration tests — Playwright E2E specs live under e2e/
     // and are executed via `npm run test:e2e`.
     include: ['**/*.test.{ts,tsx}'],

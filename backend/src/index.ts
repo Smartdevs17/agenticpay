@@ -109,6 +109,10 @@ import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
 import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
 import devDevRouter from './routes/dev/reload.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { categoriesRouter } from './routes/categories.js';
+import './cqrs/commands/index.js';
+import './cqrs/queries/index.js';
+import './cqrs/projections/index.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -330,6 +334,9 @@ app.use('/api/v1/tax', taxRouter);
 
 // Project + milestone delivery approval workflow
 app.use('/api/v1/projects', projectsRouter);
+
+// Payment categories — Issue #251
+app.use('/api/v1/categories', categoriesRouter);
 
 // Two-factor authentication
 app.use('/api/v1/auth/2fa', twoFactorAuthRouter);

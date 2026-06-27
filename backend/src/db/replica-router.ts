@@ -128,7 +128,7 @@ export class ReplicaRouter {
     model: string,
     args: any,
     sessionId?: string,
-    forceP Primary = false
+    forcePrimary = false
   ): Promise<T> {
     const isRead = this.isReadQuery(operation);
 
