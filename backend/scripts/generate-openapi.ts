@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createOpenAPIGenerator } from '../src/lib/openapi-generator.js';
 import { registerRoutesFromRegistry } from '../src/lib/openapi-registry.js';
+import { API_OPERATIONS } from '@agenticpay/api-spec';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(__dirname, '..');
@@ -55,6 +56,40 @@ async function generateOpenAPISpec(config: GeneratorConfig): Promise<void> {
   });
 
   registerRoutesFromRegistry(generator);
+
+  for (const operation of API_OPERATIONS) {
+    generator.registerPath(operation.method, operation.path.replace(/^\/api\/v1/, ''), {
+      tags: operation.tags,
+      summary: operation.summary,
+      deprecated: operation.deprecated,
+      responses: Object.fromEntries(
+        Object.keys(operation.responses).map((status) => [
+          status,
+          {
+            description: status.startsWith('2') ? 'Successful response' : 'Error response',
+            content: {
+              'application/json': {
+                schema: { type: 'object' },
+              },
+            },
+          },
+        ])
+      ),
+      ...(operation.sunset
+        ? {
+            parameters: [
+              {
+                name: 'Sunset',
+                in: 'header',
+                description: `Endpoint sunset date: ${operation.sunset}`,
+                required: false,
+                schema: { type: 'string', format: 'date-time' },
+              },
+            ],
+          }
+        : {}),
+    });
+  }
 
   const specDir = path.join(config.outputDir, 'openapi');
   fs.mkdirSync(specDir, { recursive: true });

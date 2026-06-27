@@ -1,16 +1,5 @@
-export class AgenticPayError extends Error {
-  readonly status?: number;
-  readonly code?: string;
-  readonly details?: unknown;
-
-  constructor(message: string, options?: { status?: number; code?: string; details?: unknown }) {
-    super(message);
-    this.name = 'AgenticPayError';
-    this.status = options?.status;
-    this.code = options?.code;
-    this.details = options?.details;
-  }
-}
+import { AgenticPayError } from './errors/base.js';
+export { AgenticPayError } from './errors/base.js';
 
 export class AuthenticationError extends AgenticPayError {
   constructor(message = 'Authentication failed', details?: unknown) {
@@ -46,3 +35,5 @@ export class NetworkError extends AgenticPayError {
     this.name = 'NetworkError';
   }
 }
+
+export * from './errors/generated.js';

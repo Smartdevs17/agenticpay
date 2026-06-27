@@ -956,6 +956,39 @@ model ApiVersionEndpoint {
   @@map("api_version_endpoints")
 }
 
+// ─── Centralized Configuration — Issue #481 ──────────────────────────────────
+
+model AppConfiguration {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       Json
+  source      String   @default("database")
+  description String?
+  updatedBy   String?  @map("updated_by")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([source])
+  @@map("app_configurations")
+}
+
+model ConfigAuditLog {
+  id        String   @id @default(uuid())
+  key       String
+  oldValue  Json?    @map("old_value")
+  newValue  Json?    @map("new_value")
+  actor     String?
+  reason    String?
+  source    String   @default("admin")
+  requestId String?  @map("request_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([key, createdAt])
+  @@index([actor])
+  @@map("config_audit_logs")
+}
+
 // ─── Payment Categories — Issue #251 ─────────────────────────────────────────
 
 enum PaymentCategoryType {

@@ -29,6 +29,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@agenticpay/error-codes": "*",
     "@agenticpay/types": "*"
   },
   "devDependencies": {

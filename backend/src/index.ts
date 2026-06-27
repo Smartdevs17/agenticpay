@@ -117,6 +117,9 @@ import { startOutboxPublisher, stopOutboxPublisher } from './outbox/index.js';
 import { gasRouter } from './routes/gas.js';
 import { vaultsRouter } from './routes/vaults.js';
 import { createConnectionManager } from './websocket/connection-manager.js';
+import { configurationRouter } from './routes/configuration.js';
+import { errorsRouter } from './routes/errors.js';
+import { openApiValidator } from './middleware/openapi-validator.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -203,6 +206,7 @@ app.use('/webhooks', webhookHandlersRouter);
 
 app.use(express.json());
 app.use(express.text({ type: ['text/csv', 'text/plain'] }));
+app.use('/api', openApiValidator({ validateResponses: process.env.OPENAPI_VALIDATE_RESPONSES === 'true' }));
 
 app.use(
   compressionMiddleware({
@@ -219,6 +223,8 @@ app.use(cacheControlNoStore);
 
 app.use(healthRouter);
 app.use('/docs', docsRouter);
+app.use('/api-docs', docsRouter);
+app.use('/api', errorsRouter);
 
 // Cold start monitoring dashboard — available before auth/rate-limit middleware
 app.use('/api/v1/cold-start', coldStartMonitorRouter);
@@ -339,6 +345,7 @@ app.use('/api/v1/tax', taxRouter);
 
 // Third-party backend plugins
 app.use('/api/v1/admin/plugins', pluginsRouter);
+app.use('/api/v1/admin/configuration', configurationRouter);
 
 // Smart contract emergency pause management (Issue #513)
 app.use('/api/v1/admin/contracts/pause', pauseManagerRouter);

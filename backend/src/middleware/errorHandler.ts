@@ -1,4 +1,5 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
+import { ERROR_CODE_REGISTRY, resolveErrorCode } from '@agenticpay/error-codes';
 
 type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<unknown>;
 
@@ -26,10 +27,11 @@ export function notFoundHandler(req: Request, _res: Response, next: NextFunction
   next(new AppError(404, `Route not found: ${req.method} ${req.originalUrl}`, 'NOT_FOUND'));
 }
 
-export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
   const isAppError = err instanceof AppError;
   const statusCode = isAppError ? err.statusCode : 500;
-  const code = isAppError ? err.code : 'INTERNAL_SERVER_ERROR';
+  const code = resolveErrorCode(isAppError ? err.code : undefined, statusCode);
+  const registered = ERROR_CODE_REGISTRY[code];
   const isProduction = process.env.NODE_ENV === 'production';
   const message = isAppError
     ? err.message
@@ -39,15 +41,20 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
         ? err.message
         : 'Unexpected error';
 
-  const logMethod = statusCode >= 500 ? console.error : console.warn;
+  const logMethod = registered.httpStatus >= 500 ? console.error : console.warn;
   logMethod(`[${code}] ${message}`, err);
 
-  res.status(statusCode).json({
+  if (registered.deprecated && registered.sunsetAt) {
+    res.setHeader('Sunset', registered.sunsetAt);
+    res.setHeader('Deprecation', 'true');
+  }
+
+  res.status(registered.httpStatus || statusCode).json({
     error: {
       code,
       message,
-      status: statusCode,
       ...(isAppError && err.details !== undefined ? { details: err.details } : {}),
+      ...(req.requestId ? { requestId: req.requestId } : {}),
       ...(!isProduction && !isAppError && err instanceof Error && err.stack
         ? { stack: err.stack }
         : {}),
