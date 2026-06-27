@@ -63,8 +63,9 @@ vaultsRouter.post(
   '/:id/deploy',
   validate(recordDeploymentSchema),
   asyncHandler(async (req, res) => {
+    const tenantId = getTenantId(req);
     const { contractAddress, contractVaultId } = req.body as { contractAddress: string; contractVaultId: string };
-    const result = await vaultService.recordContractDeployment(req.params.id, contractAddress, contractVaultId);
+    const result = await vaultService.recordContractDeployment(req.params.id, tenantId, contractAddress, contractVaultId);
     if (!result.ok) throw new AppError(result.error.statusCode, result.error.message, result.error.code);
     res.json({ data: result.value, timestamp: new Date() });
   }),

@@ -90,8 +90,10 @@ export class VaultService extends BaseService {
     }
   }
 
-  async recordContractDeployment(id: string, contractAddress: string, contractVaultId: string): Promise<Result<PaymentVault>> {
+  async recordContractDeployment(id: string, tenantId: string, contractAddress: string, contractVaultId: string): Promise<Result<PaymentVault>> {
     try {
+      const existing = await prisma.paymentVault.findFirst({ where: { id, tenantId, deletedAt: null } });
+      if (!existing) return this.notFoundFailure('PaymentVault', id);
       const vault = await prisma.paymentVault.update({
         where: { id },
         data: { contractAddress, contractVaultId, status: 'active' },

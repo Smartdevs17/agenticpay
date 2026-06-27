@@ -8,6 +8,8 @@ export interface ConnectionManagerOptions {
   maxConnectionsPerUser?: number;
   idleTimeoutMs?: number;
   requireAuth?: boolean;
+  /** Trust X-Forwarded-For header for IP resolution. Only enable when sitting behind a known proxy. */
+  trustProxy?: boolean;
 }
 
 export interface ConnectionManagerMetrics extends WebSocketServerMetrics {
@@ -21,6 +23,7 @@ const DEFAULT_OPTIONS: Required<ConnectionManagerOptions> = {
   maxConnectionsPerUser: 5,
   idleTimeoutMs: 5 * 60 * 1000,
   requireAuth: false,
+  trustProxy: false,
 };
 
 export class ConnectionManager {
@@ -40,6 +43,10 @@ export class ConnectionManager {
     options?: ConnectionManagerOptions,
   ) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
+  }
+
+  get resolvedOptions(): Required<ConnectionManagerOptions> {
+    return this.options;
   }
 
   checkIpLimit(ip: string): boolean {
@@ -103,10 +110,10 @@ export function createConnectionManager(
   const authHandler = createWsAuthHandler({ allowQueryParam: true });
 
   server.prependListener('upgrade', (req, socket) => {
-    const ip =
-      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
-      (socket as unknown as { remoteAddress?: string }).remoteAddress ??
-      '0.0.0.0';
+    const peerAddress = (socket as unknown as { remoteAddress?: string }).remoteAddress ?? '0.0.0.0';
+    const ip = manager.resolvedOptions.trustProxy
+      ? ((req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? peerAddress)
+      : peerAddress;
 
     // Auth check
     if (options?.requireAuth) {
