@@ -329,6 +329,57 @@ export const api = {
       listAnchors: async () => apiCall<{ anchors: unknown[] }>('/audit/anchors', { method: 'GET' }),
       exportJsonUrl: '/api/v1/audit/export/json',
       exportCsvUrl: '/api/v1/audit/export/csv',
+      streamExportUrl: (format: 'csv' | 'jsonl' = 'csv') => `/api/v1/exports/audit/stream?format=${format}`,
+    },
+
+    /**
+     * Contract Pause Management API (Issue #513)
+     */
+    contractPause: {
+      list: async (filters?: { status?: string; chain?: string }) => {
+        const params = new URLSearchParams();
+        if (filters?.status) params.set('status', filters.status);
+        if (filters?.chain) params.set('chain', filters.chain);
+        return apiCall<{ records: unknown[]; total: number }>(`/admin/contracts/pause${params.size ? `?${params}` : ''}`, { method: 'GET' });
+      },
+      get: async (pauseId: string) => apiCall(`/admin/contracts/pause/${pauseId}`, { method: 'GET' }),
+      request: async (payload: { chain: string; contractAddress: string; pauseImplementation: string; requestedBy: string; threshold?: number; timeoutSeconds?: number }) =>
+        apiCall('/admin/contracts/pause/request', { method: 'POST', body: JSON.stringify(payload) }),
+      approve: async (pauseId: string, guardianAddress: string) =>
+        apiCall(`/admin/contracts/pause/${pauseId}/approve`, { method: 'POST', body: JSON.stringify({ guardianAddress }) }),
+      resolve: async (pauseId: string, resolvedBy: string) =>
+        apiCall(`/admin/contracts/pause/${pauseId}/resolve`, { method: 'POST', body: JSON.stringify({ resolvedBy }) }),
+      checkExpiry: async () => apiCall('/admin/contracts/pause/check-expiry', { method: 'POST' }),
+      listGuardians: async () => apiCall<{ guardians: unknown[] }>('/admin/contracts/pause/guardians/list', { method: 'GET' }),
+      addGuardian: async (address: string, chain: string) =>
+        apiCall('/admin/contracts/pause/guardians', { method: 'POST', body: JSON.stringify({ address, chain }) }),
+      removeGuardian: async (address: string) =>
+        apiCall(`/admin/contracts/pause/guardians/${encodeURIComponent(address)}`, { method: 'DELETE' }),
+    },
+
+    /**
+     * Streaming Export API (Issue #500)
+     */
+    exports: {
+      getJobStatus: async (exportId: string) => apiCall<{ id: string; status: string; rowsProcessed: number; progress?: number }>(`/exports/${exportId}/status`, { method: 'GET' }),
+      cancelExport: async (exportId: string) => apiCall(`/exports/${exportId}`, { method: 'DELETE' }),
+      listJobs: async () => apiCall<{ jobs: unknown[]; activeCount: number }>('/exports/jobs/list', { method: 'GET' }),
+      auditStreamUrl: (params?: { format?: string; startDate?: string; endDate?: string; limit?: string }) => {
+        const query = new URLSearchParams();
+        if (params?.format) query.set('format', params.format);
+        if (params?.startDate) query.set('startDate', params.startDate);
+        if (params?.endDate) query.set('endDate', params.endDate);
+        if (params?.limit) query.set('limit', params.limit);
+        return `/api/v1/exports/audit/stream${query.size ? `?${query}` : ''}`;
+      },
+      paymentsStreamUrl: (params?: { format?: string; from?: string; to?: string; limit?: string }) => {
+        const query = new URLSearchParams();
+        if (params?.format) query.set('format', params.format);
+        if (params?.from) query.set('from', params.from);
+        if (params?.to) query.set('to', params.to);
+        if (params?.limit) query.set('limit', params.limit);
+        return `/api/v1/exports/payments/stream${query.size ? `?${query}` : ''}`;
+      },
     },
 
     /**

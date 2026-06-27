@@ -111,6 +111,8 @@ import devDevRouter from './routes/dev/reload.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { pluginsRouter } from './routes/plugins.js';
 import { outboxRouter } from './routes/outbox.js';
+import { pauseManagerRouter } from './routes/pause-manager.js';
+import { streamingExportRouter } from './routes/streaming-export.js';
 import { startOutboxPublisher, stopOutboxPublisher } from './outbox/index.js';
 
 // Validate environment variables at startup
@@ -334,6 +336,12 @@ app.use('/api/v1/tax', taxRouter);
 
 // Third-party backend plugins
 app.use('/api/v1/admin/plugins', pluginsRouter);
+
+// Smart contract emergency pause management (Issue #513)
+app.use('/api/v1/admin/contracts/pause', pauseManagerRouter);
+
+// Streaming exports for large datasets (Issue #500)
+app.use('/api/v1/exports', streamingExportRouter);
 
 // Project + milestone delivery approval workflow
 app.use('/api/v1/projects', projectsRouter);
