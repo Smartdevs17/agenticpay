@@ -87,6 +87,22 @@ enum PluginStatus {
   error
 }
 
+enum VaultStatus {
+  pending
+  active
+  disputed
+  completed
+  refunded
+}
+
+enum VaultMilestoneStatus {
+  pending
+  approved
+  released
+  expired
+  disputed
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -126,6 +142,7 @@ model Payment {
   fromAddress     String?       @map("from_address")
   toAddress       String?       @map("to_address")
   metadata        Json?
+  providerId      String?       @map("provider_id")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
   deletedAt       DateTime?     @map("deleted_at")
@@ -138,6 +155,7 @@ model Payment {
   @@index([status], map: "payments_active_status_idx")
   @@index([txHash])
   @@index([projectId])
+  @@index([providerId])
   @@map("payments")
 }
 
@@ -458,6 +476,99 @@ model GasEstimate {
 
   @@index([network, recordedAt])
   @@map("gas_estimates")
+}
+
+// ─── Payment Provider Models (#480) ──────────────────────────────────────────
+
+// ─── Gas Budget & Prediction Models (#479) ────────────────────────────────────
+
+model GasBudget {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  walletAddress String    @map("wallet_address")
+  chainId       Int       @map("chain_id")
+  limitGwei     Float     @map("limit_gwei")
+  usedGwei      Float     @default(0) @map("used_gwei")
+  resetAt       DateTime  @map("reset_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  @@unique([tenantId, walletAddress, chainId])
+  @@index([tenantId])
+  @@index([walletAddress, chainId])
+  @@map("gas_budgets")
+}
+
+model GasPredictionLog {
+  id            String   @id @default(uuid())
+  network       String
+  horizon       String
+  predictedGwei Float    @map("predicted_gwei")
+  actualGwei    Float?   @map("actual_gwei")
+  errorPct      Float?   @map("error_pct")
+  recordedAt    DateTime @default(now()) @map("recorded_at")
+
+  @@index([network, horizon, recordedAt])
+  @@map("gas_prediction_logs")
+}
+
+// ─── Payment Vault Models (#478) ─────────────────────────────────────────────
+
+model PaymentVault {
+  id               String      @id @default(uuid())
+  tenantId         String      @map("tenant_id")
+  depositorAddress String      @map("depositor_address")
+  recipientAddress String      @map("recipient_address")
+  totalAmount      Decimal     @db.Decimal(20, 8) @map("total_amount")
+  currency         String
+  network          String
+  status           VaultStatus @default(pending)
+  contractAddress  String?     @map("contract_address")
+  contractVaultId  String?     @map("contract_vault_id")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  deletedAt        DateTime?   @map("deleted_at")
+
+  milestones VaultMilestone[]
+
+  @@index([tenantId, status])
+  @@index([depositorAddress])
+  @@index([contractAddress])
+  @@map("payment_vaults")
+}
+
+model VaultMilestone {
+  id              String               @id @default(uuid())
+  vaultId         String               @map("vault_id")
+  name            String
+  amountPercent   Int                  @map("amount_percent")
+  deadline        DateTime
+  approverAddress String               @map("approver_address")
+  status          VaultMilestoneStatus @default(pending)
+  releasedAt      DateTime?            @map("released_at")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  deletedAt       DateTime?            @map("deleted_at")
+
+  vault    PaymentVault       @relation(fields: [vaultId], references: [id])
+  releases MilestoneRelease[]
+
+  @@index([vaultId, status])
+  @@map("vault_milestones")
+}
+
+model MilestoneRelease {
+  id          String   @id @default(uuid())
+  milestoneId String   @map("milestone_id")
+  txHash      String?  @map("tx_hash")
+  releasedAt  DateTime @default(now()) @map("released_at")
+  triggeredBy String   @map("triggered_by")
+
+  milestone VaultMilestone @relation(fields: [milestoneId], references: [id])
+
+  @@index([milestoneId])
+  @@map("milestone_releases")
 }
 
 // ─── Sandbox Models ───────────────────────────────────────────────────────────

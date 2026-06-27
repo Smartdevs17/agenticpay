@@ -33,7 +33,20 @@ import {
   BarChart3,
 } from 'lucide-react';
 
-// ── Types (mirrored from backend analytics.ts) ─────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface WsMetrics {
+  activeConnections: number;
+  acceptedConnections: number;
+  rejectedConnections: number;
+  rejectedByIpLimit: number;
+  rejectedByAuthFailure: number;
+  idleDisconnections: number;
+  messagesIn: number;
+  messagesOut: number;
+}
+
+// ── Original types (mirrored from backend analytics.ts) ────────────────────
 
 interface FunnelStep {
   stage: string;
@@ -112,6 +125,7 @@ const TIME_PRESETS = [
 export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsSnapshot | null>(null);
   const [percentiles, setPercentiles] = useState<MerchantPercentile | null>(null);
+  const [wsMetrics, setWsMetrics] = useState<WsMetrics | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [hours, setHours] = useState<number>(24);
@@ -131,6 +145,11 @@ export default function AnalyticsPage() {
       fetch(`${API_URL}/api/v1/analytics/percentiles?hours=${selectedHours}`)
         .then((r) => r.json())
         .then(setPercentiles)
+        .catch(console.error);
+
+      fetch(`${API_URL}/api/v1/websocket/metrics`)
+        .then((r) => r.json())
+        .then((m: WsMetrics) => setWsMetrics(m))
         .catch(console.error);
     },
     [applySnapshot],
@@ -321,6 +340,40 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* WebSocket Connection Metrics */}
+      {wsMetrics && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-base font-semibold">WebSocket Connections</CardTitle>
+            {wsConnected ? (
+              <Wifi className="h-4 w-4 text-green-500" aria-hidden="true" />
+            ) : (
+              <WifiOff className="h-4 w-4 text-gray-400" aria-hidden="true" />
+            )}
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div>
+                <p className="text-xs text-muted-foreground">Active</p>
+                <p className="text-xl font-bold text-green-600">{wsMetrics.activeConnections}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Accepted</p>
+                <p className="text-xl font-bold">{wsMetrics.acceptedConnections}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">IP Rejected</p>
+                <p className="text-xl font-bold text-amber-600">{wsMetrics.rejectedByIpLimit}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Auth Rejected</p>
+                <p className="text-xl font-bold text-red-600">{wsMetrics.rejectedByAuthFailure}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

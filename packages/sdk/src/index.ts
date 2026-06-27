@@ -4,6 +4,8 @@ import { PaymentsApi } from './payments.js';
 import { RefundsApi } from './refunds.js';
 import { VerificationApi } from './verification.js';
 import { AgenticPayClientOptions } from './types.js';
+export { AgenticPayWebSocket } from './websocket.js';
+export type { SdkWebSocketOptions, MessageHandler } from './websocket.js';
 
 export * from './types.js';
 export * from './errors.js';

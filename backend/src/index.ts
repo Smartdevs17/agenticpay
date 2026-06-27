@@ -114,6 +114,9 @@ import { outboxRouter } from './routes/outbox.js';
 import { pauseManagerRouter } from './routes/pause-manager.js';
 import { streamingExportRouter } from './routes/streaming-export.js';
 import { startOutboxPublisher, stopOutboxPublisher } from './outbox/index.js';
+import { gasRouter } from './routes/gas.js';
+import { vaultsRouter } from './routes/vaults.js';
+import { createConnectionManager } from './websocket/connection-manager.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -339,6 +342,8 @@ app.use('/api/v1/admin/plugins', pluginsRouter);
 
 // Smart contract emergency pause management (Issue #513)
 app.use('/api/v1/admin/contracts/pause', pauseManagerRouter);
+app.use('/api/v1/gas', gasRouter);
+app.use('/api/v1/vaults', vaultsRouter);
 
 // Streaming exports for large datasets (Issue #500)
 app.use('/api/v1/exports', streamingExportRouter);
@@ -453,7 +458,11 @@ const server = http.createServer(app);
 const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
 bindWebSocketServer(wsServer);
 app.set('wsServer', wsServer);
-app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
+
+// WebSocket connection manager: IP rate limiting + auth gating (#477)
+const wsConnectionManager = createConnectionManager(server, wsServer, { maxConnectionsPerIp: 10 });
+
+app.use('/api/v1/websocket', createWebSocketRouter(wsServer, wsConnectionManager));
 app.use('/api/v1/analytics', createAnalyticsRouter(wsServer));
 
 const analyticsInterval = setInterval(() => {
