@@ -109,10 +109,9 @@ import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
 import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
 import devDevRouter from './routes/dev/reload.js';
 import { sessionsRouter } from './routes/sessions.js';
-import { categoriesRouter } from './routes/categories.js';
-import './cqrs/commands/index.js';
-import './cqrs/queries/index.js';
-import './cqrs/projections/index.js';
+import { pluginsRouter } from './routes/plugins.js';
+import { outboxRouter } from './routes/outbox.js';
+import { startOutboxPublisher, stopOutboxPublisher } from './outbox/index.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -248,6 +247,7 @@ apiV1Router.use('/catalog', catalogRouter);
 apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
 apiV1Router.use('/queue', bullMQMonitorRouter);
+apiV1Router.use('/outbox', outboxRouter);
 apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
@@ -331,6 +331,9 @@ app.use('/api/v1/payment-links', paymentLinksRouter);
 
 // Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export)
 app.use('/api/v1/tax', taxRouter);
+
+// Third-party backend plugins
+app.use('/api/v1/admin/plugins', pluginsRouter);
 
 // Project + milestone delivery approval workflow
 app.use('/api/v1/projects', projectsRouter);
@@ -419,6 +422,7 @@ if (config.queue.enabled) {
   paymentQueue.start();
 }
 startWebhookWorker();
+startOutboxPublisher({ useBullMQ: Boolean(process.env.REDIS_URL) });
 
 // Auto-escalation cron
 setInterval(async () => {
@@ -484,6 +488,7 @@ server.listen(config.server.port, () => {
 
     // Webhook worker
     startWebhookWorker();
+    startOutboxPublisher({ useBullMQ: Boolean(process.env.REDIS_URL) });
 
     // Auto-escalation cron
     setInterval(async () => {
@@ -542,6 +547,7 @@ const shutdown = (signal: string) => {
       messageQueue.stop();
       paymentQueue.stop();
       stopWebhookWorker();
+      void stopOutboxPublisher();
       console.log('Message queue stopped.');
     } catch (err) {
       console.error('Error stopping message queue:', err);

@@ -1,0 +1,34 @@
+name: Types Contract
+
+on:
+  pull_request:
+    paths:
+      - 'packages/types/**'
+      - 'backend/prisma/schema.prisma'
+      - 'backend/src/**'
+      - 'frontend/**'
+      - 'packages/sdk/src/**'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/types/**'
+      - 'backend/prisma/schema.prisma'
+
+jobs:
+  shared-types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run generate:prisma-types --workspace @agenticpay/types
+      - run: npm run build --workspace @agenticpay/types
+      - run: npm run check:duplicates --workspace @agenticpay/types
+      - run: TYPE_API_BASE_REF=origin/main npm run check:breaking --workspace @agenticpay/types
+      - run: npm run changelog --workspace @agenticpay/types
+      - run: npm run migration-guide --workspace @agenticpay/types
