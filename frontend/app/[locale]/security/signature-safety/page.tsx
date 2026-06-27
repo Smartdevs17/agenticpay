@@ -1,4 +1,4 @@
-import { SIGNATURE_SAFETY_NOTICE } from '@/lib/signatures';
+import { SIGNATURE_SAFETY_NOTICE } from '@/lib/signature-notice';
 
 export default function SignatureSafetyPage() {
   return (

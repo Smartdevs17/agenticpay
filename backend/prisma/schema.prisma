@@ -1001,3 +1001,227 @@ model PaymentCategoryAssignment {
   @@index([categoryId])
   @@map("payment_category_assignments")
 }
+
+// ─── On-Chain Data Archival — Issue #473 ─────────────────────────────────────
+
+enum ArchivalBatchStatus {
+  pending
+  collecting
+  compressing
+  uploading
+  completed
+  failed
+  restoring
+}
+
+enum ArchivalChain {
+  stellar
+  ethereum
+  polygon
+  base
+  arbitrum
+  soroban
+}
+
+model ArchivalBatch {
+  id                String              @id @default(uuid())
+  batchDate         DateTime            @db.Date @map("batch_date")
+  status            ArchivalBatchStatus @default(pending)
+  chain             ArchivalChain
+  recordCount       Int                 @default(0) @map("record_count")
+  uncompressedBytes BigInt              @default(0) @map("uncompressed_bytes")
+  compressedBytes   BigInt              @default(0) @map("compressed_bytes")
+  contentHash       String?             @map("content_hash")
+  ipfsCid           String?             @map("ipfs_cid")
+  ipfsUrl           String?             @map("ipfs_url")
+  verifiedHash      String?             @map("verified_hash")
+  errorMessage      String?             @map("error_message")
+  retentionUntil    DateTime            @map("retention_until")
+  startedAt         DateTime?           @map("started_at")
+  completedAt       DateTime?           @map("completed_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  records DataArchive[]
+
+  @@unique([batchDate, chain])
+  @@index([status])
+  @@index([batchDate])
+  @@index([ipfsCid])
+  @@map("archival_batches")
+}
+
+model DataArchive {
+  id               String        @id @default(uuid())
+  batchId          String        @map("batch_id")
+  chain            ArchivalChain
+  txHash           String        @map("tx_hash")
+  blockNumber      BigInt        @map("block_number")
+  blockHash        String?       @map("block_hash")
+  payload          Json
+  payloadHash      String        @map("payload_hash")
+  proofOfInclusion Json          @map("proof_of_inclusion")
+  indexedAt        DateTime?     @map("indexed_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  batch ArchivalBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([chain, txHash])
+  @@index([blockNumber])
+  @@map("data_archives")
+}
+
+// ─── Contract Upgrade Safety — Issue #474 ────────────────────────────────────
+
+enum UpgradeValidationStatus {
+  pending
+  running
+  passed
+  failed
+  rolled_back
+}
+
+enum ContractPlatform {
+  evm
+  soroban
+}
+
+model ContractUpgrade {
+  id                     String                  @id @default(uuid())
+  contractName           String                  @map("contract_name")
+  platform               ContractPlatform
+  network                String
+  proxyAddress           String                  @map("proxy_address")
+  previousImplementation String?                 @map("previous_implementation")
+  newImplementation      String                  @map("new_implementation")
+  deployerAddress        String?                 @map("deployer_address")
+  timelockAddress        String?                 @map("timelock_address")
+  status                 UpgradeValidationStatus @default(pending)
+  deployedAt             DateTime?               @map("deployed_at")
+  rolledBackAt           DateTime?               @map("rolled_back_at")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+
+  validationReports UpgradeValidationReport[]
+
+  @@index([network, contractName])
+  @@index([status])
+  @@map("contract_upgrades")
+}
+
+model UpgradeValidationReport {
+  id                     String                  @id @default(uuid())
+  upgradeId              String                  @map("upgrade_id")
+  status                 UpgradeValidationStatus
+  storageLayoutDiff      Json?                   @map("storage_layout_diff")
+  simulationPassed       Boolean                 @default(false) @map("simulation_passed")
+  smokeTestsPassed       Boolean                 @default(false) @map("smoke_tests_passed")
+  adminPreserved         Boolean                 @default(false) @map("admin_preserved")
+  proxyAdminValid        Boolean                 @default(false) @map("proxy_admin_valid")
+  implementationVerified Boolean                 @default(false) @map("implementation_verified")
+  failures               Json?
+  warnings               Json?
+  forkBlockNumber        BigInt?                 @map("fork_block_number")
+  durationMs             Int?                    @map("duration_ms")
+  createdAt              DateTime                @default(now()) @map("created_at")
+
+  upgrade ContractUpgrade @relation(fields: [upgradeId], references: [id], onDelete: Cascade)
+
+  @@index([upgradeId])
+  @@index([status])
+  @@map("upgrade_validation_reports")
+}
+
+// ─── Bridge Monitoring — Issue #475 ────────────────────────────────────────
+
+enum BridgeProvider {
+  wormhole
+  layerzero
+  axelar
+  custom
+}
+
+enum BridgeMessageStatus {
+  initiated
+  source_confirmed
+  relayed
+  destination_executed
+  failed
+  stuck
+  expired
+}
+
+enum BridgeAlertSeverity {
+  info
+  warning
+  critical
+}
+
+model BridgeMessage {
+  id                 String              @id @default(uuid())
+  provider           BridgeProvider
+  sourceChain        String              @map("source_chain")
+  destinationChain   String              @map("destination_chain")
+  messageId          String              @map("message_id")
+  txHashSource       String?             @map("tx_hash_source")
+  txHashDestination  String?             @map("tx_hash_destination")
+  status             BridgeMessageStatus @default(initiated)
+  amount             String?
+  tokenAddress       String?             @map("token_address")
+  sender             String?
+  recipient          String?
+  gasCostSource      String?             @map("gas_cost_source")
+  gasCostDestination String?             @map("gas_cost_destination")
+  initiatedAt        DateTime            @default(now()) @map("initiated_at")
+  sourceConfirmedAt  DateTime?           @map("source_confirmed_at")
+  relayedAt          DateTime?           @map("relayed_at")
+  executedAt         DateTime?           @map("executed_at")
+  expectedDeliveryMs Int                 @default(300000) @map("expected_delivery_ms")
+  metadata           Json?
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  alerts  BridgeAlert[]
+  retries BridgeRetry[]
+
+  @@unique([provider, messageId])
+  @@index([status])
+  @@index([provider])
+  @@index([sourceChain, destinationChain])
+  @@index([initiatedAt])
+  @@map("bridge_messages")
+}
+
+model BridgeAlert {
+  id           String              @id @default(uuid())
+  messageId    String              @map("message_id")
+  severity     BridgeAlertSeverity
+  alertType    String              @map("alert_type")
+  message      String
+  acknowledged Boolean             @default(false)
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  bridgeMessage BridgeMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([severity])
+  @@map("bridge_alerts")
+}
+
+model BridgeRetry {
+  id           String    @id @default(uuid())
+  messageId    String    @map("message_id")
+  attempt      Int       @default(1)
+  status       String    @default("pending")
+  txHash       String?   @map("tx_hash")
+  errorMessage String?   @map("error_message")
+  initiatedBy  String?   @map("initiated_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  completedAt  DateTime? @map("completed_at")
+
+  bridgeMessage BridgeMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("bridge_retries")
+}

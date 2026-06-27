@@ -60,6 +60,13 @@ jobs:
       - name: Compile contracts
         run: npx hardhat compile
 
+      - name: Validate upgrade safety (OZ dry-run)
+        run: npx hardhat run scripts/upgrade.ts --network hardhat
+        env:
+          PROPOSE_ONLY: 'true'
+          SPLITTER_CONTRACT: SplitterV2
+        continue-on-error: true
+
       - name: Type-check scripts & tests
         run: npm run lint
 

@@ -1,0 +1,96 @@
+{
+  "common": {
+    "appName": "AgenticPay",
+    "loading": "読み込み中…",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "error": "問題が発生しました",
+    "retry": "再試行",
+    "getStarted": "始める",
+    "learnMore": "詳しく見る"
+  },
+  "nav": {
+    "dashboard": "ダッシュボード",
+    "projects": "プロジェクト",
+    "invoices": "請求書",
+    "payments": "支払い",
+    "qrPay": "QR / NFC 決済",
+    "disputes": "紛争",
+    "bridgeMonitoring": "ブリッジ監視",
+    "archival": "オンチェーンアーカイブ",
+    "upgradeSafety": "アップグレード安全性",
+    "translations": "翻訳",
+    "features": "機能",
+    "about": "概要",
+    "pricing": "料金"
+  },
+  "language": {
+    "changeLanguage": "言語を変更",
+    "resetToBrowser": "ブラウザの設定に戻す"
+  },
+  "landing": {
+    "badge": "安全 / 高速 / 透明",
+    "headline": "仕事の対価を",
+    "headlineAccent": "即座に受け取る",
+    "subheadline": "AgenticPayはブロックチェーンでフリーランサー決済を革新します。",
+    "activeProjects": "アクティブプロジェクト",
+    "paidInvoices": "支払済請求書",
+    "completedPayments": "完了した支払い",
+    "volumeSettled": "決済量"
+  },
+  "auth": {
+    "title": "AgenticPayへようこそ",
+    "subtitle": "仕事の対価を即座に受け取る",
+    "socialLogin": "ソーシャルログイン",
+    "walletConnect": "Web3ウォレット"
+  },
+  "dashboard": {
+    "title": "ダッシュボード",
+    "welcome": "おかえりなさい！概要はこちらです。",
+    "openMenu": "メニューを開く",
+    "closeMenu": "メニューを閉じる"
+  },
+  "bridgeMonitor": {
+    "title": "ブリッジ監視",
+    "subtitle": "クロスチェーンメッセージのライフサイクルと健全性を追跡",
+    "health": "ブリッジの健全性",
+    "totalMessages": "総メッセージ数",
+    "successRate": "成功率",
+    "avgLatency": "平均レイテンシ",
+    "stuckMessages": "滞留メッセージ",
+    "pendingAlerts": "未確認アラート",
+    "byProvider": "プロバイダ別",
+    "volume": "ボリューム",
+    "latency": "レイテンシ",
+    "retry": "再試行",
+    "refresh": "更新"
+  },
+  "upgradeSafety": {
+    "title": "アップグレード安全性",
+    "subtitle": "デプロイ前検証と履歴",
+    "passed": "合格",
+    "failed": "不合格",
+    "rolledBack": "ロールバック",
+    "history": "履歴",
+    "historyDesc": "ストレージレイアウトとシミュレーション",
+    "empty": "検証記録がありません。",
+    "simulation": "シミュレーション",
+    "smokeTests": "スモークテスト",
+    "adminPreserved": "管理者維持",
+    "proxyAdmin": "プロキシ管理者",
+    "implementation": "実装",
+    "refresh": "更新"
+  },
+  "i18nAdmin": {
+    "title": "翻訳管理",
+    "subtitle": "不足キーと翻訳カバレッジを確認",
+    "locale": "ロケール",
+    "missingKeys": "不足キー",
+    "coverage": "カバレッジ",
+    "namespace": "名前空間"
+  },
+  "metadata": {
+    "title": "AgenticPay - 仕事の対価を即座に受け取る",
+    "description": "ブロックチェーン技術による、安全で迅速かつ透明なフリーランサー向け決済。"
+  }
+}
