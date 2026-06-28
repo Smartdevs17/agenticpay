@@ -1258,3 +1258,94 @@ model BridgeRetry {
   @@index([messageId])
   @@map("bridge_retries")
 }
+
+// ─── Reconciliation Models ───────────────────────────────────────────────────
+
+model ReconciliationReport {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  runAt           DateTime @default(now()) @map("run_at")
+  network         String
+  totalExpected   Decimal  @map("total_expected") @db.Decimal(30, 8)
+  totalActual     Decimal  @map("total_actual") @db.Decimal(30, 8)
+  discrepancyCount Int      @default(0) @map("discrepancy_count")
+  status          String   @default("completed")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  discrepancies ReconciliationDiscrepancy[]
+
+  @@index([tenantId])
+  @@index([runAt])
+  @@map("reconciliation_reports")
+}
+
+model ReconciliationDiscrepancy {
+  id              String   @id @default(uuid())
+  reportId        String   @map("report_id")
+  walletAddress   String   @map("wallet_address")
+  expectedBalance Decimal  @map("expected_balance") @db.Decimal(30, 8)
+  actualBalance   Decimal  @map("actual_balance") @db.Decimal(30, 8)
+  difference      Decimal  @db.Decimal(30, 8)
+  currency        String
+  resolved        Boolean  @default(false)
+  resolutionReason String? @map("resolution_reason")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  report ReconciliationReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([walletAddress])
+  @@map("reconciliation_discrepancies")
+}
+
+// ─── FX Rate Models ──────────────────────────────────────────────────────────
+
+model FxRate {
+  id              String   @id @default(uuid())
+  baseCurrency    String   @map("base_currency")
+  targetCurrency  String   @map("target_currency")
+  rate            Decimal  @db.Decimal(30, 10)
+  provider        String
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+
+  @@index([baseCurrency, targetCurrency])
+  @@index([recordedAt])
+  @@map("fx_rates")
+}
+
+// ─── Dashboard Builder Models ────────────────────────────────────────────────
+
+model UserDashboard {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  userId      String   @map("user_id")
+  name        String   @default("Default Dashboard")
+  isDefault   Boolean  @default(false) @map("is_default")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  widgets     DashboardWidget[]
+
+  @@index([tenantId, userId])
+  @@map("user_dashboards")
+}
+
+model DashboardWidget {
+  id          String   @id @default(uuid())
+  dashboardId String   @map("dashboard_id")
+  type        String
+  title       String?
+  x           Int
+  y           Int
+  w           Int
+  h           Int
+  config      Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  dashboard   UserDashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@index([dashboardId])
+  @@map("dashboard_widgets")
+}
