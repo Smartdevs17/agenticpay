@@ -1,14 +1,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { Link } from '@/i18n/navigation';
+import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, X, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { usePathname } from 'next/navigation';
-import { LanguageSwitcher } from '../language/LanguageSwitcher';
+import { usePathname } from '@/i18n/navigation';
+import { LocaleSwitcher } from '../common/locale-switcher';
 
 export function Navbar() {
+  const t = useTranslations('nav');
+  const tCommon = useTranslations('common');
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const pathname = usePathname();
@@ -23,9 +26,9 @@ export function Navbar() {
   }, []);
 
   const navLinks = [
-    { name: 'Features', href: '#features' },
-    { name: 'About', href: '#how-it-works' },
-    { name: 'Pricing', href: '#pricing' },
+    { name: t('features'), href: '#features' as const },
+    { name: t('about'), href: '#how-it-works' as const },
+    { name: t('pricing'), href: '#pricing' as const },
   ];
 
   return (
@@ -72,7 +75,7 @@ export function Navbar() {
 
           {/* CTA Button & Mobile Menu Toggle */}
           <div className="flex items-center gap-4">
-            <LanguageSwitcher compact/>
+            <LocaleSwitcher compact/>
             <Link href="/auth" className="hidden md:block">
               <Button
                 className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"

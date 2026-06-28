@@ -34,6 +34,7 @@
     "generate:vapid-keys": "node scripts/generate-vapid-keys.js"
   },
   "dependencies": {
+    "@agenticpay/types": "*",
     "@prisma/client": "^5.22.0",
     "@sentry/node": "^10.50.0",
     "@sentry/profiling-node": "^10.50.0",

@@ -1,4 +1,5 @@
 import { apiCall } from '@/lib/api/client';
+export { SIGNATURE_SAFETY_NOTICE } from '@/lib/signature-notice';
 
 export interface SignatureChallengeResponse {
   domain: {
@@ -28,9 +29,6 @@ export interface SignatureVerifyResult {
   nonce: string;
   verifiedAt: string;
 }
-
-export const SIGNATURE_SAFETY_NOTICE =
-  'Only sign AgenticPay requests when your browser URL matches agenticpay.com. Never sign wallet prompts from lookalike domains.';
 
 export async function requestSignatureChallenge(payload: {
   signer: string;

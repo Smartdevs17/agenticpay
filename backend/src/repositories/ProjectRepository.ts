@@ -9,8 +9,9 @@ import {
   PaginationOptions,
   PaginatedResult,
 } from "./BaseRepository.js";
+import type { Project as SharedProject } from "@agenticpay/types";
 
-export interface Project {
+export interface Project extends Pick<SharedProject, "id" | "description" | "createdAt" | "updatedAt"> {
   id: string;
   clientId: string;
   freelancerId: string;

@@ -1,0 +1,129 @@
+name: Platform Services (#473–476)
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-services:
+    name: Archival / Upgrade / Bridge tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        working-directory: .
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+        working-directory: backend
+
+      - name: Run service tests (#473–475)
+        run: npm test -- src/services/__tests__/issues-473-475.test.ts
+        working-directory: backend
+
+      - name: Validate Prisma schema drift
+        run: npm run db:migrate:check
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agenticpay_ci
+
+  i18n:
+    name: Translation parity check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        working-directory: .
+
+      - name: Check translation key parity
+        run: npm run i18n:check
+        working-directory: frontend
+
+  i18n-sync:
+    name: DeepL translation sync (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        working-directory: .
+
+      - name: Sync missing translations via DeepL
+        run: npm run i18n:sync
+        working-directory: frontend
+        env:
+          DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
+
+      - name: Verify parity after sync
+        run: npm run i18n:check
+        working-directory: frontend
+
+  upgrade-validation:
+    name: Contract upgrade safety gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: contracts/evm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: contracts/evm/package-lock.json
+
+      - name: Install EVM contract dependencies
+        run: npm ci --prefer-offline
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      - name: Run OZ upgrade validation (dry-run)
+        run: npx hardhat run scripts/upgrade.ts --network hardhat
+        env:
+          PROPOSE_ONLY: 'true'
+          SPLITTER_CONTRACT: SplitterV2
+        continue-on-error: true

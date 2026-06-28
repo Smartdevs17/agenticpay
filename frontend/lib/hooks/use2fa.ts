@@ -13,6 +13,7 @@ import {
   VerificationResponse,
   RecoveryInitiation,
 } from '@/types/2fa';
+import { queryKeys } from '@/lib/query-keys';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -100,7 +101,7 @@ export function useDisable2FA() {
 
 export function useGet2FAStatus(userId: string) {
   return useQuery({
-    queryKey: ['2fa-status', userId],
+    queryKey: queryKeys.twoFactor.status(userId),
     queryFn: async (): Promise<TwoFactorStatus> => {
       const response = await fetch(`${BASE_URL}/api/v1/auth/2fa/status/${userId}`);
       return handleResponse(response);
@@ -143,7 +144,7 @@ export function useRegenerateBackupCodes() {
 
 export function useGet2FALogs(userId: string, limit = 50, offset = 0) {
   return useQuery({
-    queryKey: ['2fa-logs', userId, limit, offset],
+    queryKey: queryKeys.twoFactor.logs(userId, limit, offset),
     queryFn: async (): Promise<{ logs: TwoFactorLog[]; total: number }> => {
       const params = new URLSearchParams({
         limit: limit.toString(),

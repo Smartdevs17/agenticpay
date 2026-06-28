@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendEvent } from '../events/event-store.js';
-import { publish } from '../events/event-bus.js';
+import { enqueueStoredOutboxEventOutsideTransaction } from '../outbox/writer.js';
 
 export interface ReceiptNFT {
   id: string;
@@ -198,7 +198,7 @@ export function mintReceipt(input: MintReceiptInput): ReceiptNFT {
     asset: receipt.currency,
     merkleRoot: receipt.merkleRoot,
   });
-  void publish(event);
+  void enqueueStoredOutboxEventOutsideTransaction(event);
 
   return receipt;
 }
@@ -231,7 +231,7 @@ export function burnReceipt(tokenId: string): ReceiptNFT {
   receipts.set(tokenId, receipt);
 
   const event = appendEvent('receipt', tokenId, 'receipt.burned', { tokenId });
-  void publish(event);
+  void enqueueStoredOutboxEventOutsideTransaction(event);
 
   return receipt;
 }

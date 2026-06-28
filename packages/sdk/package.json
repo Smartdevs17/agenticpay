@@ -28,6 +28,9 @@
   "publishConfig": {
     "access": "public"
   },
+  "dependencies": {
+    "@agenticpay/types": "*"
+  },
   "devDependencies": {
     "@types/node": "^22.5.0",
     "tsx": "^4.19.0",

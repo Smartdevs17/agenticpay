@@ -9,13 +9,14 @@
  * - <1ms resolution overhead
  */
 
-export type Lifecycle = 'singleton' | 'transient' | 'scoped';
-
-interface Registration<T = unknown> {
-  factory: (c: DIContainer, scope?: Map<string, unknown>) => T;
-  lifecycle: Lifecycle;
-  singleton?: T;
-}
+import { ProjectRepository } from "../repositories/ProjectRepository.js";
+import { ProjectService } from "../services/ProjectService.js";
+import { ProjectController } from "../controllers/ProjectController.js";
+import { providerRegistry } from "../services/payments/provider-registry.js";
+import { SorobanPaymentProvider } from "../services/payments/providers/soroban.js";
+import { EvmPaymentProvider } from "../services/payments/providers/evm.js";
+import { FiatPaymentProvider } from "../services/payments/providers/fiat.js";
+import { CreditPaymentProvider } from "../services/payments/providers/credit.js";
 
 export class DIContainer {
   private static instance: DIContainer;
@@ -76,8 +77,16 @@ export class DIContainer {
     return reg.factory(this, scope) as T;
   }
 
-  has(token: string): boolean {
-    return this.registry.has(token);
+    // Controllers
+    const projectController = new ProjectController(projectService);
+    this.services.set("ProjectController", projectController);
+
+    // Payment providers (#480)
+    providerRegistry.register(new SorobanPaymentProvider());
+    providerRegistry.register(new EvmPaymentProvider());
+    providerRegistry.register(new FiatPaymentProvider());
+    providerRegistry.register(new CreditPaymentProvider());
+    this.services.set("PaymentProviderRegistry", providerRegistry);
   }
 
   /**

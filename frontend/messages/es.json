@@ -1,0 +1,96 @@
+{
+  "common": {
+    "appName": "AgenticPay",
+    "loading": "Cargando…",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "error": "Algo salió mal",
+    "retry": "Reintentar",
+    "getStarted": "Comenzar",
+    "learnMore": "Saber más"
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "projects": "Proyectos",
+    "invoices": "Facturas",
+    "payments": "Pagos",
+    "qrPay": "Pago QR / NFC",
+    "disputes": "Disputas",
+    "bridgeMonitoring": "Monitoreo de puentes",
+    "archival": "Archivo en cadena",
+    "upgradeSafety": "Seguridad de actualizaciones",
+    "translations": "Traducciones",
+    "features": "Funciones",
+    "about": "Acerca de",
+    "pricing": "Precios"
+  },
+  "language": {
+    "changeLanguage": "Cambiar idioma",
+    "resetToBrowser": "Restablecer al idioma del navegador"
+  },
+  "landing": {
+    "badge": "Seguro / Rápido / Transparente",
+    "headline": "Cobra al instante por",
+    "headlineAccent": "tu trabajo",
+    "subheadline": "AgenticPay revoluciona los pagos freelance con blockchain.",
+    "activeProjects": "Proyectos activos",
+    "paidInvoices": "Facturas pagadas",
+    "completedPayments": "Pagos completados",
+    "volumeSettled": "Volumen liquidado"
+  },
+  "auth": {
+    "title": "Bienvenido a AgenticPay",
+    "subtitle": "Cobra al instante por tu trabajo",
+    "socialLogin": "Inicio social",
+    "walletConnect": "Billetera Web3"
+  },
+  "dashboard": {
+    "title": "Panel",
+    "welcome": "¡Bienvenido de nuevo! Aquí está tu resumen.",
+    "openMenu": "Abrir menú",
+    "closeMenu": "Cerrar menú"
+  },
+  "bridgeMonitor": {
+    "title": "Monitoreo de puentes",
+    "subtitle": "Seguimiento del ciclo de vida de mensajes entre cadenas",
+    "health": "Salud del puente",
+    "totalMessages": "Mensajes totales",
+    "successRate": "Tasa de éxito",
+    "avgLatency": "Latencia promedio",
+    "stuckMessages": "Mensajes atascados",
+    "pendingAlerts": "Alertas pendientes",
+    "byProvider": "Por proveedor",
+    "volume": "Volumen",
+    "latency": "Latencia",
+    "retry": "Reintentar",
+    "refresh": "Actualizar"
+  },
+  "upgradeSafety": {
+    "title": "Seguridad de actualizaciones",
+    "subtitle": "Validación pre-despliegue e historial",
+    "passed": "Aprobado",
+    "failed": "Fallido",
+    "rolledBack": "Revertido",
+    "history": "Historial",
+    "historyDesc": "Comprobaciones de almacenamiento y simulación",
+    "empty": "Sin validaciones registradas.",
+    "simulation": "Simulación",
+    "smokeTests": "Pruebas",
+    "adminPreserved": "Admin preservado",
+    "proxyAdmin": "Proxy admin",
+    "implementation": "Implementación",
+    "refresh": "Actualizar"
+  },
+  "i18nAdmin": {
+    "title": "Gestión de traducciones",
+    "subtitle": "Revisar claves faltantes y cobertura de traducción",
+    "locale": "Idioma",
+    "missingKeys": "Claves faltantes",
+    "coverage": "Cobertura",
+    "namespace": "Espacio de nombres"
+  },
+  "metadata": {
+    "title": "AgenticPay - Cobrá al instante por tu trabajo",
+    "description": "Pagos seguros, rápidos y transparentes para freelancers con tecnología blockchain."
+  }
+}

@@ -44,6 +44,9 @@ import { flagsRouter } from './routes/flags.js';
 import { emailRouter } from './routes/email.js';
 import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
+import { archivalRouter } from './routes/archival.js';
+import { upgradeValidatorRouter } from './routes/upgrade-validator.js';
+import { bridgeMonitorRouter } from './routes/bridge-monitor.js';
 import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { nfcRouter } from './routes/nfc.js';
@@ -109,6 +112,15 @@ import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
 import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
 import devDevRouter from './routes/dev/reload.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { pluginsRouter } from './routes/plugins.js';
+import { outboxRouter } from './routes/outbox.js';
+import { pauseManagerRouter } from './routes/pause-manager.js';
+import { streamingExportRouter } from './routes/streaming-export.js';
+import { startOutboxPublisher, stopOutboxPublisher } from './outbox/index.js';
+import { gasRouter } from './routes/gas.js';
+import { vaultsRouter } from './routes/vaults.js';
+import { createConnectionManager } from './websocket/connection-manager.js';
+import { getBridgeMonitorService } from './services/bridge-monitor/bridge-monitor.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -244,6 +256,7 @@ apiV1Router.use('/catalog', catalogRouter);
 apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
 apiV1Router.use('/queue', bullMQMonitorRouter);
+apiV1Router.use('/outbox', outboxRouter);
 apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
@@ -264,6 +277,9 @@ apiV1Router.use('/disputes', disputeRoutes);
 apiV1Router.use('/emails', emailRouter);
 apiV1Router.use('/portfolio', portfolioRouter);
 apiV1Router.use('/backup', backupRouter);
+apiV1Router.use('/archival', archivalRouter);
+apiV1Router.use('/admin/contracts/upgrade', upgradeValidatorRouter);
+apiV1Router.use('/bridge/monitor', bridgeMonitorRouter);
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
 apiV1Router.use('/nfc', nfcRouter);
@@ -328,8 +344,25 @@ app.use('/api/v1/payment-links', paymentLinksRouter);
 // Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export)
 app.use('/api/v1/tax', taxRouter);
 
+// Third-party backend plugins
+app.use('/api/v1/admin/plugins', pluginsRouter);
+
+// Smart contract emergency pause management (Issue #513)
+app.use('/api/v1/admin/contracts/pause', pauseManagerRouter);
+app.use('/api/v1/admin/contracts/upgrade', upgradeValidatorRouter);
+app.use('/api/v1/archival', archivalRouter);
+app.use('/api/v1/bridge/monitor', bridgeMonitorRouter);
+app.use('/api/v1/gas', gasRouter);
+app.use('/api/v1/vaults', vaultsRouter);
+
+// Streaming exports for large datasets (Issue #500)
+app.use('/api/v1/exports', streamingExportRouter);
+
 // Project + milestone delivery approval workflow
 app.use('/api/v1/projects', projectsRouter);
+
+// Payment categories — Issue #251
+app.use('/api/v1/categories', categoriesRouter);
 
 // Two-factor authentication
 app.use('/api/v1/auth/2fa', twoFactorAuthRouter);
@@ -412,6 +445,7 @@ if (config.queue.enabled) {
   paymentQueue.start();
 }
 startWebhookWorker();
+startOutboxPublisher({ useBullMQ: Boolean(process.env.REDIS_URL) });
 
 // Auto-escalation cron
 setInterval(async () => {
@@ -434,7 +468,11 @@ const server = http.createServer(app);
 const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
 bindWebSocketServer(wsServer);
 app.set('wsServer', wsServer);
-app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
+
+// WebSocket connection manager: IP rate limiting + auth gating (#477)
+const wsConnectionManager = createConnectionManager(server, wsServer, { maxConnectionsPerIp: 10 });
+
+app.use('/api/v1/websocket', createWebSocketRouter(wsServer, wsConnectionManager));
 app.use('/api/v1/analytics', createAnalyticsRouter(wsServer));
 
 const analyticsInterval = setInterval(() => {
@@ -477,6 +515,7 @@ server.listen(config.server.port, () => {
 
     // Webhook worker
     startWebhookWorker();
+    startOutboxPublisher({ useBullMQ: Boolean(process.env.REDIS_URL) });
 
     // Auto-escalation cron
     setInterval(async () => {
@@ -496,6 +535,11 @@ server.listen(config.server.port, () => {
     }).catch(() => {
       console.log('[RedisCache] Not available, using in-memory cache only');
     });
+
+    // Bridge monitoring — Issue #475
+    getBridgeMonitorService().start(
+      parseInt(process.env.BRIDGE_MONITOR_POLL_MS ?? '30000', 10),
+    );
   });
 });
 
@@ -535,6 +579,7 @@ const shutdown = (signal: string) => {
       messageQueue.stop();
       paymentQueue.stop();
       stopWebhookWorker();
+      void stopOutboxPublisher();
       console.log('Message queue stopped.');
     } catch (err) {
       console.error('Error stopping message queue:', err);
@@ -545,6 +590,13 @@ const shutdown = (signal: string) => {
       console.log('Batch processor stopped.');
     } catch (err) {
       console.error('Error stopping batch processor:', err);
+    }
+
+    try {
+      getBridgeMonitorService().stop();
+      console.log('Bridge monitor stopped.');
+    } catch (err) {
+      console.error('Error stopping bridge monitor:', err);
     }
 
     clearInterval(analyticsInterval);

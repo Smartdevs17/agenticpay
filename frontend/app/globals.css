@@ -188,3 +188,18 @@
     box-shadow: none !important;
   }
 }
+
+/* RTL layout support — Issue #476 */
+[dir='rtl'] {
+  text-align: start;
+}
+
+[dir='rtl'] .sidebar-mirror {
+  inset-inline-start: 0;
+  inset-inline-end: auto;
+}
+
+[dir='rtl'] .dropdown-end {
+  inset-inline-end: 0;
+  inset-inline-start: auto;
+}
