@@ -1,12 +1,15 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import { useTranslations } from 'next-intl';
 import { SocialLogin } from '@/components/auth/SocialLogin';
 import { WalletConnect } from '@/components/auth/WalletConnect';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Wallet, Users } from 'lucide-react';
 
 export default function AuthPage() {
+  const t = useTranslations('auth');
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4">
       <motion.div
@@ -26,10 +29,10 @@ export default function AuthPage() {
               <Wallet className="h-8 w-8 text-white" />
             </motion.div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Welcome to AgenticPay
+              {t('title')}
             </h1>
             <p className="text-gray-600">
-              Get paid instantly for your work
+              {t('subtitle')}
             </p>
           </div>
 
@@ -37,11 +40,11 @@ export default function AuthPage() {
             <TabsList className="grid w-full grid-cols-2 mb-6">
               <TabsTrigger value="social" className="flex items-center gap-2">
                 <Users className="h-4 w-4" />
-                Social Login
+                {t('socialLogin')}
               </TabsTrigger>
               <TabsTrigger value="wallet" className="flex items-center gap-2">
                 <Wallet className="h-4 w-4" />
-                Web3 Wallet
+                {t('walletConnect')}
               </TabsTrigger>
             </TabsList>
 

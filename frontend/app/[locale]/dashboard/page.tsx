@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { useTranslations } from 'next-intl';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp } from 'lucide-react';
@@ -27,14 +28,15 @@ const DashboardCharts = dynamic(() => import('./DashboardCharts'), {
 });
 
 export default function DashboardPage() {
+  const t = useTranslations('dashboard');
   const { stats, recentActivity, loading } = useDashboardData();
 
   if (loading) {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <p className="text-gray-600 mt-1 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t('title')}</h1>
+          <p className="text-gray-600 mt-1 dark:text-gray-400">{t('welcome')}</p>
         </div>
         <DashboardStatsSkeleton />
         <Card>
@@ -75,8 +77,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8 pb-8">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-gray-600 mt-1 dark:text-gray-400">Welcome back! Here&apos;s your overview.</p>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t('title')}</h1>
+        <p className="text-gray-600 mt-1 dark:text-gray-400">{t('welcome')}</p>
       </div>
 
       {/* Stats Grid */}

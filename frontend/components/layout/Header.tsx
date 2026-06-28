@@ -44,7 +44,7 @@ import { getBrowserTimeZone, isValidTimeZone } from "@/lib/utils";
 import { CommandMenu } from "./CommandMenu";
 import { useCommandStore } from "@/store/useCommandStore";
 import { useOfflineStatus } from "@/components/offline/OfflineProvider";
-import { LanguageSwitcher } from "@/components/language/LanguageSwitcher";
+import { LocaleSwitcher } from "@/components/common/locale-switcher";
 import { CopyButton } from "@/components/ui/copy-button";
 
 /* ---------------- NETWORK INDICATOR ---------------- */
@@ -170,7 +170,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
               </div>
             )}
 
-            <LanguageSwitcher />
+            <LocaleSwitcher />
 
             <div className="hidden sm:block">
               <CommandMenu />

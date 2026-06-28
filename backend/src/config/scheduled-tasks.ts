@@ -19,6 +19,8 @@ import { markOverdueRequests } from '../services/gdpr.js';
 import { sandboxCleanupJobs } from '../jobs/sandbox-cleanup.js';
 import { SubscriptionService } from '../services/subscription.service.js';
 import { SubscriptionProcessor } from '../jobs/subscription-processor.js';
+import { getArchivalService } from '../services/archival/index.js';
+import { getBridgeMonitorService } from '../services/bridge-monitor/bridge-monitor.js';
 import { ethers } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -157,6 +159,50 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     description: 'Aggregates sandbox usage statistics for monitoring dashboards.',
     defaultSchedule: '0 0 * * *',
     handler: sandboxCleanupJobs.find((j) => j.id === 'sandbox-maintenance-stats')!.handler,
+  },
+  {
+    id: 'daily-onchain-archival',
+    name: 'Daily On-Chain Data Archival',
+    description: 'Backs up transaction data, event logs, and contract state to IPFS with integrity verification.',
+    defaultSchedule: '0 3 * * *',
+    timezone: 'UTC',
+    timeoutMs: 60 * 60 * 1000,
+    handler: async () => {
+      const result = await getArchivalService().runDailyArchival();
+      if (result.ok) {
+        console.log(`[archival] Daily batch complete: ${result.value.batchesProcessed} chain(s) archived`);
+      } else {
+        console.error('[archival] Daily batch failed:', result.error.message);
+      }
+    },
+  },
+  {
+    id: 'bridge-monitor-reconcile',
+    name: 'Bridge Message Reconciliation',
+    description: 'Polls bridge providers, detects stuck/delayed messages, and emits alerts.',
+    defaultSchedule: '*/5 * * * *',
+    timeoutMs: 5 * 60 * 1000,
+    handler: async () => {
+      await getBridgeMonitorService().pollAndReconcile();
+    },
+  },
+  {
+    id: 'archival-retention-cleanup',
+    name: 'Archival retention enforcement',
+    description: 'Removes archival batches past the 7-year retention window.',
+    defaultSchedule: '0 4 * * 0',
+    timezone: 'UTC',
+    handler: async () => {
+      if (!process.env.DATABASE_URL) return;
+      const { prisma } = await import('../lib/prisma.js');
+      const cutoff = new Date();
+      const deleted = await prisma.archivalBatch.deleteMany({
+        where: { retentionUntil: { lt: cutoff } },
+      });
+      if (deleted.count > 0) {
+        console.log(`[archival] Purged ${deleted.count} expired batch(es)`);
+      }
+    },
   },
 ];
 
