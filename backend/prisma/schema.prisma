@@ -1259,93 +1259,172 @@ model BridgeRetry {
   @@map("bridge_retries")
 }
 
-// ─── Reconciliation Models ───────────────────────────────────────────────────
+// ─── Issue #462: Webhook Subscription Manager ───────────────────────────────────
 
-model ReconciliationReport {
-  id              String   @id @default(uuid())
-  tenantId        String   @map("tenant_id")
-  runAt           DateTime @default(now()) @map("run_at")
-  network         String
-  totalExpected   Decimal  @map("total_expected") @db.Decimal(30, 8)
-  totalActual     Decimal  @map("total_actual") @db.Decimal(30, 8)
-  discrepancyCount Int      @default(0) @map("discrepancy_count")
-  status          String   @default("completed")
-  createdAt       DateTime @default(now()) @map("created_at")
+model WebhookSubscription {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  eventTypes    String[] @map("event_types")
+  filterExpr    String?  @map("filter_expr")
+  targetUrl     String   @map("target_url")
+  description   String?
+  status        SubscriptionStatus @default(active)
+  version       Int      @default(1) @map("version")
+  lastDelivered DateTime? @map("last_delivered")
+  deliveryCount Int      @default(0) @map("delivery_count")
+  successCount  Int      @default(0) @map("success_count")
+  failCount     Int      @default(0) @map("fail_count")
+  avgLatency    Float?   @map("avg_latency")
+  pausedAt      DateTime? @map("paused_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
 
-  discrepancies ReconciliationDiscrepancy[]
+  deliveries WebhookSubscriptionDelivery[]
 
   @@index([tenantId])
-  @@index([runAt])
-  @@map("reconciliation_reports")
+  @@index([status])
+  @@index([tenantId, status])
+  @@map("webhook_subscriptions")
 }
 
-model ReconciliationDiscrepancy {
-  id              String   @id @default(uuid())
-  reportId        String   @map("report_id")
-  walletAddress   String   @map("wallet_address")
-  expectedBalance Decimal  @map("expected_balance") @db.Decimal(30, 8)
-  actualBalance   Decimal  @map("actual_balance") @db.Decimal(30, 8)
-  difference      Decimal  @db.Decimal(30, 8)
-  currency        String
-  resolved        Boolean  @default(false)
-  resolutionReason String? @map("resolution_reason")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+model WebhookSubscriptionDelivery {
+  id             String   @id @default(uuid())
+  subscriptionId String   @map("subscription_id")
+  eventType      String   @map("event_type")
+  payload        Json
+  status         DeliveryStatus @default(pending)
+  statusCode     Int?     @map("status_code")
+  latencyMs      Int?     @map("latency_ms")
+  errorMessage   String?  @map("error_message")
+  attemptCount   Int      @default(0) @map("attempt_count")
+  createdAt      DateTime @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
 
-  report ReconciliationReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  subscription WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
-  @@index([reportId])
-  @@index([walletAddress])
-  @@map("reconciliation_discrepancies")
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("webhook_subscription_deliveries")
 }
 
-// ─── FX Rate Models ──────────────────────────────────────────────────────────
+// ─── Issue #463: Revenue Sharing Pool ───────────────────────────────────────────
 
-model FxRate {
-  id              String   @id @default(uuid())
-  baseCurrency    String   @map("base_currency")
-  targetCurrency  String   @map("target_currency")
-  rate            Decimal  @db.Decimal(30, 10)
-  provider        String
-  recordedAt      DateTime @default(now()) @map("recorded_at")
+model RevenuePool {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  chain     String   @default("soroban")
+  contractId String  @map("contract_id")
+  status    PoolStatus @default(active)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
 
-  @@index([baseCurrency, targetCurrency])
-  @@index([recordedAt])
-  @@map("fx_rates")
+  recipients   RevenueRecipient[]
+  distributions RevenueDistribution[]
+
+  @@index([tenantId])
+  @@map("revenue_pools")
 }
 
-// ─── Dashboard Builder Models ────────────────────────────────────────────────
-
-model UserDashboard {
+model RevenueRecipient {
   id          String   @id @default(uuid())
-  tenantId    String   @map("tenant_id")
-  userId      String   @map("user_id")
-  name        String   @default("Default Dashboard")
-  isDefault   Boolean  @default(false) @map("is_default")
+  poolId      String   @map("pool_id")
+  wallet      String
+  ratioBps    Int      @map("ratio_bps")
+  accumulated String   @default("0") @map("accumulated")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  widgets     DashboardWidget[]
+  pool RevenuePool @relation(fields: [poolId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId, userId])
-  @@map("user_dashboards")
+  @@unique([poolId, wallet])
+  @@map("revenue_recipients")
 }
 
-model DashboardWidget {
+model RevenueDistribution {
+  id        String   @id @default(uuid())
+  poolId    String   @map("pool_id")
+  txHash    String   @map("tx_hash")
+  amount    String   @map("amount")
+  status    DistributionStatus @default(pending)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pool RevenuePool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+
+  @@index([poolId])
+  @@map("revenue_distributions")
+}
+
+// ─── Issue #464: EVM Paymaster / ERC-4337 ───────────────────────────────────────
+
+model PaymasterBudget {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  chainId   Int      @map("chain_id")
+  token     String
+  balance   String   @default("0")
+  totalDeposited  String @default("0") @map("total_deposited")
+  totalUsed      String @default("0") @map("total_used")
+  maxGasPerTx    String? @map("max_gas_per_tx")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, chainId, token])
+  @@map("paymaster_budgets")
+}
+
+model UserOperation {
   id          String   @id @default(uuid())
-  dashboardId String   @map("dashboard_id")
-  type        String
-  title       String?
-  x           Int
-  y           Int
-  w           Int
-  h           Int
-  config      Json?
+  userOpHash  String   @unique @map("user_op_hash")
+  sender      String
+  nonce       String
+  paymaster   String
+  mode        String   @default("verifying")
+  actualGasCost String? @map("actual_gas_cost")
+  status      UserOpStatus @default(pending)
+  txHash      String?  @map("tx_hash")
+  errorMsg    String?  @map("error_msg")
   createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  completedAt DateTime? @map("completed_at")
 
-  dashboard   UserDashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  @@index([sender])
+  @@index([status])
+  @@index([createdAt])
+  @@map("user_operations")
+}
 
-  @@index([dashboardId])
-  @@map("dashboard_widgets")
+// ─── New Enums ──────────────────────────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  active
+  paused
+  disabled
+}
+
+enum DeliveryStatus {
+  pending
+  delivered
+  failed
+  retrying
+}
+
+enum PoolStatus {
+  active
+  paused
+  archived
+}
+
+enum DistributionStatus {
+  pending
+  completed
+  failed
+}
+
+enum UserOpStatus {
+  pending
+  completed
+  failed
 }
