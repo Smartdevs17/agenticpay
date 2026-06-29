@@ -1694,3 +1694,282 @@ model ReportTemplate {
   @@index([isPublic, usageCount])
   @@map("report_templates")
 }
+
+// ─── Issue #465: Payment Reconciliation Report Generator ─────────────────────
+
+enum ReportJobStatus {
+  pending
+  generating
+  completed
+  failed
+  expired
+}
+
+model ReportJob {
+  id           String          @id @default(uuid())
+  tenantId     String          @map("tenant_id")
+  userId       String?         @map("user_id")
+  type         String          @default("reconciliation") // reconciliation, custom
+  status       ReportJobStatus @default(pending)
+  dateFrom     DateTime        @map("date_from")
+  dateTo       DateTime        @map("date_to")
+  format       String          @default("csv") // csv, pdf
+  filters      Json?
+  progress     Int             @default(0)
+  errorMessage String?         @map("error_message")
+  completedAt  DateTime?       @map("completed_at")
+  expiresAt    DateTime        @map("expires_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  deletedAt    DateTime?       @map("deleted_at")
+
+  archives ReportArchive[]
+
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@index([tenantId, status])
+  @@map("report_jobs")
+}
+
+model ReportArchive {
+  id         String      @id @default(uuid())
+  reportId   String      @map("report_id")
+  format     String      @default("csv")
+  fileUrl    String      @map("file_url")
+  fileSize   Int         @default(0) @map("file_size")
+  rowCount   Int         @default(0) @map("row_count")
+  checksum   String?     @map("checksum")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  report ReportJob @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("report_archives")
+}
+
+// ─── Issue #466: Flash Loan-Protected Liquidity Provider Integration ─────────
+
+enum AnomalySeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum CircuitBreakerStatus {
+  tripped
+  monitoring
+  recovered
+}
+
+model PriceAnomalyLog {
+  id              String          @id @default(uuid())
+  tenantId        String          @map("tenant_id")
+  poolId          String          @map("pool_id")
+  tokenPair       String          @map("token_pair")
+  executionPrice  Decimal         @map("execution_price") @db.Decimal(30, 18)
+  referencePrice  Decimal         @map("reference_price") @db.Decimal(30, 18)
+  deviationPct    Float           @map("deviation_pct")
+  txHash          String?         @map("tx_hash")
+  severity        AnomalySeverity @default(medium)
+  detectedAt      DateTime        @default(now()) @map("detected_at")
+  metadata        Json?
+
+  @@index([tenantId, detectedAt])
+  @@index([poolId, detectedAt])
+  @@index([severity])
+  @@index([detectedAt])
+  @@map("price_anomaly_logs")
+}
+
+model CircuitBreakerEvent {
+  id              String               @id @default(uuid())
+  tenantId        String               @map("tenant_id")
+  poolId          String               @map("pool_id")
+  eventType       String               @map("event_type") // price_deviation, repeated_attack, manual
+  status          CircuitBreakerStatus @default(monitoring)
+  triggeredAt     DateTime             @default(now()) @map("triggered_at")
+  recoveredAt     DateTime?            @map("recovered_at")
+  anomalyCount    Int                  @default(0) @map("anomaly_count")
+  thresholdConfig Json?                @map("threshold_config")
+  metadata        Json?
+
+  @@index([tenantId, poolId])
+  @@index([status])
+  @@index([tenantId, status])
+  @@index([triggeredAt])
+  @@map("circuit_breaker_events")
+}
+
+// ─── Issue #467: Bulk Payment CSV Upload ─────────────────────────────────────
+
+enum BulkUploadStatus {
+  pending
+  validating
+  processing
+  completed
+  partially_completed
+  failed
+}
+
+model BulkUpload {
+  id              String           @id @default(uuid())
+  tenantId        String           @map("tenant_id")
+  userId          String?          @map("user_id")
+  fileName        String           @map("file_name")
+  fileSize        Int              @map("file_size")
+  mimeType        String           @map("mime_type")
+  totalRows       Int              @default(0) @map("total_rows")
+  validRows       Int              @default(0) @map("valid_rows")
+  errorRows       Int              @default(0) @map("error_rows")
+  processedRows   Int              @default(0) @map("processed_rows")
+  failedRows      Int              @default(0) @map("failed_rows")
+  columnMapping   Json?            @map("column_mapping")
+  status          BulkUploadStatus @default(pending)
+  errorReportUrl  String?          @map("error_report_url")
+  completedAt     DateTime?        @map("completed_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  deletedAt       DateTime?        @map("deleted_at")
+
+  rows BulkUploadRow[]
+
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@index([tenantId, status])
+  @@map("bulk_uploads")
+}
+
+enum BulkUploadRowStatus {
+  pending
+  valid
+  invalid
+  processing
+  completed
+  failed
+}
+
+model BulkUploadRow {
+  id             String               @id @default(uuid())
+  bulkUploadId   String               @map("bulk_upload_id")
+  rowNumber      Int                  @map("row_number")
+  rawData        Json?
+  parsedData     Json?
+  status         BulkUploadRowStatus  @default(pending)
+  errors         Json?
+  warnings       Json?
+  paymentId      String?              @map("payment_id")
+  processedAt    DateTime?            @map("processed_at")
+  createdAt      DateTime             @default(now()) @map("created_at")
+
+  bulkUpload BulkUpload @relation(fields: [bulkUploadId], references: [id], onDelete: Cascade)
+
+  @@index([bulkUploadId])
+  @@index([status])
+  @@index([bulkUploadId, status])
+  @@map("bulk_upload_rows")
+}
+
+// ─── Issue #468: Dynamic Fee Calculation Engine with Tiered Pricing ──────────
+
+enum FeeScheduleStatus {
+  active
+  inactive
+  pending
+}
+
+enum FeeType {
+  flat
+  percentage
+  tiered
+}
+
+model FeeSchedule {
+  id              String            @id @default(uuid())
+  tenantId        String            @map("tenant_id")
+  name            String
+  description     String?
+  feeType         FeeType           @default(percentage) @map("fee_type")
+  flatFee         Decimal?          @map("flat_fee") @db.Decimal(20, 8)
+  percentageFee   Decimal?          @map("percentage_fee") @db.Decimal(8, 4)
+  minFee          Decimal?          @map("min_fee") @db.Decimal(20, 8)
+  maxFee          Decimal?          @map("max_fee") @db.Decimal(20, 8)
+  gasSurchargePct Decimal?          @map("gas_surcharge_pct") @db.Decimal(8, 4)
+  gasThresholdGwei Float?           @map("gas_threshold_gwei")
+  status          FeeScheduleStatus @default(active)
+  effectiveFrom   DateTime          @default(now()) @map("effective_from")
+  effectiveTo     DateTime?         @map("effective_to")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  deletedAt       DateTime?         @map("deleted_at")
+
+  volumeTiers     VolumeTier[]
+  merchantOverrides MerchantFeeOverride[]
+  changeLogs      FeeChangeLog[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, effectiveFrom, effectiveTo])
+  @@map("fee_schedules")
+}
+
+model VolumeTier {
+  id           String   @id @default(uuid())
+  feeScheduleId String  @map("fee_schedule_id")
+  minVolume    Decimal  @map("min_volume") @db.Decimal(20, 8)
+  maxVolume    Decimal? @map("max_volume") @db.Decimal(20, 8)
+  flatFee      Decimal? @map("flat_fee") @db.Decimal(20, 8)
+  percentageFee Decimal @map("percentage_fee") @db.Decimal(8, 4)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  feeSchedule FeeSchedule @relation(fields: [feeScheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([feeScheduleId, minVolume])
+  @@index([feeScheduleId])
+  @@map("volume_tiers")
+}
+
+enum OverrideStatus {
+  active
+  expired
+  pending
+}
+
+model MerchantFeeOverride {
+  id             String         @id @default(uuid())
+  feeScheduleId  String         @map("fee_schedule_id")
+  merchantId     String         @map("merchant_id")
+  flatFee        Decimal?       @map("flat_fee") @db.Decimal(20, 8)
+  percentageFee  Decimal?       @map("percentage_fee") @db.Decimal(8, 4)
+  minFee         Decimal?       @map("min_fee") @db.Decimal(20, 8)
+  maxFee         Decimal?       @map("max_fee") @db.Decimal(20, 8)
+  status         OverrideStatus @default(active)
+  effectiveFrom  DateTime       @default(now()) @map("effective_from")
+  effectiveTo    DateTime?      @map("effective_to")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  feeSchedule FeeSchedule @relation(fields: [feeScheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([feeScheduleId, merchantId])
+  @@index([merchantId])
+  @@index([feeScheduleId])
+  @@index([merchantId, status])
+  @@map("merchant_fee_overrides")
+}
+
+model FeeChangeLog {
+  id           String   @id @default(uuid())
+  feeScheduleId String  @map("fee_schedule_id")
+  field        String
+  oldValue     Json?
+  newValue     Json?
+  changedBy    String?  @map("changed_by")
+  reason       String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  feeSchedule FeeSchedule @relation(fields: [feeScheduleId], references: [id], onDelete: Cascade)
+
+  @@index([feeScheduleId])
+  @@index([createdAt])
+  @@map("fee_change_logs")
+}

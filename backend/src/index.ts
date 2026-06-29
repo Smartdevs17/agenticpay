@@ -125,6 +125,10 @@ import { swapsRouter } from './routes/swaps.js';
 import { treasuryRouter } from './routes/treasury.js';
 import { apiKeysRouter } from './routes/api-keys.js';
 import { reportsRouter } from './routes/reports.js';
+import { reconciliationRouter } from './routes/reconciliation.js';
+import { liquidityProtectionRouter } from './routes/liquidity-protection.js';
+import { bulkPaymentsRouter } from './routes/bulk-payments.js';
+import { feesRouter } from './routes/fees.js';
 import { apiUsageTracker, checkQuota } from './middleware/api-usage-tracker.js';
 
 // Validate environment variables at startup
@@ -397,6 +401,18 @@ app.use('/api/v1/treasury', treasuryRouter);
 
 // Custom report builder with saved templates — Issue #472
 app.use('/api/v1/reports', reportsRouter);
+
+// Payment reconciliation report generator — Issue #465
+app.use('/api/v1/reconciliation', reconciliationRouter);
+
+// Flash loan-protected liquidity provider integration — Issue #466
+app.use('/api/v1/liquidity/protection', liquidityProtectionRouter);
+
+// Bulk payment CSV upload — Issue #467
+app.use('/api/v1/payments/bulk', bulkPaymentsRouter);
+
+// Dynamic fee calculation engine with tiered pricing — Issue #468
+app.use('/api/v1/fees', feesRouter);
 
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());
