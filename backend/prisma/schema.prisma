@@ -1225,3 +1225,46 @@ model BridgeRetry {
   @@index([messageId])
   @@map("bridge_retries")
 }
+
+// ─── Payment Request Expiration — Issue #460 ─────────────────────────────────
+
+enum PaymentRequestStatus {
+  pending
+  paid
+  expired
+  cancelled
+}
+
+model PaymentRequest {
+  id                String               @id @default(uuid())
+  tenantId          String               @map("tenant_id")
+  requesterId       String               @map("requester_id")
+  payerAddress      String?              @map("payer_address")
+  requesterAddress  String               @map("requester_address")
+  amount            Decimal              @db.Decimal(20, 8)
+  currency          String               @default("XLM")
+  network           String               @default("stellar")
+  tokenAddress      String?              @map("token_address")
+  status            PaymentRequestStatus @default(pending)
+  /// Absolute deadline — enforced both on-chain and backend.
+  expiresAt         DateTime             @map("expires_at")
+  /// Set when the request transitions to expired.
+  expiredAt         DateTime?            @map("expired_at")
+  /// Set when payment is confirmed.
+  paidAt            DateTime?            @map("paid_at")
+  /// On-chain request ID (Soroban u64 or EVM uint256, stored as string).
+  contractRequestId String?              @map("contract_request_id")
+  memo              String?
+  metadata          Json?
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  deletedAt         DateTime?            @map("deleted_at")
+
+  @@index([tenantId, status])
+  @@index([expiresAt])
+  @@index([status, expiresAt])
+  @@index([requesterId])
+  @@index([payerAddress])
+  @@index([createdAt])
+  @@map("payment_requests")
+}
