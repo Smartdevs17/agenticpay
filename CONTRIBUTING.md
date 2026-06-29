@@ -119,3 +119,10 @@ Pull requests may be sent back for updates if they do not include appropriate va
 ## Questions and Support
 
 If you are unsure about an implementation detail, open an issue or start a discussion before investing heavily in a large change. Early alignment helps us review and merge contributions faster.
+# Frontend Domain Modules
+
+Frontend feature code should live under `frontend/src/domains/<domain>/` where the current domains are `payments`, `merchants`, `wallets`, `analytics`, `settings`, and `developers`. Each domain owns `components/`, `hooks/`, `api/`, `types/`, and `pages/` subdirectories plus a barrel export from `index.ts`.
+
+Use domain aliases for feature imports, for example `@payments/hooks` or `@wallets/api`. Shared utilities belong in `@shared/*`, while design-system primitives belong in `@ui/*` or the existing `components/ui` implementation. Direct imports from one domain into another are blocked by the local ESLint boundary rule; move cross-domain code into shared modules instead.
+
+For mechanical migrations, run `npm run migrate:domain-imports -- <files...>` from `frontend/` and then review the diff. New pages can remain in the Next.js `app/` tree, but feature-specific logic should be colocated in the owning domain module.

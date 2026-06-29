@@ -15,6 +15,7 @@
     "test:e2e:install": "playwright install --with-deps",
     "test:e2e:update-snapshots": "playwright test --update-snapshots",
     "test:e2e:report": "playwright show-report",
+    "migrate:domain-imports": "node scripts/migrate-domain-imports.mjs",
     "generate:api-hooks": "node ../packages/api-hooks-generator/dist/cli.js",
     "generate:api-hooks:watch": "node ../packages/api-hooks-generator/dist/cli.js --watch",
     "i18n:sync": "tsx scripts/sync-translations.ts",
