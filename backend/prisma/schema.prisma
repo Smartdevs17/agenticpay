@@ -1973,3 +1973,113 @@ model FeeChangeLog {
   @@index([createdAt])
   @@map("fee_change_logs")
 }
+
+// ─── Issue #447: Smart Contract Event Indexer ─────────────────────────────────
+
+enum IndexedEventChain {
+  stellar
+  evm
+}
+
+model IndexedEvent {
+  id              String             @id @default(uuid())
+  dedupKey        String             @unique @map("dedup_key")   // chain:txHash[:logIndex]
+  chain           IndexedEventChain
+  contractAddress String             @map("contract_address")
+  eventType       String             @map("event_type")
+  blockNumber     BigInt             @map("block_number")
+  txHash          String             @map("tx_hash")
+  timestamp       DateTime
+  payload         Json
+  confirmations   Int                @default(0)
+  retentionUntil  DateTime           @map("retention_until")
+  createdAt       DateTime           @default(now()) @map("created_at")
+
+  @@index([chain, contractAddress, eventType])
+  @@index([chain, contractAddress, timestamp])
+  @@index([eventType])
+  @@index([timestamp])
+  @@index([retentionUntil])
+  @@map("indexed_events")
+}
+
+model WsEventSubscription {
+  id              String   @id @default(uuid())
+  sessionId       String   @map("session_id")
+  contractAddress String?  @map("contract_address")
+  eventType       String?  @map("event_type")
+  chain           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  expiresAt       DateTime @map("expires_at")
+
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@map("ws_event_subscriptions")
+}
+
+// ─── Issue #446: AI Payment Routing Metrics ────────────────────────────────────
+
+model RoutingDecision {
+  id              String   @id @default(uuid())
+  tenantId        String?  @map("tenant_id")
+  requestId       String   @unique @map("request_id")
+  selectedChain   String   @map("selected_chain")
+  fallbackChains  String[] @map("fallback_chains")
+  scoreStellar    Float?   @map("score_stellar")
+  scoreEvm        Float?   @map("score_evm")
+  featureSnapshot Json     @map("feature_snapshot")   // gas prices, latencies, success rates at decision time
+  rationale       String?
+  latencyMs       Int?     @map("latency_ms")
+  isManualOverride Boolean @default(false) @map("is_manual_override")
+  overrideBy      String?  @map("override_by")
+  abVariant       String?  @map("ab_variant")         // "static" | "ai"
+  outcome         String?                             // "success" | "failed" | null (pending)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([selectedChain, createdAt])
+  @@index([abVariant])
+  @@map("routing_decisions")
+}
+
+model ChainPerformanceMetric {
+  id               String   @id @default(uuid())
+  chain            String
+  sampleAt         DateTime @default(now()) @map("sample_at")
+  avgGasPrice      Float?   @map("avg_gas_price")
+  avgConfirmTimeMs Float?   @map("avg_confirm_time_ms")
+  successRate      Float?   @map("success_rate")          // 0–1
+  p50LatencyMs     Float?   @map("p50_latency_ms")
+  p99LatencyMs     Float?   @map("p99_latency_ms")
+  sampleSize       Int      @default(0) @map("sample_size")
+
+  @@index([chain, sampleAt])
+  @@index([sampleAt])
+  @@map("chain_performance_metrics")
+}
+
+// ─── Issue #668: PII Audit ────────────────────────────────────────────────────
+
+enum PiiClassificationLevel {
+  strict
+  standard
+  permissive
+}
+
+model PiiAuditLog {
+  id            String                  @id @default(uuid())
+  endpoint      String
+  method        String                  @default("GET")
+  fieldPath     String                  @map("field_path")   // JSON path of detected PII
+  piiType       String                  @map("pii_type")     // email | phone | ssn | crypto_address | api_key
+  action        String                  @default("redacted") // redacted | masked | allowed
+  level         PiiClassificationLevel  @default(standard)
+  tenantId      String?                 @map("tenant_id")
+  requestId     String?                 @map("request_id")
+  createdAt     DateTime                @default(now()) @map("created_at")
+
+  @@index([endpoint, createdAt])
+  @@index([piiType])
+  @@index([tenantId, createdAt])
+  @@map("pii_audit_logs")
+}

@@ -130,6 +130,10 @@ import { liquidityProtectionRouter } from './routes/liquidity-protection.js';
 import { bulkPaymentsRouter } from './routes/bulk-payments.js';
 import { feesRouter } from './routes/fees.js';
 import { apiUsageTracker, checkQuota } from './middleware/api-usage-tracker.js';
+import indexerRouter from './routes/indexer.js';
+import aiRoutingRouter from './routes/ai-routing.js';
+import piiRouter from './routes/pii.js';
+import { piiRedactionMiddleware } from './middleware/pii-redaction.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -217,6 +221,8 @@ app.use('/webhooks', webhookHandlersRouter);
 app.use(express.json());
 app.use(express.text({ type: ['text/csv', 'text/plain'] }));
 app.use('/api', openApiValidator({ validateResponses: process.env.OPENAPI_VALIDATE_RESPONSES === 'true' }));
+// Redact PII from all outgoing JSON API responses — Issue #668
+app.use('/api', piiRedactionMiddleware);
 
 app.use(
   compressionMiddleware({
@@ -413,6 +419,15 @@ app.use('/api/v1/payments/bulk', bulkPaymentsRouter);
 
 // Dynamic fee calculation engine with tiered pricing — Issue #468
 app.use('/api/v1/fees', feesRouter);
+
+// Smart contract event indexer with real-time WebSocket streams — Issue #447
+app.use('/api/v1/indexer', indexerRouter);
+
+// AI-powered payment routing engine — Issue #446
+app.use('/api/v1/routing/ai', aiRoutingRouter);
+
+// PII classification and redaction audit — Issue #668
+app.use('/api/v1/pii', piiRouter);
 
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());
