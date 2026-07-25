@@ -37,6 +37,7 @@ function simulateProcessing(): Promise<{
 
 export function ConfirmStep() {
   const processingStatus = useWizardStore((s) => s.processingStatus);
+  const paymentType = useWizardStore((s) => s.paymentType);
   const setProcessingStatus = useWizardStore((s) => s.setProcessingStatus);
   const transactionHash = useWizardStore((s) => s.transactionHash);
   const setTransactionHash = useWizardStore((s) => s.setTransactionHash);
@@ -88,11 +89,11 @@ export function ConfirmStep() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Confirm Payment</CardTitle>
+        <CardTitle>{paymentType === 'tip' ? 'Confirm Tip Donation' : 'Confirm Payment'}</CardTitle>
         <CardDescription>
-          {processingStatus === 'idle' && 'Ready to process your payment.'}
-          {processingStatus === 'processing' && 'Processing your payment...'}
-          {processingStatus === 'success' && 'Payment completed successfully!'}
+          {processingStatus === 'idle' && (paymentType === 'tip' ? 'Ready to process your tip donation.' : 'Ready to process your payment.')}
+          {processingStatus === 'processing' && (paymentType === 'tip' ? 'Processing your tip donation...' : 'Processing your payment...')}
+          {processingStatus === 'success' && (paymentType === 'tip' ? 'Tip donation completed successfully!' : 'Payment completed successfully!')}
           {processingStatus === 'error' && 'Something went wrong.'}
         </CardDescription>
       </CardHeader>
@@ -134,7 +135,9 @@ export function ConfirmStep() {
               <div className="text-center">
                 <h3 className="text-lg font-semibold">Transaction Submitted</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Your payment has been submitted to the network.
+                  {paymentType === 'tip'
+                    ? 'Your tip donation has been submitted to the network.'
+                    : 'Your payment has been submitted to the network.'}
                 </p>
               </div>
 

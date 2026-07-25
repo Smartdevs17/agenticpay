@@ -9,6 +9,7 @@ import {
   Shield,
   Repeat,
   ClipboardList,
+  HeartHandshake,
   type LucideIcon,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { useWizardStore, type PaymentType } from '@/store/wizard-store';
 
 const selectTypeSchema = z.object({
-  paymentType: z.enum(['simple', 'escrow', 'subscription', 'batch'], {
+  paymentType: z.enum(['simple', 'escrow', 'subscription', 'batch', 'tip'], {
     required_error: 'Please select a payment type',
   }),
 });
@@ -52,6 +53,12 @@ const OPTIONS: PaymentTypeOption[] = [
     label: 'Batch Payment',
     description: 'Pay multiple recipients in a single transaction.',
     icon: ClipboardList,
+  },
+  {
+    value: 'tip',
+    label: 'Tip Donation',
+    description: 'Send a quick donation to support a creator or cause.',
+    icon: HeartHandshake,
   },
 ];
 

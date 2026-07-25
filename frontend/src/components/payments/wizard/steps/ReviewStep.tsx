@@ -13,6 +13,7 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   escrow: 'Escrow Payment',
   subscription: 'Subscription',
   batch: 'Batch Payment',
+  tip: 'Tip Donation',
 };
 
 const INTERVAL_LABELS: Record<string, string> = {
@@ -97,6 +98,19 @@ export function ReviewStep() {
         { label: 'Max Payments', value: d.maxPayments },
       ],
     });
+  } else if (paymentType === 'tip') {
+    const d = formData as Record<string, string | undefined>;
+    sections.push({
+      key: 'details',
+      label: 'Tip Details',
+      step: 1,
+      fields: [
+        { label: 'Amount', value: d.amount },
+        { label: 'Currency', value: d.currency },
+        { label: 'Recipient', value: d.recipient },
+        { label: 'Message', value: d.description },
+      ],
+    });
   } else if (paymentType === 'batch') {
     const d = formData as {
       currency?: string;
@@ -174,6 +188,29 @@ export function ReviewStep() {
             </div>
           </div>
         ))}
+
+        {paymentType === 'tip' && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-muted-foreground">
+              Top Tippers
+            </h3>
+            <div className="divide-y rounded-lg border">
+              {[
+                { name: 'Maya Chen', amount: '$25' },
+                { name: 'Jordan Patel', amount: '$15' },
+                { name: 'Alicia Gomez', amount: '$10' },
+              ].map((tipper) => (
+                <div
+                  key={tipper.name}
+                  className="flex items-center justify-between px-4 py-2 text-sm"
+                >
+                  <span>{tipper.name}</span>
+                  <Badge variant="secondary">{tipper.amount}</Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Batch entries detail */}
         {paymentType === 'batch' && (

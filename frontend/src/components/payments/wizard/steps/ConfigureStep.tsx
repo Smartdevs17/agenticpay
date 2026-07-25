@@ -36,6 +36,19 @@ const simpleSchema = z.object({
   description: z.string().min(1, 'Description is required'),
 });
 
+const tipSchema = z.object({
+  amount: z
+    .string()
+    .min(1, 'Amount is required')
+    .regex(/^\d+(\.\d{1,7})?$/, 'Enter a valid amount'),
+  currency: z.string().min(1, 'Currency is required'),
+  recipient: z
+    .string()
+    .min(1, 'Recipient is required')
+    .regex(/^[G][a-km-zA-HJ-NP-Z1-9]{55}$/, 'Invalid Stellar public key'),
+  description: z.string().min(1, 'A short thank-you note is required'),
+});
+
 const escrowSchema = z.object({
   amount: z
     .string()
@@ -98,6 +111,8 @@ const getSchema = (type: PaymentType | null) => {
       return subscriptionSchema;
     case 'batch':
       return batchSchema;
+    case 'tip':
+      return tipSchema;
     default:
       return simpleSchema;
   }
@@ -208,6 +223,28 @@ function getFields(type: PaymentType | null): FieldDef[] {
           options: currencies,
         },
       ];
+    case 'tip':
+      return [
+        { name: 'amount', label: 'Amount', type: 'text', placeholder: '0.00' },
+        {
+          name: 'currency',
+          label: 'Currency',
+          type: 'select',
+          options: currencies,
+        },
+        {
+          name: 'recipient',
+          label: 'Recipient',
+          type: 'text',
+          placeholder: 'G...',
+        },
+        {
+          name: 'description',
+          label: 'Message',
+          type: 'textarea',
+          placeholder: 'Thanks for the great work!',
+        },
+      ];
     default:
       return [];
   }
@@ -225,6 +262,8 @@ export function ConfigureStep() {
   const schema = useMemo(() => getSchema(paymentType), [paymentType]);
   const fields = useMemo(() => getFields(paymentType), [paymentType]);
   const isBatch = paymentType === 'batch';
+  const isTip = paymentType === 'tip';
+  const tipPresets = ['5', '10', '25'];
 
   const form = useForm({
     resolver: zodResolver(schema),
@@ -239,6 +278,7 @@ export function ConfigureStep() {
     formState: { errors, isValid },
     watch,
     reset,
+    setValue,
   } = form;
 
   const { fields: entryFields, append, remove } = useFieldArray({
@@ -251,6 +291,7 @@ export function ConfigureStep() {
   }, [paymentType, reset, formData]);
 
   const batchEntries = watch('entries') as BatchPaymentEntry[] | undefined;
+  const selectedTipAmount = watch('amount') as string | undefined;
   const batchTotal = useMemo(
     () =>
       (batchEntries ?? []).reduce(
@@ -347,11 +388,57 @@ export function ConfigureStep() {
           {paymentType === 'escrow' && 'Set up the escrow conditions and parties involved.'}
           {paymentType === 'subscription' && 'Configure the recurring payment schedule.'}
           {paymentType === 'batch' && 'Add recipients and amounts for the batch payment.'}
+          {paymentType === 'tip' && 'Choose a quick tip amount and share a brief thank-you note.'}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit, onError)} className="space-y-6">
+          {isTip && (
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+              <div className="flex items-center justify-between">
+                <Label>Suggested tip amounts</Label>
+                <span className="text-xs text-muted-foreground">Fast pick</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {tipPresets.map((preset) => (
+                  <Button
+                    key={preset}
+                    type="button"
+                    variant={selectedTipAmount === preset ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setValue('amount', preset, { shouldValidate: true, shouldDirty: true })}
+                  >
+                    ${preset}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {fields.map(renderField)}
+
+          {isTip && (
+            <div className="rounded-lg border bg-muted/30 p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Top tippers</h3>
+                <span className="text-xs text-muted-foreground">This week</span>
+              </div>
+              <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <li className="flex items-center justify-between rounded-md bg-background/80 px-3 py-2">
+                  <span>Maya Chen</span>
+                  <span className="font-medium text-foreground">$25</span>
+                </li>
+                <li className="flex items-center justify-between rounded-md bg-background/80 px-3 py-2">
+                  <span>Jordan Patel</span>
+                  <span className="font-medium text-foreground">$15</span>
+                </li>
+                <li className="flex items-center justify-between rounded-md bg-background/80 px-3 py-2">
+                  <span>Alicia Gomez</span>
+                  <span className="font-medium text-foreground">$10</span>
+                </li>
+              </ul>
+            </div>
+          )}
 
           {/* Batch entry rows */}
           {isBatch && (

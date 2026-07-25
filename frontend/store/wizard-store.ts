@@ -1,9 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type PaymentType = 'simple' | 'escrow' | 'subscription' | 'batch';
+export type PaymentType = 'simple' | 'escrow' | 'subscription' | 'batch' | 'tip';
 
 export interface SimplePaymentData {
+  amount: string;
+  currency: string;
+  recipient: string;
+  description: string;
+}
+
+export interface TipPaymentData {
   amount: string;
   currency: string;
   recipient: string;
@@ -41,7 +48,8 @@ export type PaymentFormData =
   | SimplePaymentData
   | EscrowPaymentData
   | SubscriptionPaymentData
-  | BatchPaymentData;
+  | BatchPaymentData
+  | TipPaymentData;
 
 export interface WizardState {
   currentStep: number;
