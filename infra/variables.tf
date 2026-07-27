@@ -128,3 +128,11 @@ variable "quic_monitoring_enabled" {
   type        = bool
   default     = true
 }
+
+# ── Gas Metrics Monitoring Variables ───────────────────────────────────────────
+
+variable "alert_email" {
+  description = "Email address for operational alerts"
+  type        = string
+  default     = ""
+}

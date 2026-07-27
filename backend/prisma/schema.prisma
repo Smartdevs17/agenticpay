@@ -484,13 +484,14 @@ model DependencyVulnerability {
 
 model GasEstimate {
   id              String   @id @default(uuid())
-  network         String   @unique
+  network         String
+  chainId         Int      @map("chain_id")
   gasPriceGwei    Decimal  @map("gas_price_gwei") @db.Decimal(30, 9)
   baseFeeGwei     Decimal? @map("base_fee_gwei") @db.Decimal(30, 9)
   priorityFeeGwei Decimal? @map("priority_fee_gwei") @db.Decimal(30, 9)
   recordedAt      DateTime @default(now()) @map("recorded_at")
 
-  @@index([network, recordedAt])
+  @@index([network, chainId, recordedAt])
   @@map("gas_estimates")
 }
 
@@ -519,14 +520,61 @@ model GasBudget {
 model GasPredictionLog {
   id            String   @id @default(uuid())
   network       String
+  chainId       Int      @map("chain_id")
   horizon       String
   predictedGwei Float    @map("predicted_gwei")
   actualGwei    Float?   @map("actual_gwei")
   errorPct      Float?   @map("error_pct")
   recordedAt    DateTime @default(now()) @map("recorded_at")
 
-  @@index([network, horizon, recordedAt])
+  @@index([network, chainId, horizon, recordedAt])
   @@map("gas_prediction_logs")
+}
+
+model GasPriceHistory {
+  id            String   @id @default(uuid())
+  network       String
+  chainId       Int      @map("chain_id")
+  baseFeeGwei   Decimal  @map("base_fee_gwei") @db.Decimal(30, 9)
+  priorityFeeGwei Decimal? @map("priority_fee_gwei") @db.Decimal(30, 9)
+  gasUsed       BigInt?  @map("gas_used")
+  blockNumber   Int?     @map("block_number")
+  timestamp     DateTime @default(now())
+
+  @@index([network, chainId, timestamp])
+  @@index([timestamp])
+  @@map("gas_price_history")
+}
+
+model NetworkCongestion {
+  id                  String   @id @default(uuid())
+  network             String
+  chainId             Int      @map("chain_id")
+  currentBaseFee      Decimal  @map("current_base_fee") @db.Decimal(30, 9)
+  utilizationRate     Float    @map("utilization_rate")
+  pendingTransactions Int      @map("pending_transactions")
+  congestionScore     Float    @map("congestion_score")
+  trend               String
+  timestamp           DateTime @default(now())
+
+  @@index([network, chainId, timestamp])
+  @@index([timestamp])
+  @@map("network_congestion")
+}
+
+model GasAccuracyBenchmark {
+  id              String   @id @default(uuid())
+  network         String
+  chainId         Int      @map("chain_id")
+  operation       String
+  estimatedGas    BigInt   @map("estimated_gas")
+  actualGas       BigInt   @map("actual_gas")
+  errorPct        Float    @map("error_pct")
+  timestamp       DateTime @default(now())
+
+  @@index([network, chainId, operation, timestamp])
+  @@index([timestamp])
+  @@map("gas_accuracy_benchmarks")
 }
 
 // ─── Payment Vault Models (#478) ─────────────────────────────────────────────
