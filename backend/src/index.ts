@@ -140,6 +140,13 @@ import { getReorgDetector } from './services/chain/reorg-detector.js';
 import { workspacesRouter } from './routes/workspaces.js';
 import { refundsEnhancedRouter } from './routes/refunds-enhanced.js';
 
+// TSOA Controllers for OpenAPI generation
+import { HealthController } from './controllers/health.controller.js';
+import { GasController } from './controllers/gas.controller.js';
+
+// Swagger UI for API documentation
+import { swaggerRouter } from './routes/swagger.js';
+
 // Validate environment variables at startup
 validateEnv();
 const env = getConfig();
@@ -245,6 +252,7 @@ app.use(cacheControlNoStore);
 app.use(healthRouter);
 app.use('/docs', docsRouter);
 app.use('/api-docs', docsRouter);
+app.use('/swagger', swaggerRouter);
 app.use('/api', errorsRouter);
 
 // Cold start monitoring dashboard — available before auth/rate-limit middleware
