@@ -6,6 +6,8 @@ import { tokenBucketRateLimit } from './middleware/rate-limit.js';
 import { apiExpressRateLimit } from './middleware/express-api-rate-limit.js';
 import { slidingWindowRateLimit } from './middleware/sliding-window-rate-limit.js';
 import { compressionMiddleware, getCompressionMetrics } from './middleware/compression.js';
+import { paginationMiddleware, etagMiddleware } from './middleware/pagination.js';
+import { poolMonitorRouter } from './routes/pool-monitor.js';
 import { poolMetrics } from './config/database.js';
 import { config } from './config.js';
 import { versionMiddleware } from './middleware/versioning.js';
@@ -244,6 +246,9 @@ app.use(
   })
 );
 
+app.use(paginationMiddleware);
+app.use(etagMiddleware);
+
 app.use(slaTrackingMiddleware);
 app.use(sessionMiddleware);
 app.use(tokenAuthMiddleware);
@@ -448,6 +453,9 @@ app.use('/api/v1/workspaces', workspacesRouter);
 
 // Enhanced refund processing with policy engine and multi-level approval
 app.use('/api/v1/refunds-enhanced', refundsEnhancedRouter);
+
+// Database connection pool and performance monitoring
+app.use('/api/v1/monitoring/pool', poolMonitorRouter);
 
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());
