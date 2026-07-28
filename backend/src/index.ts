@@ -84,6 +84,7 @@ import { createAnalyticsRouter } from './routes/analytics.js';
 import { paymentQueue } from './queue/payment-queue.js';
 import './events/projections.js';
 import { stripeRouter } from './routes/stripe.js';
+import subscriptionsRouter from './routes/subscriptions.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
 import { requestSizeLimit } from './middleware/request-size-limit.js';
@@ -313,6 +314,9 @@ app.use('/api/v1/sandbox', sandboxRateLimiter, sandboxRouter);
 
 // Email system v2 with templates, analytics, and localization
 app.use('/api/v2/email', emailV2Router);
+
+// Subscription billing with metered usage and tiered pricing (Issue #570)
+app.use('/api/v1/subscriptions', subscriptionsRouter);
 
 // GraphQL gateway with federation-ready schema and subscriptions stream
 app.use('/graphql', graphQLRouter);

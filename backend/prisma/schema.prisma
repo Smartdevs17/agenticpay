@@ -479,3 +479,191 @@ model EmailAnalytics {
   @@index([date])
   @@map("email_analytics")
 }
+
+// ─── Subscription & Billing Models ─────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  active
+  past_due
+  canceled
+  unpaid
+  trialing
+  paused
+}
+
+enum UsageMetricType {
+  api_calls
+  storage_gb
+  compute_hours
+  transactions
+  custom
+}
+
+enum BillingInterval {
+  monthly
+  yearly
+}
+
+model SubscriptionPlan {
+  id                String          @id @default(uuid())
+  tenantId          String          @map("tenant_id")
+  name              String
+  description       String?
+  stripePriceId     String?         @map("stripe_price_id")
+  basePrice         Decimal         @db.Decimal(10, 2)
+  currency          String          @default("USD")
+  billingInterval   BillingInterval @map("billing_interval")
+  features          Json?           // Array of feature names
+  usageLimits       Json?           @map("usage_limits") // { api_calls: 10000, storage_gb: 100 }
+  isActive          Boolean         @default(true) @map("is_active")
+  trialDays         Int             @default(0) @map("trial_days")
+  gracePeriodDays   Int             @default(3) @map("grace_period_days")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  deletedAt         DateTime?       @map("deleted_at")
+
+  subscriptions     Subscription[]
+  meteredPricing    MeteredPricing[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([isActive])
+  @@map("subscription_plans")
+}
+
+model MeteredPricing {
+  id                String          @id @default(uuid())
+  planId            String          @map("plan_id")
+  metricType        UsageMetricType @map("metric_type")
+  stripeMeterId     String?         @map("stripe_meter_id")
+  unitPrice         Decimal         @db.Decimal(10, 4) @map("unit_price")
+  currency          String          @default("USD")
+  includedUnits     Int             @default(0) @map("included_units") // Free tier
+  tiers             Json?           // Volume discount tiers: [{ upTo: 1000, price: 0.01 }, { upTo: null, price: 0.005 }]
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  plan              SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@unique([planId, metricType])
+  @@index([planId])
+  @@map("metered_pricing")
+}
+
+model Subscription {
+  id                    String              @id @default(uuid())
+  tenantId              String              @map("tenant_id")
+  userId                String              @map("user_id")
+  planId                String              @map("plan_id")
+  stripeSubscriptionId  String?             @unique @map("stripe_subscription_id")
+  stripeCustomerId      String?             @map("stripe_customer_id")
+  status                SubscriptionStatus  @default(trialing)
+  currentPeriodStart    DateTime            @map("current_period_start")
+  currentPeriodEnd      DateTime            @map("current_period_end")
+  cancelAtPeriodEnd     Boolean             @default(false) @map("cancel_at_period_end")
+  canceledAt            DateTime?           @map("canceled_at")
+  trialStart            DateTime?           @map("trial_start")
+  trialEnd              DateTime?           @map("trial_end")
+  metadata              Json?
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+  deletedAt             DateTime?           @map("deleted_at")
+
+  plan                  SubscriptionPlan    @relation(fields: [planId], references: [id])
+  usageRecords          UsageRecord[]
+  invoices              SubscriptionInvoice[]
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([planId])
+  @@index([status])
+  @@index([stripeSubscriptionId])
+  @@map("subscriptions")
+}
+
+model UsageRecord {
+  id              String          @id @default(uuid())
+  subscriptionId  String          @map("subscription_id")
+  tenantId        String          @map("tenant_id")
+  metricType      UsageMetricType @map("metric_type")
+  quantity        Int
+  timestamp       DateTime        @default(now())
+  metadata        Json?
+  aggregatedAt    DateTime?       @map("aggregated_at")
+  billedAt        DateTime?       @map("billed_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  subscription    Subscription    @relation(fields: [subscriptionId], references: [id])
+
+  @@index([subscriptionId])
+  @@index([tenantId])
+  @@index([metricType])
+  @@index([timestamp])
+  @@index([aggregatedAt])
+  @@map("usage_records")
+}
+
+model UsageAggregate {
+  id              String          @id @default(uuid())
+  subscriptionId  String          @map("subscription_id")
+  tenantId        String          @map("tenant_id")
+  metricType      UsageMetricType @map("metric_type")
+  totalQuantity   Int             @map("total_quantity")
+  periodStart     DateTime        @map("period_start")
+  periodEnd       DateTime        @map("period_end")
+  cost            Decimal         @db.Decimal(10, 4)
+  currency        String          @default("USD")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@unique([subscriptionId, metricType, periodStart])
+  @@index([subscriptionId])
+  @@index([tenantId])
+  @@index([periodStart])
+  @@map("usage_aggregates")
+}
+
+model SubscriptionInvoice {
+  id                  String   @id @default(uuid())
+  subscriptionId      String   @map("subscription_id")
+  tenantId            String   @map("tenant_id")
+  stripeInvoiceId     String?  @unique @map("stripe_invoice_id")
+  amount              Decimal  @db.Decimal(10, 2)
+  currency            String   @default("USD")
+  status              String   // draft, open, paid, void, uncollectible
+  periodStart         DateTime @map("period_start")
+  periodEnd           DateTime @map("period_end")
+  dueDate             DateTime @map("due_date")
+  paidAt              DateTime? @map("paid_at")
+  attemptCount        Int      @default(0) @map("attempt_count")
+  nextPaymentAttempt  DateTime? @map("next_payment_attempt")
+  metadata            Json?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  subscription        Subscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([subscriptionId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("subscription_invoices")
+}
+
+model UsageAlert {
+  id              String          @id @default(uuid())
+  subscriptionId  String          @map("subscription_id")
+  tenantId        String          @map("tenant_id")
+  metricType      UsageMetricType @map("metric_type")
+  threshold       Int             // Percentage: 80 or 100
+  triggered       Boolean         @default(false)
+  triggeredAt     DateTime?       @map("triggered_at")
+  notifiedAt      DateTime?       @map("notified_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@unique([subscriptionId, metricType, threshold])
+  @@index([subscriptionId])
+  @@index([triggered])
+  @@map("usage_alerts")
+}

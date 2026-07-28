@@ -19,6 +19,7 @@ import { markOverdueRequests } from '../services/gdpr.js';
 import { sandboxCleanupJobs } from '../jobs/sandbox-cleanup.js';
 import { SubscriptionService } from '../services/subscription.service.js';
 import { SubscriptionProcessor } from '../jobs/subscription-processor.js';
+import { aggregateUsage, checkUsageAlerts, processDunning } from '../jobs/usageAggregation.js';
 import { ethers } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -157,6 +158,30 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     description: 'Aggregates sandbox usage statistics for monitoring dashboards.',
     defaultSchedule: '0 0 * * *',
     handler: sandboxCleanupJobs.find((j) => j.id === 'sandbox-maintenance-stats')!.handler,
+  },
+  {
+    id: 'usage-aggregation',
+    name: 'Usage Aggregation and Billing',
+    description: 'Aggregates metered usage records and syncs to Stripe for subscription billing.',
+    defaultSchedule: '0 * * * *', // Hourly
+    timeoutMs: 10 * 60 * 1000, // 10 minutes
+    handler: aggregateUsage,
+  },
+  {
+    id: 'usage-alerts-check',
+    name: 'Usage Alerts Check',
+    description: 'Checks subscription usage against limits and triggers alerts at 80% and 100%.',
+    defaultSchedule: '0 * * * *', // Hourly
+    timeoutMs: 5 * 60 * 1000, // 5 minutes
+    handler: checkUsageAlerts,
+  },
+  {
+    id: 'subscription-dunning',
+    name: 'Subscription Dunning Process',
+    description: 'Processes failed payments with retry logic and grace period management.',
+    defaultSchedule: '0 0 * * *', // Daily
+    timeoutMs: 15 * 60 * 1000, // 15 minutes
+    handler: processDunning,
   },
 ];
 
