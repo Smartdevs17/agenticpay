@@ -2,8 +2,10 @@ import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config/env.js';
 import { withQueryProfiling } from '../config/database.js';
+import { EmailDeliveryService } from './email-delivery.js';
 
 let openaiClient: OpenAI | null = null;
+const emailService = new EmailDeliveryService();
 
 const TAX_RATES: Record<string, number> = {
   US: 0.10,
@@ -28,7 +30,13 @@ const getOpenAIClient = () => {
   return openaiClient;
 };
 
-export type InvoiceStatus = 'draft' | 'pending' | 'paid' | 'overdue';
+export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
+
+export interface InvoiceReminder {
+  sentAt: string;
+  type: '7_days' | '3_days' | 'overdue' | 'custom';
+  message: string;
+}
 
 export type InvoiceLineItem = {
   description: string;
@@ -52,11 +60,18 @@ export type InvoiceRecord = {
   invoiceNumber: string;
   merchantId: string;
   projectId: string;
+  recipientEmail?: string;
+  recipientName?: string;
   lineItems: InvoiceLineItem[];
   subtotal: number;
   taxTotal: number;
   total: number;
   currency: string;
+  dueDate?: string;
+  sentAt?: string;
+  paidAt?: string;
+  cancelledAt?: string;
+  reminders: InvoiceReminder[];
   generatedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -224,7 +239,8 @@ export async function generateInvoice(request: InvoiceRequest): Promise<InvoiceR
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     summary,
-    status: 'pending',
+    status: 'draft',
+    reminders: [],
     countryCode,
     taxBreakdown: [
       {
@@ -239,6 +255,144 @@ export async function generateInvoice(request: InvoiceRequest): Promise<InvoiceR
 
   invoices.set(invoice.id, invoice);
   return invoice;
+}
+
+export async function sendInvoiceEmail(
+  invoiceId: string,
+  recipientEmail: string,
+  recipientName?: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const invoice = invoices.get(invoiceId);
+  if (!invoice) return { success: false, error: 'Invoice not found' };
+  if (invoice.status === 'cancelled') return { success: false, error: 'Invoice is cancelled' };
+
+  const pdf = buildSimplePdf(invoice);
+  const result = await emailService.send({
+    to: recipientEmail,
+    toName: recipientName,
+    subject: `Invoice ${invoice.invoiceNumber} from AgenticPay`,
+    html: `
+      <h2>Invoice ${invoice.invoiceNumber}</h2>
+      <p>Dear ${recipientName || 'Valued Customer'},</p>
+      <p>Please find attached the invoice for project <strong>${invoice.projectId}</strong>.</p>
+      <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse;margin:16px 0">
+        <tr><td><strong>Subtotal</strong></td><td>$${invoice.subtotal.toFixed(2)}</td></tr>
+        <tr><td><strong>Tax</strong></td><td>$${invoice.taxTotal.toFixed(2)}</td></tr>
+        <tr><td><strong>Total</strong></td><td>$${invoice.total.toFixed(2)}</td></tr>
+      </table>
+      ${invoice.dueDate ? `<p><strong>Due Date:</strong> ${new Date(invoice.dueDate).toLocaleDateString()}</p>` : ''}
+      <p>${invoice.summary}</p>
+      <hr/>
+      <p style="color:#666;font-size:12px">AgenticPay - Automated Invoice System</p>
+    `,
+    attachments: [
+      {
+        filename: `${invoice.invoiceNumber}.pdf`,
+        content: pdf,
+        contentType: 'application/pdf',
+      },
+    ],
+  });
+
+  if (result.success) {
+    invoice.recipientEmail = recipientEmail;
+    invoice.recipientName = recipientName || undefined;
+    invoice.sentAt = new Date().toISOString();
+    invoice.status = 'sent';
+    invoice.updatedAt = new Date().toISOString();
+    invoices.set(invoiceId, invoice);
+  }
+
+  return { success: result.success, messageId: result.messageId, error: result.error };
+}
+
+export function updateInvoiceStatus(
+  invoiceId: string,
+  status: InvoiceStatus
+): InvoiceRecord | undefined {
+  const invoice = invoices.get(invoiceId);
+  if (!invoice) return undefined;
+
+  invoice.status = status;
+  invoice.updatedAt = new Date().toISOString();
+  if (status === 'paid') invoice.paidAt = new Date().toISOString();
+  if (status === 'cancelled') invoice.cancelledAt = new Date().toISOString();
+
+  invoices.set(invoiceId, invoice);
+  return invoice;
+}
+
+export function sendPaymentReminder(invoiceId: string): InvoiceReminder | undefined {
+  const invoice = invoices.get(invoiceId);
+  if (!invoice) return undefined;
+  if (invoice.status === 'paid' || invoice.status === 'cancelled') return undefined;
+  if (!invoice.dueDate) return undefined;
+
+  const daysOverdue = Math.floor(
+    (Date.now() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  let reminderType: InvoiceReminder['type'];
+  let message: string;
+
+  if (daysOverdue <= 0) {
+    const daysUntilDue = Math.abs(daysOverdue);
+    if (daysUntilDue <= 7 && daysUntilDue > 3) {
+      reminderType = '7_days';
+      message = `Reminder: Invoice ${invoice.invoiceNumber} is due in ${daysUntilDue} days.`;
+    } else if (daysUntilDue <= 3 && daysUntilDue > 0) {
+      reminderType = '3_days';
+      message = `Reminder: Invoice ${invoice.invoiceNumber} is due in ${daysUntilDue} days. Please arrange payment.`;
+    } else {
+      return undefined;
+    }
+  } else {
+    reminderType = 'overdue';
+    invoice.status = 'overdue';
+    message = `Overdue Notice: Invoice ${invoice.invoiceNumber} is ${daysOverdue} day(s) overdue. Please pay immediately.`;
+  }
+
+  const reminder: InvoiceReminder = {
+    sentAt: new Date().toISOString(),
+    type: reminderType,
+    message,
+  };
+
+  invoice.reminders.push(reminder);
+  invoice.updatedAt = new Date().toISOString();
+  invoices.set(invoiceId, invoice);
+
+  if (invoice.recipientEmail) {
+    emailService.send({
+      to: invoice.recipientEmail,
+      toName: invoice.recipientName,
+      subject: `Payment Reminder: ${invoice.invoiceNumber}`,
+      html: `<p>${message}</p><p>Total Due: $${invoice.total.toFixed(2)}</p>`,
+    }).catch(() => {});
+  }
+
+  return reminder;
+}
+
+export function getOverdueInvoices(): InvoiceRecord[] {
+  return [...invoices.values()].filter(
+    (inv) => inv.status === 'sent' || inv.status === 'overdue'
+  );
+}
+
+export function processOverdueInvoices(): InvoiceReminder[] {
+  const sent = getOverdueInvoices();
+  const reminders: InvoiceReminder[] = [];
+  for (const inv of sent) {
+    const reminder = sendPaymentReminder(inv.id);
+    if (reminder) reminders.push(reminder);
+  }
+  return reminders;
+}
+
+export function getInvoiceReminders(invoiceId: string): InvoiceReminder[] {
+  const invoice = invoices.get(invoiceId);
+  return invoice?.reminders ?? [];
 }
 
 export function listInvoices(): InvoiceRecord[] {
