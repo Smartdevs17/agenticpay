@@ -137,6 +137,8 @@ import piiRouter from './routes/pii.js';
 import { piiRedactionMiddleware } from './middleware/pii-redaction.js';
 import { reorgRouter } from './routes/reorg.js';
 import { getReorgDetector } from './services/chain/reorg-detector.js';
+import { workspacesRouter } from './routes/workspaces.js';
+import { refundsEnhancedRouter } from './routes/refunds-enhanced.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -183,9 +185,9 @@ const apiRateLimiter = tokenBucketRateLimit({ keyPrefix: 'rl:api' });
 const invoiceLimiter = tokenBucketRateLimit({
   keyPrefix: 'rl:invoice',
   endpointConfig: {
-    free:       { capacity: 10,  refillRate: 0.1, burstAllowance: 2  },
-    pro:        { capacity: 60,  refillRate: 1,   burstAllowance: 10 },
-    enterprise: { capacity: 300, refillRate: 5,   burstAllowance: 50 },
+    free: { capacity: 10, refillRate: 0.1, burstAllowance: 2 },
+    pro: { capacity: 60, refillRate: 1, burstAllowance: 10 },
+    enterprise: { capacity: 300, refillRate: 5, burstAllowance: 50 },
   },
 });
 
@@ -262,7 +264,7 @@ app.use('/api/', slidingWindowRateLimit({ keyPrefix: 'sw:api' }));
 app.use('/api/', requestCoalescer());
 
 // Apply sandbox-aware rate limiting for sandbox endpoints
-const sandboxRateLimiter = tokenBucketRateLimit({ 
+const sandboxRateLimiter = tokenBucketRateLimit({
   keyPrefix: 'rl:sandbox',
   sandboxMode: env.NODE_ENV === 'sandbox' || env.NODE_ENV === 'development'
 });
@@ -433,6 +435,12 @@ app.use('/api/v1/routing/ai', aiRoutingRouter);
 // PII classification and redaction audit — Issue #668
 app.use('/api/v1/pii', piiRouter);
 
+// Multi-tenant workspaces with RBAC
+app.use('/api/v1/workspaces', workspacesRouter);
+
+// Enhanced refund processing with policy engine and multi-level approval
+app.use('/api/v1/refunds-enhanced', refundsEnhancedRouter);
+
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());
 app.use('/api/v1/sandbox', sandboxRateLimiter, sandboxRouter);
@@ -450,7 +458,7 @@ app.use('/graphql/ws', graphQLWsRouter);
 // Dev tooling routes (only in development)
 if (env.NODE_ENV === 'development') {
   app.use('/api/dev', devDevRouter);
-  
+
   // Initialize dev log WebSocket transport
   import('./logger/dev-transport.js').then(({ createDevLogTransport }) => {
     createDevLogTransport(server, '/ws/logs');

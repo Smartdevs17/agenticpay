@@ -2335,6 +2335,208 @@ model PiiAuditLog {
   @@map("pii_audit_logs")
 }
 
+// ─── Workspace / Multi-Tenant Models ─────────────────────────────────────────
+
+enum WorkspaceRole {
+  owner
+  admin
+  member
+  viewer
+}
+
+enum WorkspaceInvitationStatus {
+  pending
+  accepted
+  declined
+  expired
+}
+
+model Workspace {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  description   String?
+  logoUrl       String?  @map("logo_url")
+  ownerId       String   @map("owner_id")
+  isActive      Boolean  @default(true) @map("is_active")
+  settings      Json?    // workspace-level settings (branding, features, etc.)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  members       WorkspaceMember[]
+  invitations   WorkspaceInvitation[]
+  auditLogs     WorkspaceAuditLog[]
+
+  @@index([slug])
+  @@index([ownerId])
+  @@index([isActive])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid())
+  workspaceId String        @map("workspace_id")
+  userId      String        @map("user_id")
+  role        WorkspaceRole @default(member)
+  joinedAt    DateTime      @default(now()) @map("joined_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([role])
+  @@map("workspace_members")
+}
+
+model WorkspaceInvitation {
+  id            String                     @id @default(uuid())
+  workspaceId   String                     @map("workspace_id")
+  email         String
+  role          WorkspaceRole              @default(member)
+  token         String                     @unique
+  invitedBy     String                     @map("invited_by")
+  status        WorkspaceInvitationStatus  @default(pending)
+  expiresAt     DateTime                   @map("expires_at")
+  acceptedAt    DateTime?                  @map("accepted_at")
+  declinedAt    DateTime?                  @map("declined_at")
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @updatedAt @map("updated_at")
+
+  workspace     Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
+  @@index([email])
+  @@index([token])
+  @@index([status])
+  @@map("workspace_invitations")
+}
+
+model WorkspaceAuditLog {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  actorId     String?  @map("actor_id")
+  action      String
+  resource    String
+  details     Json?
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([actorId])
+  @@index([action])
+  @@map("workspace_audit_logs")
+}
+
+// ─── Enhanced Refund Models ──────────────────────────────────────────────────
+
+enum RefundStatus {
+  pending
+  approved
+  rejected
+  processing
+  completed
+  failed
+}
+
+enum RefundApprovalLevel {
+  first
+  second
+  third
+}
+
+model RefundPolicy {
+  id                       String   @id @default(uuid())
+  workspaceId              String   @map("workspace_id")
+  name                     String
+  fullRefundWindowDays     Int      @default(30) @map("full_refund_window_days")
+  autoApprovalThreshold    Decimal  @default(100) @map("auto_approval_threshold") @db.Decimal(20, 8)
+  alwaysRefundUnderAmount  Decimal  @default(25) @map("always_refund_under_amount") @db.Decimal(20, 8)
+  maxPartialRefundPct      Int      @default(100) @map("max_partial_refund_pct")
+  requireReason            Boolean  @default(true) @map("require_reason")
+  firstApprovalThreshold   Decimal  @default(500) @map("first_approval_threshold") @db.Decimal(20, 8)
+  secondApprovalThreshold  Decimal  @default(5000) @map("second_approval_threshold") @db.Decimal(20, 8)
+  isActive                 Boolean  @default(true) @map("is_active")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+  deletedAt                DateTime? @map("deleted_at")
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@index([isActive])
+  @@map("refund_policies")
+}
+
+model Refund {
+  id              String       @id @default(uuid())
+  workspaceId     String       @map("workspace_id")
+  paymentId       String       @map("payment_id")
+  stripeRefundId  String?      @unique @map("stripe_refund_id")
+  amount          Decimal      @db.Decimal(20, 8)
+  currency        String       @default("USD")
+  reason          String?
+  status          RefundStatus @default(pending)
+  decision        String?      // 'approved' | 'rejected' | 'manual_review'
+  decisionReasons String[]     @map("decision_reasons")
+  requestedBy     String?      @map("requested_by")
+  approvedBy      String?      @map("approved_by")
+  processedAt     DateTime?    @map("processed_at")
+  completedAt     DateTime?    @map("completed_at")
+  metadata        Json?
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  deletedAt       DateTime?    @map("deleted_at")
+
+  lineItems       RefundLineItem[]
+  approvals       RefundApproval[]
+
+  @@index([workspaceId, createdAt])
+  @@index([paymentId])
+  @@index([status])
+  @@index([stripeRefundId])
+  @@map("refunds")
+}
+
+model RefundLineItem {
+  id        String   @id @default(uuid())
+  refundId  String   @map("refund_id")
+  label     String
+  amount    Decimal  @db.Decimal(20, 8)
+  quantity  Int      @default(1)
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  refund    Refund   @relation(fields: [refundId], references: [id], onDelete: Cascade)
+
+  @@index([refundId])
+  @@map("refund_line_items")
+}
+
+model RefundApproval {
+  id            String              @id @default(uuid())
+  refundId      String              @map("refund_id")
+  level         RefundApprovalLevel
+  approverId    String              @map("approver_id")
+  status        String              @default("pending") // pending | approved | rejected
+  comment       String?
+  approvedAt    DateTime?           @map("approved_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  refund        Refund              @relation(fields: [refundId], references: [id], onDelete: Cascade)
+
+  @@unique([refundId, level])
+  @@index([refundId])
+  @@index([approverId])
+  @@map("refund_approvals")
+}
+
 // ─── Chain Reorganization Models ─────────────────────────────────────────────
 
 model ReorgEvent {
