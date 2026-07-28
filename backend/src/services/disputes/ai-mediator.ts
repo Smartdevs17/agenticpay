@@ -35,7 +35,7 @@ export interface DisputeEvidenceInput {
   timestamp: string;
 }
 
-export interface DisputeInput {
+export type DisputeInput {
   id: string;
   description: string;
   category: DisputeCategory;
@@ -44,6 +44,8 @@ export interface DisputeInput {
   evidence: DisputeEvidenceInput[];
   chatHistory?: string[];
   historicalOutcome?: ResolutionRecommendation;
+  /** Arbitrator expertise tags for routing */
+  complexityTags?: string[];
 }
 
 export interface MediationResult {
@@ -56,6 +58,17 @@ export interface MediationResult {
   escalatedToHuman: boolean;
   aiSummary: string;
   processedAt: string;
+  /** Evidence scoring breakdown */
+  evidenceScore?: {
+    relevance: number;
+    strength: number;
+    credibility: number;
+    overall: number;
+  };
+  /** Complexity score for escalation routing */
+  complexityScore?: number;
+  /** Recommended arbitrator specializations */
+  recommendedArbitratorSpecializations?: string[];
 }
 
 export interface AIMediationLog {
@@ -230,6 +243,35 @@ function classifyDispute(
   };
 }
 
+function scoreEvidence(evidence: DisputeEvidenceInput[]): { relevance: number; strength: number; credibility: number; overall: number } {
+  if (evidence.length === 0) {
+    return { relevance: 0, strength: 0, credibility: 0, overall: 0 };
+  }
+
+  const relevance = Math.min(1, evidence.filter((e) => e.fileUrl || e.description.length > 20).length / Math.max(1, evidence.length));
+  const strength = Math.min(1, evidence.filter((e) => e.type === 'document' || e.type === 'image').length / Math.max(1, evidence.length));
+  const credibility = 0.7; // placeholder for identity/attestation checks
+  const overall = (relevance + strength + credibility) / 3;
+
+  return { relevance, strength, credibility, overall };
+}
+
+function estimateComplexity(input: DisputeInput, evidenceScore: { overall: number }): number {
+  let complexity = 0;
+  if (input.amount > 10000) complexity += 0.3;
+  if (input.evidence.length > 5) complexity += 0.2;
+  if (evidenceScore.overall < 0.5) complexity += 0.3;
+  if (input.category === 'other') complexity += 0.2;
+  return Math.min(1, complexity);
+}
+
+function recommendArbitratorSpecializations(complexityScore: number, category: DisputeCategory): string[] {
+  if (complexityScore >= 0.7) return ['smart-contract', 'defi', 'legal'];
+  if (category === 'quality_issue') return ['quality', 'service'];
+  if (category === 'unauthorized_charge') return ['fraud', 'identity'];
+  return ['payment', 'escrow'];
+}
+
 // ---------------------------------------------------------------------------
 // Historical pattern boost
 // ---------------------------------------------------------------------------
@@ -282,9 +324,14 @@ export async function analyzeDispute(input: DisputeInput): Promise<MediationResu
   let classification = classifyDispute(input, signals);
   classification = applyHistoricalBoost(classification, input.historicalOutcome);
 
+  const evidenceScore = scoreEvidence(input.evidence);
+  const complexityScore = estimateComplexity(input, evidenceScore);
+  const recommendedArbitratorSpecializations = recommendArbitratorSpecializations(complexityScore, input.category);
+
   const autoResolved =
     classification.rawConfidence >= AUTO_RESOLVE_THRESHOLD &&
-    classification.recommendation !== 'needs_human_review';
+    classification.recommendation !== 'needs_human_review' &&
+    complexityScore < 0.6;
 
   const escalatedToHuman = !autoResolved;
 
@@ -305,6 +352,9 @@ export async function analyzeDispute(input: DisputeInput): Promise<MediationResu
     escalatedToHuman,
     aiSummary: generateSummary(input, classification),
     processedAt: new Date().toISOString(),
+    evidenceScore,
+    complexityScore,
+    recommendedArbitratorSpecializations,
   };
 
   // Persist log

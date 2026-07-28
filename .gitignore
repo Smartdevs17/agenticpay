@@ -30,6 +30,17 @@ npm-debug.log*
 # Keys
 *.pem
 
+# Test snapshots
+*.snap
+*.snap.new
+**/__snapshots__/
+**/snapshots/
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
 .claude
 .lhci_reports/
 bundle-reports/
