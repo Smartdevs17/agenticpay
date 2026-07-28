@@ -59,19 +59,36 @@ contract GasPriceOracle {
 
     // ── Fee Quote ────────────────────────────────────────────────────────────
 
-    /// @notice Generate a fee quote valid for `ttlSeconds`.
-    /// @param token Address of the ERC-20 token for fee payment (address(0) for ETH).
-    /// @param ttlSeconds How long the quote is valid.
-    /// @return quote The fee quote struct.
     function getQuote(address token, uint256 ttlSeconds) external view returns (FeeQuote memory quote) {
         uint256 baseFee = block.basefee;
         uint256 pFee = priorityFee;
-        uint256 maxFee = baseFee + baseFeePremium + pFee;
+        uint256 premium;
+        assembly {
+            premium := sload(baseFeePremium.slot)
+        }
+        uint256 maxFee;
+        unchecked {
+            maxFee = baseFee + premium + pFee;
+        }
 
-        uint256 tokenFee = 0;
-        if (token != address(0) && tokenPriceRatios[token] > 0) {
-            // Convert ETH fee to token fee: tokenFee = maxFee * ratio / 1e18
-            tokenFee = (maxFee * tokenPriceRatios[token]) / 1e18;
+        uint256 tokenFee;
+        if (token != address(0)) {
+            uint256 ratio;
+            assembly {
+                mstore(0, token)
+                mstore(0x20, tokenPriceRatios.slot)
+                ratio := sload(keccak256(0, 0x40))
+            }
+            if (ratio > 0) {
+                unchecked {
+                    tokenFee = (maxFee * ratio) / 1e18;
+                }
+            }
+        }
+
+        uint256 validUntil;
+        unchecked {
+            validUntil = block.timestamp + ttlSeconds;
         }
 
         quote = FeeQuote({
@@ -79,20 +96,33 @@ contract GasPriceOracle {
             priorityFee: pFee,
             maxFeePerGas: maxFee,
             tokenFee: tokenFee,
-            validUntil: block.timestamp + ttlSeconds
+            validUntil: validUntil
         });
     }
 
-    /// @notice Estimate the total gas cost in ETH for a given gas limit.
     function estimateGasCost(uint256 gasLimit) external view returns (uint256 costWei) {
-        return (block.basefee + baseFeePremium + priorityFee) * gasLimit;
+        unchecked {
+            return (block.basefee + baseFeePremium + priorityFee) * gasLimit;
+        }
     }
 
-    /// @notice Estimate gas cost in ERC-20 tokens.
     function estimateGasCostInToken(uint256 gasLimit, address token) external view returns (uint256 costTokens) {
-        uint256 costWei = (block.basefee + baseFeePremium + priorityFee) * gasLimit;
-        if (tokenPriceRatios[token] > 0) {
-            costTokens = (costWei * tokenPriceRatios[token]) / 1e18;
+        uint256 costWei;
+        unchecked {
+            costWei = (block.basefee + baseFeePremium + priorityFee) * gasLimit;
+        }
+        if (token != address(0)) {
+            uint256 ratio;
+            assembly {
+                mstore(0, token)
+                mstore(0x20, tokenPriceRatios.slot)
+                ratio := sload(keccak256(0, 0x40))
+            }
+            if (ratio > 0) {
+                unchecked {
+                    costTokens = (costWei * ratio) / 1e18;
+                }
+            }
         }
     }
 

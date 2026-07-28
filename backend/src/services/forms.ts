@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AppError } from '../middleware/errorHandler.js';
 
-export const formFieldTypeSchema = z.enum(['text', 'number', 'date', 'file', 'select']);
+export const formFieldTypeSchema = z.enum(['text', 'number', 'date', 'file', 'select', 'payment']);
 
 export const formOptionSchema = z.object({
   label: z.string().min(1, 'Option label is required'),
@@ -172,6 +172,19 @@ function isFieldVisible(field: FormField, values: Record<string, unknown>): bool
 }
 
 function validateFieldValue(field: FormField, value: unknown): string | null {
+  if (field.type === 'payment') {
+    if (field.required && (value === undefined || value === null)) {
+      return 'Payment details are required';
+    }
+    if (value !== undefined && value !== null) {
+      if (typeof value !== 'object') return 'Payment value must be an object';
+      const p = value as Record<string, unknown>;
+      if (typeof p.amount !== 'number' || p.amount <= 0) return 'Payment amount must be a positive number';
+      if (typeof p.currency !== 'string' || !/^[A-Z]{3,5}$/.test(p.currency)) return 'Payment currency must be a 3–5 letter code (e.g. USD, XLM)';
+    }
+    return null;
+  }
+
   if (field.type === 'file') {
     const fileValue = sanitizeFileField(value);
     if (!fileValue) {
@@ -350,6 +363,49 @@ export function getDrafts(formId: string): FormDraft[] {
   }
 
   return drafts.get(formId) ?? [];
+}
+
+export function exportFormSubmissions(formId: string, format: 'csv' | 'json'): string {
+  const form = forms.get(formId);
+  if (!form) {
+    throw new AppError(404, 'Form not found', 'NOT_FOUND');
+  }
+
+  const formSubmissions = submissions.get(formId) ?? [];
+
+  if (format === 'json') {
+    return JSON.stringify(formSubmissions, null, 2);
+  }
+
+  // CSV export
+  const fieldNames = form.fields.map((f) => f.name);
+  const header = ['id', 'submittedAt', 'success', ...fieldNames]
+    .map((col) => `"${col}"`)
+    .join(',');
+
+  // Prefix cells that start with formula-injection chars to prevent spreadsheet execution
+  const safeCsvCell = (raw: string): string => {
+    const escaped = raw.replace(/"/g, '""');
+    const safe = /^[=+\-@\t\r]/.test(escaped) ? `'${escaped}` : escaped;
+    return `"${safe}"`;
+  };
+
+  const rows = formSubmissions.map((sub) => {
+    const cells = [
+      safeCsvCell(sub.id),
+      safeCsvCell(sub.submittedAt),
+      safeCsvCell(String(sub.success)),
+      ...fieldNames.map((name) => {
+        const val = sub.values[name];
+        if (val === undefined || val === null) return '""';
+        const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        return safeCsvCell(str);
+      }),
+    ];
+    return cells.join(',');
+  });
+
+  return [header, ...rows].join('\n');
 }
 
 export function deleteDraft(formId: string, draftId: string): void {

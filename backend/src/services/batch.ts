@@ -182,6 +182,137 @@ export function generateCSVTemplate(): string {
   ].join('\n');
 }
 
+// ── Dry-Run Estimation ───────────────────────────────────────────────────────
+
+export interface BatchEstimate {
+  totalPayments: number;
+  totalAmount: string;
+  byAsset: Record<string, string>;
+  estimatedGasUnits: number;
+  duplicateCount: number;
+  invalidAddressCount: number;
+  estimatedDurationMs: number;
+}
+
+export function estimateBatch(payments: BatchPaymentItem[]): BatchEstimate {
+  const byAsset: Record<string, number> = {};
+  let totalAmount = 0;
+  let invalidCount = 0;
+
+  for (const p of payments) {
+    if (!/^G[A-Z2-7]{55}$/.test(p.recipient)) {
+      invalidCount++;
+      continue;
+    }
+    const amount = parseFloat(p.amount) || 0;
+    totalAmount += amount;
+    byAsset[p.asset] = (byAsset[p.asset] ?? 0) + amount;
+  }
+
+  const duplicateIndices = detectDuplicates(payments);
+  const byAssetStrings: Record<string, string> = {};
+  for (const [k, v] of Object.entries(byAsset)) {
+    byAssetStrings[k] = v.toFixed(7);
+  }
+
+  return {
+    totalPayments: payments.length,
+    totalAmount: totalAmount.toFixed(7),
+    byAsset: byAssetStrings,
+    estimatedGasUnits: payments.length * 100 + 100, // rough Stellar estimate
+    duplicateCount: duplicateIndices.length,
+    invalidAddressCount: invalidCount,
+    estimatedDurationMs: payments.length * 50 + 500, // rough estimate
+  };
+}
+
+// ── Scheduled Batch Execution ────────────────────────────────────────────────
+
+export interface ScheduledBatch {
+  id: string;
+  label?: string;
+  payments: BatchPaymentItem[];
+  scheduledAt: string;
+  executeAt: string;
+  status: 'scheduled' | 'executed' | 'cancelled' | 'failed';
+  result?: BatchRecord;
+  createdAt: string;
+}
+
+const scheduledBatches = new Map<string, ScheduledBatch>();
+let scheduleTimer: ReturnType<typeof setInterval> | null = null;
+
+export function scheduleBatch(
+  payments: BatchPaymentItem[],
+  executeAt: string,
+  label?: string
+): ScheduledBatch {
+  const id = `sched_${randomUUID()}`;
+  const now = new Date().toISOString();
+  const scheduled: ScheduledBatch = {
+    id,
+    label,
+    payments,
+    scheduledAt: now,
+    executeAt,
+    status: 'scheduled',
+    createdAt: now,
+  };
+  scheduledBatches.set(id, scheduled);
+  startScheduleProcessor();
+  return scheduled;
+}
+
+export function listScheduledBatches(): ScheduledBatch[] {
+  return Array.from(scheduledBatches.values()).sort(
+    (a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()
+  );
+}
+
+export function cancelScheduledBatch(id: string): ScheduledBatch | undefined {
+  const batch = scheduledBatches.get(id);
+  if (!batch || batch.status !== 'scheduled') return undefined;
+  batch.status = 'cancelled';
+  scheduledBatches.set(id, batch);
+  return batch;
+}
+
+export function getScheduledBatch(id: string): ScheduledBatch | undefined {
+  return scheduledBatches.get(id);
+}
+
+function processScheduledBatches(): void {
+  const now = Date.now();
+  const due = Array.from(scheduledBatches.values()).filter(
+    (b) => b.status === 'scheduled' && new Date(b.executeAt).getTime() <= now
+  );
+
+  for (const batch of due) {
+    try {
+      const result = executeBatch(batch.payments, batch.label);
+      batch.result = result;
+      batch.status = 'executed';
+    } catch (error) {
+      batch.status = 'failed';
+    }
+    scheduledBatches.set(batch.id, batch);
+  }
+}
+
+function startScheduleProcessor(): void {
+  if (scheduleTimer) return;
+  scheduleTimer = setInterval(() => {
+    processScheduledBatches();
+  }, 5_000);
+}
+
+export function stopScheduleProcessor(): void {
+  if (scheduleTimer) {
+    clearInterval(scheduleTimer);
+    scheduleTimer = null;
+  }
+}
+
 // ── BatchProcessor (transaction batching with Stellar) ────────────────────────
 
 export interface BatchItem<T = unknown> {

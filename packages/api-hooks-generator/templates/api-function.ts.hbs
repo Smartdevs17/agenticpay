@@ -1,0 +1,52 @@
+// Auto-generated API function for {{operationId}}
+// Path: {{path}} [{{method}}]
+
+import { apiClient } from '../client';
+{{#if hasBody}}
+import { z } from 'zod';
+{{/if}}
+
+{{#if hasBody}}
+export const {{requestTypeName}}Schema = z.object({
+  {{#each requestBodyFields}}
+  {{name}}: {{zodType}},
+  {{/each}}
+});
+
+export type {{requestTypeName}} = z.infer<typeof {{requestTypeName}}Schema>;
+
+{{/if}}
+export interface {{responseTypeName}} {
+  {{#each responseFields}}
+  {{name}}: {{type}};
+  {{/each}}
+}
+
+export async function fetch{{pascalCase operationId}}(
+  {{#each pathParams}}
+  {{name}}: {{type}},
+  {{/each}}
+  {{#if queryParams}}
+  query?: { {{#each queryParams}}{{name}}{{#unless required}}?{{/unless}}: {{type}}; {{/each}} },
+  {{/if}}
+  {{#if hasBody}}
+  body?: {{requestTypeName}},
+  {{/if}}
+): Promise<{{responseTypeName}}> {
+  const url = `{{urlTemplate}}`{{#if queryParams}} + '?' + new URLSearchParams(query as Record<string, string>).toString(){{/if}};
+  {{#ifEquals method 'GET'}}
+  return apiClient.get(url).json();
+  {{/ifEquals}}
+  {{#ifEquals method 'POST'}}
+  return apiClient.post(url, { json: body }).json();
+  {{/ifEquals}}
+  {{#ifEquals method 'PUT'}}
+  return apiClient.put(url, { json: body }).json();
+  {{/ifEquals}}
+  {{#ifEquals method 'DELETE'}}
+  return apiClient.delete(url).json();
+  {{/ifEquals}}
+  {{#ifEquals method 'PATCH'}}
+  return apiClient.patch(url, { json: body }).json();
+  {{/ifEquals}}
+}

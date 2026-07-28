@@ -292,16 +292,133 @@ resource "aws_apprunner_vpc_connector" "connector" {
 }
 
 # ------------------------------------------------------------------------------
+# HTTP/3 (QUIC) CONFIGURATION
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudfront_origin_access_control" "default" {
+  name                              = "agenticpay-${var.environment}-oac"
+  description                       = "OAC for AgenticPay ${var.environment}"
+  origin_access_control_origin_type = "mediapackagev2"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+# Frontend CloudFront distribution with HTTP/3 support
+resource "aws_cloudfront_distribution" "frontend" {
+  enabled         = true
+  is_ipv6_enabled = true
+  http_version    = var.enable_http3 ? "http3" : "http2"
+  price_class     = "PriceClass_100"
+  aliases         = var.domain_aliases
+
+  origin {
+    domain_name = aws_amplify_app.frontend.default_domain
+    origin_id   = "amplify-frontend"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD", "OPTIONS"]
+    target_origin_id = "amplify-frontend"
+    compress         = true
+
+    forwarded_values {
+      query_string = true
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 3600
+    max_ttl                = 86400
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+    minimum_protocol_version       = "TLSv1.2_2021"
+  }
+
+  tags = {
+    Name = "agenticpay-${var.environment}-frontend-cf"
+  }
+}
+
+# Backend API CloudFront distribution with HTTP/3 support
+resource "aws_cloudfront_distribution" "backend" {
+  enabled         = true
+  is_ipv6_enabled = true
+  http_version    = var.enable_http3 ? "http3" : "http2"
+  price_class     = "PriceClass_100"
+
+  origin {
+    domain_name = aws_apprunner_service.backend.service_url
+    origin_id   = "apprunner-backend"
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD", "OPTIONS"]
+    target_origin_id = "apprunner-backend"
+    compress         = true
+
+    forwarded_values {
+      query_string = true
+      cookies {
+        forward = "all"
+      }
+      headers = ["Authorization", "Content-Type", "X-API-Key", "X-HMAC-Signature"]
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 60
+    max_ttl                = 3600
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+    minimum_protocol_version       = "TLSv1.2_2021"
+  }
+
+  tags = {
+    Name = "agenticpay-${var.environment}-backend-cf"
+  }
+}
+
+# ------------------------------------------------------------------------------
 # FRONTEND RESOURCES (Next.js)
 # ------------------------------------------------------------------------------
 resource "aws_amplify_app" "frontend" {
   name       = "agenticpay-frontend-${var.environment}"
   repository = "https://github.com/Smartdevs17/agenticpay"
 
-  # HTTP/2 is enabled by default on AWS Amplify (ALPN negotiation via CloudFront).
-  # custom_headers propagates Link preload hints so CloudFront can issue
-  # HTTP/2 PUSH_PROMISE frames for critical fonts and CSS before the HTML
-  # has been parsed by the browser.
   custom_headers = <<-EOT
     customHeaders:
       - pattern: '**'
@@ -310,6 +427,8 @@ resource "aws_amplify_app" "frontend" {
             value: 'SAMEORIGIN'
           - key: 'Link'
             value: '</fonts/inter-var.woff2>; rel=preload; as=font; type="font/woff2"; crossorigin=anonymous'
+          - key: 'Alt-Svc'
+            value: 'h3=":443"; ma=86400'
   EOT
 
   build_spec = <<-EOT
@@ -333,7 +452,172 @@ resource "aws_amplify_app" "frontend" {
   EOT
 
   environment_variables = {
-    NEXT_PUBLIC_API_URL = "https://${aws_apprunner_service.backend.service_url}/api/v1"
+    NEXT_PUBLIC_API_URL = "https://${aws_cloudfront_distribution.backend.domain_name}/api/v1"
     NODE_ENV            = var.environment
   }
+}
+
+# ------------------------------------------------------------------------------
+# GAS METRICS MONITORING
+# ------------------------------------------------------------------------------
+
+# CloudWatch Log Group for Gas Estimation Service
+resource "aws_cloudwatch_log_group" "gas_metrics" {
+  name              = "/aws/agenticpay/gas-metrics-${var.environment}"
+  retention_in_days = var.environment == "prod" ? 30 : 7
+
+  tags = {
+    Name = "agenticpay-gas-metrics-${var.environment}"
+  }
+}
+
+# CloudWatch Dashboard for Gas Metrics
+resource "aws_cloudwatch_dashboard" "gas_metrics" {
+  dashboard_name = "agenticpay-gas-metrics-${var.environment}"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "metric"
+        x      = 0
+        y      = 0
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/AppRunner", "CPUUtilization", "ServiceName", aws_apprunner_service.backend.service_name],
+            [".", "MemoryUtilization", ".", "."],
+          ]
+          period = 300
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Backend Resource Utilization"
+          view   = "timeSeries"
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 6
+        width  = 24
+        height = 6
+
+        properties = {
+          logGroupName  = aws_cloudwatch_log_group.gas_metrics.name
+          query        = "fields @timestamp, @message | filter @message like /GAS_ESTIMATE/ | stats count() by @timestamp"
+          region       = var.aws_region
+          title        = "Gas Estimate Requests"
+          view         = "table"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 0
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", aws_db_instance.postgres.identifier],
+            [".", "DatabaseConnections", ".", "."],
+          ]
+          period = 300
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Database Performance"
+          view   = "timeSeries"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 12
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/ApiGateway", "Count", "ApiName", "agenticpay-backend-${var.environment}"],
+            [".", "Latency", ".", "."],
+            [".", "5XXError", ".", "."],
+            [".", "4XXError", ".", "."],
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "API Gateway Metrics"
+          view   = "timeSeries"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 12
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/CloudFront", "Requests", "DistributionId", aws_cloudfront_distribution.backend.id],
+            [".", "Latency", ".", "."],
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "CloudFront Backend Metrics"
+          view   = "timeSeries"
+        }
+      },
+    ]
+  })
+}
+
+# CloudWatch Alarm for High Gas Estimation Error Rate
+resource "aws_cloudwatch_metric_alarm" "gas_estimation_error_rate" {
+  alarm_name          = "agenticpay-gas-estimation-error-rate-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "5XXError"
+  namespace           = "AWS/AppRunner"
+  period              = "300"
+  statistic           = "Sum"
+  threshold           = var.environment == "prod" ? "10" : "50"
+  alarm_description   = "Alert when gas estimation error rate exceeds threshold"
+  alarm_actions       = var.environment == "prod" ? [aws_sns_topic.alerts.arn] : []
+
+  dimensions = {
+    ServiceName = aws_apprunner_service.backend.service_name
+  }
+}
+
+# CloudWatch Alarm for High Database Connection Usage
+resource "aws_cloudwatch_metric_alarm" "db_connection_usage" {
+  alarm_name          = "agenticpay-db-connection-usage-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "DatabaseConnections"
+  namespace           = "AWS/RDS"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = var.db_proxy_max_connections_percent
+  alarm_description   = "Alert when database connection usage exceeds threshold"
+  alarm_actions       = var.environment == "prod" ? [aws_sns_topic.alerts.arn] : []
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.postgres.identifier
+  }
+}
+
+# SNS Topic for Alerts
+resource "aws_sns_topic" "alerts" {
+  name = "agenticpay-alerts-${var.environment}"
+}
+
+resource "aws_sns_topic_subscription" "email_alerts" {
+  count     = var.environment == "prod" && var.alert_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
 }

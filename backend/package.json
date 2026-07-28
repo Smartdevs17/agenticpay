@@ -10,6 +10,8 @@
     "lint": "eslint src/",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest --passWithNoTests",
+    "tenant-isolation:scan": "tsx src/security/tenant-isolation/scan.ts",
+    "tenant-isolation:test": "vitest run src/security/tenant-isolation",
     "db:generate": "prisma generate",
     "db:migrate": "npx tsx migrations/runner.ts deploy",
     "db:migrate:status": "npx tsx migrations/runner.ts status",
@@ -21,11 +23,20 @@
     "db:studio": "prisma studio",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "openapi:validate": "node -e \"require('fs').accessSync('docs/api/openapi/openapi.json')\"",
+    "sdk:generate": "npm run openapi:generate && tsx ../sdk-generator/dist/cli.js --config openapi.config.json",
+    "sdk:generate:typescript": "npm run openapi:generate && tsx ../sdk-generator/dist/cli.js --config openapi.config.json --lang typescript",
+    "sdk:generate:python": "npm run openapi:generate && tsx ../sdk-generator/dist/cli.js --config openapi.config.json --lang python",
+    "sdk:generate:go": "npm run openapi:generate && tsx ../sdk-generator/dist/cli.js --config openapi.config.json --lang go",
+    "sdk:generate:rust": "npm run openapi:generate && tsx ../sdk-generator/dist/cli.js --config openapi.config.json --lang rust",
     "benchmark": "tsx src/tests/benchmarks/run-benchmarks.ts",
     "benchmark:baseline": "tsx src/tests/benchmarks/run-benchmarks.ts --write-baseline",
-    "benchmark:compare": "tsx src/tests/benchmarks/compare-baseline.ts"
+    "benchmark:compare": "tsx src/tests/benchmarks/compare-baseline.ts",
+    "generate:vapid-keys": "node scripts/generate-vapid-keys.js"
   },
   "dependencies": {
+    "@agenticpay/api-spec": "*",
+    "@agenticpay/error-codes": "*",
+    "@agenticpay/types": "*",
     "@prisma/client": "^5.22.0",
     "@sentry/node": "^10.50.0",
     "@sentry/profiling-node": "^10.50.0",
@@ -83,6 +94,7 @@
     "@types/ws": "^8.5.12",
     "eslint": "^9.0.0",
     "prisma": "^5.22.0",
+    "ts-morph": "^24.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
@@ -91,5 +103,8 @@
     "openapi-fetch": "^0.13.5",
     "openapi-typescript": "^7.4.4",
     "pino-pretty": "^13.0.0"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "^4.62.2"
   }
 }

@@ -66,30 +66,33 @@ contract RelayPaymaster {
 
     // ── User Deposits ────────────────────────────────────────────────────────
 
-    /// @notice Deposit ERC-20 tokens for gas payment.
+    error TokenTransferFailed();
+
     function deposit(address token, uint256 amount) external {
         if (!acceptedTokens[token]) revert TokenNotAccepted();
 
-        // Pull tokens from user
         (bool ok, bytes memory data) = token.call(
             abi.encodeWithSelector(0x23b872dd, msg.sender, address(this), amount)
         );
-        require(ok && (data.length == 0 || abi.decode(data, (bool))), "TransferFrom failed");
+        if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TokenTransferFailed();
 
-        deposits[msg.sender].balance += amount;
+        unchecked {
+            deposits[msg.sender].balance += amount;
+        }
         emit Deposited(msg.sender, token, amount);
     }
 
-    /// @notice Withdraw unused deposit.
     function withdraw(address token, uint256 amount) external {
         UserDeposit storage dep = deposits[msg.sender];
         if (dep.balance < amount) revert InsufficientDeposit();
 
-        dep.balance -= amount;
+        unchecked {
+            dep.balance -= amount;
+        }
         (bool ok, ) = token.call(
             abi.encodeWithSelector(0xa9059cbb, msg.sender, amount)
         );
-        require(ok, "Transfer failed");
+        if (!ok) revert TokenTransferFailed();
 
         emit Withdrawn(msg.sender, token, amount);
     }
@@ -104,23 +107,24 @@ contract RelayPaymaster {
         return dep.balance >= estimatedGasWei; // rough approximation
     }
 
-    /// @notice Called by relayer after successful meta-tx to collect fee in tokens.
-    /// @param user The user whose deposit to charge.
-    /// @param token The ERC-20 token for fee payment.
-    /// @param gasCostWei The actual gas cost in ETH.
     function collectFee(address user, address token, uint256 gasCostWei) external onlyRelayer {
         if (!acceptedTokens[token]) revert TokenNotAccepted();
 
         uint256 ratio = tokenPriceRatios[token];
-        if (ratio == 0) ratio = 1e18; // default 1:1 if no ratio set
+        if (ratio == 0) ratio = 1e18;
 
-        uint256 tokenFee = (gasCostWei * ratio) / 1e18;
+        uint256 tokenFee;
+        unchecked {
+            tokenFee = (gasCostWei * ratio) / 1e18;
+        }
         UserDeposit storage dep = deposits[user];
         if (dep.balance < tokenFee) revert InsufficientDeposit();
 
-        dep.balance -= tokenFee;
-        totalSponsored += gasCostWei;
-        totalFeesCollected += tokenFee;
+        unchecked {
+            dep.balance -= tokenFee;
+            totalSponsored += gasCostWei;
+            totalFeesCollected += tokenFee;
+        }
 
         emit GasSponsored(user, msg.sender, gasCostWei);
         emit FeeCollected(user, token, tokenFee);

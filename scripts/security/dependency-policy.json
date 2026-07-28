@@ -1,0 +1,18 @@
+{
+  "blockingSeverities": ["high", "critical"],
+  "remediationSlaDays": {
+    "critical": 7,
+    "high": 30,
+    "moderate": 60,
+    "low": 90
+  },
+  "allowedLicenses": [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Unlicense"
+  ]
+}

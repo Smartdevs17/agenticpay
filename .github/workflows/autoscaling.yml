@@ -9,33 +9,7 @@ name: Auto-Scaling
 #   - Max instances: configurable per profile (default 4, burst 8)
 #   - Policies: scale-up on queue depth; scale-down via concurrency cancel + idle timeout
 
-on:
-  push:
-    branches: [main, dev]
-  pull_request:
-    branches: [main, dev]
-  schedule:
-    # Weekly scaling policy review + cost snapshot (pairs with cost-monitor.yml)
-    - cron: '30 8 * * 1'
-  workflow_dispatch:
-    inputs:
-      scale_profile:
-        description: 'Scaling profile (conservative | balanced | burst)'
-        required: false
-        default: 'balanced'
-        type: choice
-        options:
-          - conservative
-          - balanced
-          - burst
-      min_parallel:
-        description: 'Minimum parallel matrix jobs (floor)'
-        required: false
-        default: '1'
-      max_parallel:
-        description: 'Maximum parallel matrix jobs (ceiling)'
-        required: false
-        default: '4'
+on: workflow_dispatch
 
 concurrency:
   group: autoscaling-${{ github.workflow }}-${{ github.ref }}

@@ -1,4 +1,10 @@
-import { createHmac, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { encryptWebhookPayload } from './webhooks/encryption.js';
+import {
+  signWebhookPayload,
+  WEBHOOK_SIGNATURE_HEADER,
+  WEBHOOK_TIMESTAMP_HEADER,
+} from './webhooks/signer.js';
 
 export type WebhookDeliveryStatus =
   | 'pending'
@@ -15,6 +21,9 @@ export interface MerchantWebhookConfig {
   enabled: boolean;
   currentSecret: string;
   previousSecrets: string[];
+  signatureVersion: string;
+  secretExpiresAt: string;
+  encryptionPublicKey?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -72,15 +81,12 @@ function computeBackoffDelay(attempt: number): number {
   return exponential + jitter;
 }
 
-function buildSignature(secret: string, body: string): string {
-  return createHmac('sha256', secret).update(body).digest('hex');
-}
-
 export function upsertWebhookConfig(input: {
   merchantId: string;
   url: string;
   secret: string;
   enabled?: boolean;
+  encryptionPublicKey?: string;
 }): MerchantWebhookConfig {
   const existing = Array.from(webhookConfigs.values()).find((x) => x.merchantId === input.merchantId);
   const ts = nowIso();
@@ -89,6 +95,9 @@ export function upsertWebhookConfig(input: {
     existing.url = input.url;
     existing.currentSecret = input.secret;
     existing.enabled = input.enabled ?? true;
+    existing.signatureVersion = 'v1';
+    existing.secretExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    existing.encryptionPublicKey = input.encryptionPublicKey;
     existing.updatedAt = ts;
     webhookConfigs.set(existing.id, existing);
     return existing;
@@ -101,6 +110,9 @@ export function upsertWebhookConfig(input: {
     enabled: input.enabled ?? true,
     currentSecret: input.secret,
     previousSecrets: [],
+    signatureVersion: 'v1',
+    secretExpiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    encryptionPublicKey: input.encryptionPublicKey,
     createdAt: ts,
     updatedAt: ts,
   };
@@ -114,6 +126,8 @@ export function rotateWebhookSecret(configId: string, nextSecret: string): Merch
   config.previousSecrets.unshift(config.currentSecret);
   config.previousSecrets = config.previousSecrets.slice(0, 5);
   config.currentSecret = nextSecret;
+  config.signatureVersion = 'v1';
+  config.secretExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
   config.updatedAt = nowIso();
   webhookConfigs.set(config.id, config);
   return config;
@@ -178,8 +192,25 @@ async function deliverOne(delivery: WebhookDeliveryLog): Promise<void> {
     return;
   }
 
-  const body = delivery.responseBody ?? '{}';
-  const signature = buildSignature(config.currentSecret, body);
+  let originalEvent: PaymentWebhookEvent | undefined;
+  try {
+    originalEvent = delivery.responseBody ? JSON.parse(delivery.responseBody) as PaymentWebhookEvent : undefined;
+  } catch {
+    originalEvent = {
+      eventId: delivery.eventId,
+      merchantId: delivery.merchantId,
+      type: 'webhook.retry',
+      payload: {},
+      createdAt: delivery.createdAt,
+    };
+  }
+  const signed = signWebhookPayload({
+    payload: originalEvent ? { ...originalEvent, payload: originalEvent.payload } : {},
+    secret: config.currentSecret,
+    version: config.signatureVersion,
+    eventId: delivery.eventId,
+  });
+  const body = encryptWebhookPayload(signed.body, config.encryptionPublicKey);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ATTEMPT_TIMEOUT_MS);
 
@@ -192,7 +223,10 @@ async function deliverOne(delivery: WebhookDeliveryLog): Promise<void> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Webhook-Signature': signature,
+        [WEBHOOK_SIGNATURE_HEADER]: signed.signature,
+        [WEBHOOK_TIMESTAMP_HEADER]: signed.timestamp,
+        'X-AgenticPay-Signature-Version': signed.version,
+        'X-AgenticPay-Event-Id': delivery.eventId,
         'X-Webhook-Idempotency-Key': delivery.idempotencyKey,
         'X-Webhook-Event-Id': delivery.eventId,
       },

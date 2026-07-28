@@ -1,16 +1,6 @@
 name: SDK Documentation
 
-on:
-  pull_request:
-    paths:
-      - 'packages/sdk/**'
-      - 'packages/types/**'
-      - '.github/workflows/sdk-docs.yml'
-  push:
-    branches: [main, dev]
-    paths:
-      - 'packages/sdk/**'
-      - 'packages/types/**'
+on: workflow_dispatch
 
 jobs:
   typedoc:

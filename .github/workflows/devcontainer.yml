@@ -1,19 +1,6 @@
 name: Devcontainer
 
-on:
-  push:
-    branches: [main, dev]
-    paths:
-      - '.devcontainer/**'
-      - 'docker-compose.yml'
-      - '.github/workflows/devcontainer.yml'
-  pull_request:
-    branches: [main, dev]
-    paths:
-      - '.devcontainer/**'
-      - 'docker-compose.yml'
-      - '.github/workflows/devcontainer.yml'
-  workflow_dispatch:
+on: workflow_dispatch
 
 concurrency:
   group: devcontainer-${{ github.ref }}

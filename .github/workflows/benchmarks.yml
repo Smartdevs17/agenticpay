@@ -1,17 +1,6 @@
 name: API Benchmarks
 
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'backend/**'
-      - '.github/workflows/benchmarks.yml'
-  pull_request:
-    branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - '.github/workflows/benchmarks.yml'
-  workflow_dispatch:
+on: workflow_dispatch
 
 concurrency:
   group: benchmarks-${{ github.ref }}

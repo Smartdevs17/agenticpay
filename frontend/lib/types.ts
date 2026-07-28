@@ -1,3 +1,19 @@
+import type {
+  Invoice as CanonicalInvoice,
+  Milestone as CanonicalMilestone,
+  Payment as CanonicalPayment,
+  Project as CanonicalProject,
+  User as CanonicalUser,
+} from "@agenticpay/types";
+
+export type {
+  CanonicalInvoice,
+  CanonicalMilestone,
+  CanonicalPayment,
+  CanonicalProject,
+  CanonicalUser,
+};
+
 export interface User {
   name: string;
   address: string;
@@ -64,4 +80,3 @@ export interface Payment {
   timestamp: string;
   escrowId?: string;
 }
-

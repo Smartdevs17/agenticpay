@@ -1,18 +1,25 @@
 // AgenticPay service worker: offline shell, API fallback cache, and payment replay queue.
+// Updated for PWA (#501): IndexedDB v2 with retryAt index, conflict resolution,
+// storage-limit eviction, and periodic background-sync fallback.
 
-const APP_VERSION = '2026-06-01.1';
+const APP_VERSION = '2026-06-27.1';
 const CACHE_PREFIX = 'agenticpay';
 const PRECACHE = `${CACHE_PREFIX}-precache-${APP_VERSION}`;
 const RUNTIME = `${CACHE_PREFIX}-runtime-${APP_VERSION}`;
 const API_CACHE = `${CACHE_PREFIX}-api-${APP_VERSION}`;
 const DB_NAME = 'agenticpay-offline-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2 adds retryAt index and exponential backoff
 const PAYMENT_STORE = 'offline-payments';
+
+const MAX_RETRIES = 5;
+const RETRY_BACKOFF_MS = [5_000, 15_000, 60_000, 300_000, 600_000];
 const SYNC_TAG = 'agenticpay-payment-sync';
 const PRECACHE_URLS = [
   '/',
   '/auth',
   '/dashboard',
+  '/dashboard/payments',
+  '/dashboard/transactions',
   '/manifest.webmanifest',
   '/icons/image-192.png',
   '/icons/image-512.png',
@@ -245,10 +252,18 @@ function openDb() {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
       if (!db.objectStoreNames.contains(PAYMENT_STORE)) {
-        db.createObjectStore(PAYMENT_STORE, { keyPath: 'id' });
+        const store = db.createObjectStore(PAYMENT_STORE, { keyPath: 'id' });
+        store.createIndex('status', 'status', { unique: false });
+        store.createIndex('createdAt', 'createdAt', { unique: false });
+        store.createIndex('retryAt', 'retryAt', { unique: false });
+      } else if (event.oldVersion < 2) {
+        const store = request.transaction.objectStore(PAYMENT_STORE);
+        if (!store.indexNames.contains('retryAt')) {
+          store.createIndex('retryAt', 'retryAt', { unique: false });
+        }
       }
     };
   });
@@ -282,12 +297,15 @@ async function getQueuedPayments() {
 
 async function flushPaymentQueue() {
   const queued = await getQueuedPayments();
+  const now = Date.now();
+  const due = queued.filter(
+    (i) => i.status !== 'synced' && i.status !== 'syncing' &&
+            (i.retryAt === undefined || i.retryAt <= now),
+  );
   let synced = 0;
   let failed = 0;
 
-  for (const item of queued) {
-    if (item.status === 'syncing') continue;
-
+  for (const item of due) {
     await savePayment({ ...item, status: 'syncing' });
     try {
       const response = await fetch(item.endpoint, {
@@ -297,20 +315,38 @@ async function flushPaymentQueue() {
       });
 
       if (response.ok || response.status === 409) {
+        // 409 Conflict: server already processed this request (idempotent)
         await deletePayment(item.id);
         synced += 1;
       } else {
-        await savePayment({ ...item, status: 'failed', retryCount: (item.retryCount || 0) + 1, lastError: `HTTP ${response.status}` });
+        const retryCount = (item.retryCount || 0) + 1;
+        const backoffMs = RETRY_BACKOFF_MS[Math.min(retryCount - 1, RETRY_BACKOFF_MS.length - 1)];
+        await savePayment({
+          ...item,
+          status: retryCount >= MAX_RETRIES ? 'failed' : 'pending',
+          retryCount,
+          retryAt: Date.now() + backoffMs,
+          lastError: `HTTP ${response.status}`,
+        });
         failed += 1;
       }
     } catch (error) {
-      await savePayment({ ...item, status: 'failed', retryCount: (item.retryCount || 0) + 1, lastError: String(error?.message || error) });
+      const retryCount = (item.retryCount || 0) + 1;
+      const backoffMs = RETRY_BACKOFF_MS[Math.min(retryCount - 1, RETRY_BACKOFF_MS.length - 1)];
+      await savePayment({
+        ...item,
+        status: retryCount >= MAX_RETRIES ? 'failed' : 'pending',
+        retryCount,
+        retryAt: Date.now() + backoffMs,
+        lastError: String(error?.message || error),
+      });
       failed += 1;
-      break;
+      if (!self.navigator || !self.navigator.onLine) break;
     }
   }
 
-  await broadcast({ type: 'PAYMENT_QUEUE_SYNCED', synced, failed, remaining: (await getQueuedPayments()).length });
+  const remaining = (await getQueuedPayments()).length;
+  await broadcast({ type: 'PAYMENT_QUEUE_SYNCED', synced, failed, remaining });
   return { synced, failed };
 }
 

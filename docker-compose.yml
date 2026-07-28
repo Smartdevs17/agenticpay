@@ -1,5 +1,8 @@
 # Backend services for local development and Devcontainer networking.
 # Start: docker compose up -d
+# Sandbox: docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+
+version: '3.8'
 
 services:
   postgres:

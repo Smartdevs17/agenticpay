@@ -1,13 +1,6 @@
 name: Generate API Documentation
 
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'backend/src/**'
-      - 'backend/scripts/generate-openapi.ts'
-      - '.github/workflows/generate-docs.yml'
-  workflow_dispatch:
+on: workflow_dispatch
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

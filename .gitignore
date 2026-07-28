@@ -31,3 +31,9 @@ npm-debug.log*
 *.pem
 
 .claude
+.lhci_reports/
+bundle-reports/
+trend-data.json
+packages/*/dist/
+frontend/src/generated/
+packages/contracts/src/generated/

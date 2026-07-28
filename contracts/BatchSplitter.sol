@@ -50,6 +50,74 @@ contract BatchSplitter {
     error EmptyBatch();
     error ZeroAmount();
 
+    // ── Merkle Batch Verification ───────────────────────────────────────────
+
+    struct MerkleTransfer {
+        address to;
+        uint256 amount;
+        bytes32[] proof;
+        uint256 leafIndex;
+    }
+
+    event MerkleBatchExecuted(address indexed sender, bytes32 merkleRoot, uint256 totalTransferred, uint256 count);
+
+    error InvalidMerkleProof();
+
+    function _leafHash(address to, uint256 amount, uint256 index) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(to, amount, index));
+    }
+
+    function _verifyMerkleProof(bytes32[] calldata proof, bytes32 root, bytes32 leaf) internal pure returns (bool) {
+        bytes32 computedHash = leaf;
+        for (uint256 i; i < proof.length; ) {
+            bytes32 proofElement = proof[i];
+            if (computedHash <= proofElement) {
+                computedHash = keccak256(abi.encodePacked(computedHash, proofElement));
+            } else {
+                computedHash = keccak256(abi.encodePacked(proofElement, computedHash));
+            }
+            unchecked { ++i; }
+        }
+        return computedHash == root;
+    }
+
+    /// @notice Execute ETH transfers with Merkle proof verification for batch integrity.
+    function batchTransferMerkle(
+        bytes32 root,
+        MerkleTransfer[] calldata transfers
+    ) external payable {
+        uint256 len = transfers.length;
+        if (len == 0) revert EmptyBatch();
+
+        uint256 running;
+        for (uint256 i; i < len; ) {
+            MerkleTransfer calldata t = transfers[i];
+            if (t.to == address(0)) revert ZeroRecipient();
+            if (t.amount == 0) revert ZeroAmount();
+            bytes32 leaf = _leafHash(t.to, t.amount, t.leafIndex);
+            if (!_verifyMerkleProof(t.proof, root, leaf)) revert InvalidMerkleProof();
+            running += t.amount;
+            unchecked { ++i; }
+        }
+        if (running != msg.value) revert ValueMismatch(running, msg.value);
+
+        for (uint256 i; i < len; ) {
+            MerkleTransfer calldata t = transfers[i];
+            (bool ok, ) = t.to.call{value: t.amount}("");
+            if (!ok) revert TransferFailed(t.to, t.amount);
+            unchecked { ++i; }
+        }
+
+        emit MerkleBatchExecuted(msg.sender, root, running, len);
+    }
+
+    /// @notice Verify a single leaf's Merkle proof off-chain.
+    function verifyBatchMerkleProof(
+        bytes32 root, address to, uint256 amount, uint256 index, bytes32[] calldata proof
+    ) external pure returns (bool) {
+        return _verifyMerkleProof(proof, root, _leafHash(to, amount, index));
+    }
+
     // ── Native ETH batch ───────────────────────────────────────────────────
 
     /// @notice Send ETH to multiple recipients in one transaction.

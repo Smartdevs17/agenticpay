@@ -5,7 +5,7 @@
  * PgBouncer integration, and recommended composite indexes for AgenticPay.
  */
 
-import { featureFlags } from './featureFlags.js';
+import { featureFlags } from "./featureFlags.js";
 
 // ── Pool configuration ─────────────────────────────────────────────────────────
 
@@ -25,19 +25,19 @@ function envInt(key: string, fallback: number): number {
 
 export function buildPoolConfig(env = process.env.NODE_ENV): PoolConfig {
   switch (env) {
-    case 'production':
+    case "production":
       return {
-        max: envInt('DB_POOL_MAX', 50),
-        min: envInt('DB_POOL_MIN', 5),
-        acquireTimeoutMs: envInt('DB_ACQUIRE_TIMEOUT_MS', 10_000),
-        idleTimeoutMs: envInt('DB_IDLE_TIMEOUT_MS', 300_000),
-        createTimeoutMs: envInt('DB_CREATE_TIMEOUT_MS', 10_000),
-        maxConnectionAgeMs: envInt('DB_MAX_AGE_MS', 1_800_000),
+        max: envInt("DB_POOL_MAX", 50),
+        min: envInt("DB_POOL_MIN", 5),
+        acquireTimeoutMs: envInt("DB_ACQUIRE_TIMEOUT_MS", 10_000),
+        idleTimeoutMs: envInt("DB_IDLE_TIMEOUT_MS", 300_000),
+        createTimeoutMs: envInt("DB_CREATE_TIMEOUT_MS", 10_000),
+        maxConnectionAgeMs: envInt("DB_MAX_AGE_MS", 1_800_000),
       };
-    case 'staging':
+    case "staging":
       return {
-        max: envInt('DB_POOL_MAX', 20),
-        min: envInt('DB_POOL_MIN', 2),
+        max: envInt("DB_POOL_MAX", 20),
+        min: envInt("DB_POOL_MIN", 2),
         acquireTimeoutMs: 15_000,
         idleTimeoutMs: 600_000,
         createTimeoutMs: 15_000,
@@ -45,8 +45,8 @@ export function buildPoolConfig(env = process.env.NODE_ENV): PoolConfig {
       };
     default:
       return {
-        max: envInt('DB_POOL_MAX', 10),
-        min: envInt('DB_POOL_MIN', 1),
+        max: envInt("DB_POOL_MAX", 10),
+        min: envInt("DB_POOL_MIN", 1),
         acquireTimeoutMs: 30_000,
         idleTimeoutMs: 900_000,
         createTimeoutMs: 30_000,
@@ -59,7 +59,7 @@ export function buildPoolConfig(env = process.env.NODE_ENV): PoolConfig {
 
 export interface PgBouncerConfig {
   enabled: boolean;
-  poolMode: 'transaction' | 'session' | 'statement';
+  poolMode: "transaction" | "session" | "statement";
   defaultPoolSize: number;
   maxPoolSize: number;
   minPoolSize: number;
@@ -75,20 +75,20 @@ export interface PgBouncerConfig {
 }
 
 const DEFAULT_PGBOUNCER_CONFIG: PgBouncerConfig = {
-  enabled: process.env.PGBOUNCER_ENABLED === 'true',
-  poolMode: 'transaction',
-  defaultPoolSize: envInt('PGBOUNCER_DEFAULT_POOL_SIZE', 25),
-  maxPoolSize: envInt('PGBOUNCER_MAX_POOL_SIZE', 50),
-  minPoolSize: envInt('PGBOUNCER_MIN_POOL_SIZE', 5),
-  reservePoolSize: envInt('PGBOUNCER_RESERVE_POOL_SIZE', 5),
-  reservePoolTimeoutMs: envInt('PGBOUNCER_RESERVE_POOL_TIMEOUT_MS', 5_000),
-  maxClientConnections: envInt('PGBOUNCER_MAX_CLIENT_CONNECTIONS', 100),
-  maxPreparedStatements: envInt('PGBOUNCER_MAX_PREPARED_STATEMENTS', 50),
-  queryTimeoutMs: envInt('PGBOUNCER_QUERY_TIMEOUT_MS', 30_000),
-  idleTimeoutMs: envInt('PGBOUNCER_IDLE_TIMEOUT_MS', 600_000),
-  serverLifetimeMs: envInt('PGBOUNCER_SERVER_LIFETIME_MS', 3_600_000),
-  serverIdleTimeoutMs: envInt('PGBOUNCER_SERVER_IDLE_TIMEOUT_MS', 600_000),
-  healthCheckIntervalMs: envInt('PGBOUNCER_HEALTH_CHECK_INTERVAL_MS', 30_000),
+  enabled: process.env.PGBOUNCER_ENABLED === "true",
+  poolMode: "transaction",
+  defaultPoolSize: envInt("PGBOUNCER_DEFAULT_POOL_SIZE", 25),
+  maxPoolSize: envInt("PGBOUNCER_MAX_POOL_SIZE", 50),
+  minPoolSize: envInt("PGBOUNCER_MIN_POOL_SIZE", 5),
+  reservePoolSize: envInt("PGBOUNCER_RESERVE_POOL_SIZE", 5),
+  reservePoolTimeoutMs: envInt("PGBOUNCER_RESERVE_POOL_TIMEOUT_MS", 5_000),
+  maxClientConnections: envInt("PGBOUNCER_MAX_CLIENT_CONNECTIONS", 100),
+  maxPreparedStatements: envInt("PGBOUNCER_MAX_PREPARED_STATEMENTS", 50),
+  queryTimeoutMs: envInt("PGBOUNCER_QUERY_TIMEOUT_MS", 30_000),
+  idleTimeoutMs: envInt("PGBOUNCER_IDLE_TIMEOUT_MS", 600_000),
+  serverLifetimeMs: envInt("PGBOUNCER_SERVER_LIFETIME_MS", 3_600_000),
+  serverIdleTimeoutMs: envInt("PGBOUNCER_SERVER_IDLE_TIMEOUT_MS", 600_000),
+  healthCheckIntervalMs: envInt("PGBOUNCER_HEALTH_CHECK_INTERVAL_MS", 30_000),
 };
 
 let pgBouncerConfig: PgBouncerConfig = { ...DEFAULT_PGBOUNCER_CONFIG };
@@ -186,7 +186,8 @@ class PoolMetricsCollector {
   snapshot(): ConnectionPoolMetrics {
     const averageAcquireTimeMs =
       this.acquireTimes.length > 0
-        ? this.acquireTimes.reduce((sum, t) => sum + t, 0) / this.acquireTimes.length
+        ? this.acquireTimes.reduce((sum, t) => sum + t, 0) /
+          this.acquireTimes.length
         : 0;
 
     return {
@@ -272,7 +273,9 @@ class ConnectionLeaseManager {
     const now = Date.now();
     for (const [id, lease] of this.leases.entries()) {
       if (!lease.released && now - lease.acquiredAt > this.leaseTimeoutMs) {
-        console.warn(`[PoolLeak] Connection ${id} has been held for ${now - lease.acquiredAt}ms without release`);
+        console.warn(
+          `[PoolLeak] Connection ${id} has been held for ${now - lease.acquiredAt}ms without release`,
+        );
         poolMetrics.recordLeakDetected();
         this.leases.delete(id);
       } else if (lease.released) {
@@ -328,10 +331,12 @@ class PoolExhaustionManager {
     for (const handler of this.handlers) {
       try {
         handler.onExhaustion();
-      } catch { }
+      } catch {}
     }
 
-    console.warn(`[PoolExhaustion] Pool exhausted, backing off for ${this.backoffMs}ms`);
+    console.warn(
+      `[PoolExhaustion] Pool exhausted, backing off for ${this.backoffMs}ms`,
+    );
   }
 
   notifyRecovery(): void {
@@ -341,10 +346,10 @@ class PoolExhaustionManager {
     for (const handler of this.handlers) {
       try {
         handler.onRecovery();
-      } catch { }
+      } catch {}
     }
 
-    console.log('[PoolExhaustion] Pool recovered');
+    console.log("[PoolExhaustion] Pool recovered");
   }
 
   scheduleRecovery(): void {
@@ -369,7 +374,8 @@ export const poolExhaustionManager = new PoolExhaustionManager();
 // ── Prepared Statement Registry ────────────────────────────────────────────────
 
 export const PREPARED_STATEMENTS = {
-  getPaymentById: 'SELECT * FROM payments WHERE id = $1 AND tenant_id = $2 LIMIT 1',
+  getPaymentById:
+    "SELECT * FROM payments WHERE id = $1 AND tenant_id = $2 LIMIT 1",
   listPendingPayments:
     "SELECT id, tx_hash, amount, network FROM payments WHERE status = 'pending' ORDER BY created_at ASC LIMIT $1",
   upsertGasEstimate: `
@@ -422,7 +428,10 @@ class PreparedStatementManager {
   }
 
   getRegisteredStatements(): Array<{ name: string; sql: string }> {
-    return Array.from(this.statements.entries()).map(([name, sql]) => ({ name, sql }));
+    return Array.from(this.statements.entries()).map(([name, sql]) => ({
+      name,
+      sql,
+    }));
   }
 
   getStatementCount(): number {
@@ -431,16 +440,19 @@ class PreparedStatementManager {
 }
 
 export const preparedStatementManager = new PreparedStatementManager(
-  envInt('PGBOUNCER_MAX_PREPARED_STATEMENTS', 50),
+  envInt("PGBOUNCER_MAX_PREPARED_STATEMENTS", 50),
 );
 preparedStatementManager.registerDefaults();
 
 // ── Slow query detection ───────────────────────────────────────────────────────
 
-export const SLOW_QUERY_THRESHOLD_MS = envInt('SLOW_QUERY_THRESHOLD_MS', 500);
-export const VERY_SLOW_QUERY_THRESHOLD_MS = envInt('VERY_SLOW_QUERY_THRESHOLD_MS', 2_000);
+export const SLOW_QUERY_THRESHOLD_MS = envInt("SLOW_QUERY_THRESHOLD_MS", 500);
+export const VERY_SLOW_QUERY_THRESHOLD_MS = envInt(
+  "VERY_SLOW_QUERY_THRESHOLD_MS",
+  2_000,
+);
 
-export type SlowQuerySeverity = 'warn' | 'critical';
+export type SlowQuerySeverity = "warn" | "critical";
 
 export interface SlowQueryEvent {
   sql: string;
@@ -461,7 +473,7 @@ export function onSlowQuery(handler: SlowQueryHandler): void {
 export async function withQueryTimer<T>(
   sql: string,
   params: unknown[],
-  execute: () => Promise<T>
+  execute: () => Promise<T>,
 ): Promise<T> {
   const start = Date.now();
   try {
@@ -470,7 +482,7 @@ export async function withQueryTimer<T>(
     const durationMs = Date.now() - start;
     if (durationMs >= SLOW_QUERY_THRESHOLD_MS) {
       const severity: SlowQuerySeverity =
-        durationMs >= VERY_SLOW_QUERY_THRESHOLD_MS ? 'critical' : 'warn';
+        durationMs >= VERY_SLOW_QUERY_THRESHOLD_MS ? "critical" : "warn";
       const event: SlowQueryEvent = {
         sql: sql.slice(0, 500),
         durationMs,
@@ -479,15 +491,19 @@ export async function withQueryTimer<T>(
         timestamp: new Date(),
       };
       for (const handler of slowQueryHandlers) {
-        try { handler(event); } catch { }
+        try {
+          handler(event);
+        } catch {}
       }
     }
   }
 }
 
 onSlowQuery((event) => {
-  const label = event.severity === 'critical' ? 'CRITICAL' : 'SLOW';
-  console.warn(`[db] ${label} query ${event.durationMs}ms: ${event.sql.slice(0, 120)}`);
+  const label = event.severity === "critical" ? "CRITICAL" : "SLOW";
+  console.warn(
+    `[db] ${label} query ${event.durationMs}ms: ${event.sql.slice(0, 120)}`,
+  );
 });
 
 // ── Composite index definitions ────────────────────────────────────────────────
@@ -504,88 +520,96 @@ export interface CompositeIndex {
 
 export const RECOMMENDED_INDEXES: CompositeIndex[] = [
   {
-    name: 'idx_invoices_project_created',
-    table: 'invoices',
-    columns: ['project_id', 'created_at'],
-    description: 'Optimizes listing invoices by project ordered by date',
-    targetQuery: 'SELECT * FROM invoices WHERE project_id = ? ORDER BY created_at DESC',
+    name: "idx_invoices_project_created",
+    table: "invoices",
+    columns: ["project_id", "created_at"],
+    description: "Optimizes listing invoices by project ordered by date",
+    targetQuery:
+      "SELECT * FROM invoices WHERE project_id = ? ORDER BY created_at DESC",
   },
   {
-    name: 'idx_verifications_status_type',
-    table: 'verifications',
-    columns: ['status', 'verification_type'],
-    description: 'Filters verifications by status and type',
-    targetQuery: 'SELECT * FROM verifications WHERE status = ? AND verification_type = ?',
+    name: "idx_verifications_status_type",
+    table: "verifications",
+    columns: ["status", "verification_type"],
+    description: "Filters verifications by status and type",
+    targetQuery:
+      "SELECT * FROM verifications WHERE status = ? AND verification_type = ?",
   },
   {
-    name: 'idx_transactions_account_ledger',
-    table: 'transactions',
-    columns: ['account_id', 'ledger_seq'],
-    description: 'Looks up transactions for an account sorted by ledger sequence',
-    targetQuery: 'SELECT * FROM transactions WHERE account_id = ? ORDER BY ledger_seq DESC',
+    name: "idx_transactions_account_ledger",
+    table: "transactions",
+    columns: ["account_id", "ledger_seq"],
+    description:
+      "Looks up transactions for an account sorted by ledger sequence",
+    targetQuery:
+      "SELECT * FROM transactions WHERE account_id = ? ORDER BY ledger_seq DESC",
   },
   {
-    name: 'idx_payments_recipient_status',
-    table: 'payments',
-    columns: ['recipient', 'status'],
-    description: 'Finds pending payments for a recipient',
-    targetQuery: 'SELECT * FROM payments WHERE recipient = ? AND status = ?',
+    name: "idx_payments_recipient_status",
+    table: "payments",
+    columns: ["recipient", "status"],
+    description: "Finds pending payments for a recipient",
+    targetQuery: "SELECT * FROM payments WHERE recipient = ? AND status = ?",
   },
   {
-    name: 'idx_payments_created_status',
-    table: 'payments',
-    columns: ['created_at', 'status'],
-    description: 'Oldest pending payments for processing',
-    targetQuery: 'SELECT * FROM payments WHERE status = ? ORDER BY created_at ASC LIMIT ?',
+    name: "idx_payments_created_status",
+    table: "payments",
+    columns: ["created_at", "status"],
+    description: "Oldest pending payments for processing",
+    targetQuery:
+      "SELECT * FROM payments WHERE status = ? ORDER BY created_at ASC LIMIT ?",
   },
   {
-    name: 'idx_payments_tx_hash',
-    table: 'payments',
-    columns: ['tx_hash'],
+    name: "idx_payments_tx_hash",
+    table: "payments",
+    columns: ["tx_hash"],
     unique: true,
-    description: 'Idempotency and on-chain lookup by transaction hash',
-    targetQuery: 'SELECT * FROM payments WHERE tx_hash = ?',
+    description: "Idempotency and on-chain lookup by transaction hash",
+    targetQuery: "SELECT * FROM payments WHERE tx_hash = ?",
   },
   {
-    name: 'idx_sessions_user_expires',
-    table: 'sessions',
-    columns: ['user_id', 'expires_at'],
-    description: 'Finds active sessions for a user',
-    targetQuery: 'SELECT * FROM sessions WHERE user_id = ? AND expires_at > ?',
+    name: "idx_sessions_user_expires",
+    table: "sessions",
+    columns: ["user_id", "expires_at"],
+    description: "Finds active sessions for a user",
+    targetQuery: "SELECT * FROM sessions WHERE user_id = ? AND expires_at > ?",
   },
   {
-    name: 'idx_refunds_invoice_created',
-    table: 'refunds',
-    columns: ['invoice_id', 'created_at'],
-    description: 'Lists refunds for an invoice ordered by date',
-    targetQuery: 'SELECT * FROM refunds WHERE invoice_id = ? ORDER BY created_at DESC',
+    name: "idx_refunds_invoice_created",
+    table: "refunds",
+    columns: ["invoice_id", "created_at"],
+    description: "Lists refunds for an invoice ordered by date",
+    targetQuery:
+      "SELECT * FROM refunds WHERE invoice_id = ? ORDER BY created_at DESC",
   },
   {
-    name: 'idx_users_tenant_email',
-    table: 'users',
-    columns: ['tenant_id', 'email'],
+    name: "idx_users_tenant_email",
+    table: "users",
+    columns: ["tenant_id", "email"],
     unique: true,
-    description: 'Login and uniqueness constraint per tenant',
-    targetQuery: 'SELECT * FROM users WHERE tenant_id = ? AND email = ?',
+    description: "Login and uniqueness constraint per tenant",
+    targetQuery: "SELECT * FROM users WHERE tenant_id = ? AND email = ?",
   },
   {
-    name: 'idx_audit_logs_entity_created',
-    table: 'audit_logs',
-    columns: ['entity_id', 'created_at'],
-    description: 'Audit trail queries per resource ordered by time',
-    targetQuery: 'SELECT * FROM audit_logs WHERE entity_id = ? ORDER BY created_at DESC',
+    name: "idx_audit_logs_entity_created",
+    table: "audit_logs",
+    columns: ["entity_id", "created_at"],
+    description: "Audit trail queries per resource ordered by time",
+    targetQuery:
+      "SELECT * FROM audit_logs WHERE entity_id = ? ORDER BY created_at DESC",
   },
   {
-    name: 'idx_gas_estimates_network_recorded',
-    table: 'gas_estimates',
-    columns: ['network', 'recorded_at'],
-    description: 'Gas analytics aggregation by network and time window',
-    targetQuery: 'SELECT * FROM gas_estimates WHERE network = ? ORDER BY recorded_at DESC',
+    name: "idx_gas_estimates_network_recorded",
+    table: "gas_estimates",
+    columns: ["network", "recorded_at"],
+    description: "Gas analytics aggregation by network and time window",
+    targetQuery:
+      "SELECT * FROM gas_estimates WHERE network = ? ORDER BY recorded_at DESC",
   },
 ];
 
 export function getRecommendedIndexes(): CompositeIndex[] {
-  if (!featureFlags.evaluate('db-composite-indexes')) return [];
+  if (!featureFlags.evaluate("db-composite-indexes")) return [];
   return RECOMMENDED_INDEXES;
 }
 
@@ -597,24 +621,37 @@ export interface ReplicaConfig {
   database: string;
   user: string;
   password: string;
+  enabled: boolean;
+  maxLag: number;
 }
 
 export function buildReplicaConfigs(): ReplicaConfig[] {
-  const replicaUrls = (process.env.DB_READ_REPLICA_URLS ?? '')
-    .split(',')
+  const replicaUrls = (process.env.DB_READ_REPLICA_URLS ?? "")
+    .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+
+  const maxLag = envInt("DB_REPLICA_MAX_LAG_MS", 5000);
 
   return replicaUrls.map((url) => {
     const parsed = new URL(url);
     return {
       host: parsed.hostname,
       port: Number(parsed.port) || 5432,
-      database: parsed.pathname.replace(/^\//, ''),
+      database: parsed.pathname.replace(/^\//, ""),
       user: parsed.username,
       password: parsed.password,
+      enabled: true,
+      maxLag,
     };
   });
+}
+
+export function buildReplicaUrls(): string[] {
+  return (process.env.DB_READ_REPLICA_URLS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 export function isReadQuery(sql: string): boolean {
@@ -652,7 +689,7 @@ class QueryProfiler {
   }
 
   isEnabled(): boolean {
-    return featureFlags.evaluate('db-query-profiling');
+    return featureFlags.evaluate("db-query-profiling");
   }
 
   profile<T>(query: string, source: string, fn: () => Promise<T>): Promise<T> {
@@ -661,47 +698,70 @@ class QueryProfiler {
     const start = Date.now();
     return fn().then((result) => {
       const durationMs = Date.now() - start;
-      const profile: QueryProfile = { query, durationMs, timestamp: new Date().toISOString(), source };
+      const profile: QueryProfile = {
+        query,
+        durationMs,
+        timestamp: new Date().toISOString(),
+        source,
+      };
 
       this.allQueries.push(profile);
       if (this.allQueries.length > this.maxAllQueries) this.allQueries.shift();
 
       if (durationMs > this.slowThresholdMs) {
-        console.warn(`[QueryProfiler] SLOW QUERY (${durationMs.toFixed(0)}ms) [${source}]: ${query.substring(0, 200)}`);
+        console.warn(
+          `[QueryProfiler] SLOW QUERY (${durationMs.toFixed(0)}ms) [${source}]: ${query.substring(0, 200)}`,
+        );
         this.slowQueries.push(profile);
-        if (this.slowQueries.length > this.maxSlowQueries) this.slowQueries.shift();
+        if (this.slowQueries.length > this.maxSlowQueries)
+          this.slowQueries.shift();
       }
 
       return result;
     });
   }
 
-  detectNPlusOne(source: string, parentFn: () => Promise<unknown[]>): Promise<unknown[]> {
+  detectNPlusOne(
+    source: string,
+    parentFn: () => Promise<unknown[]>,
+  ): Promise<unknown[]> {
     if (!this.isEnabled()) return parentFn();
-    const originalQuery = this.allQueries[this.allQueries.length - 1]?.query || 'unknown';
+    const originalQuery =
+      this.allQueries[this.allQueries.length - 1]?.query || "unknown";
 
     return parentFn().then((results) => {
       const total = this.allQueries.length;
       if (total > 10 && results.length > 1) {
-        console.warn(`[QueryProfiler] N+1 DETECTED [${source}]: ${total} queries for ${results.length} results`);
+        console.warn(
+          `[QueryProfiler] N+1 DETECTED [${source}]: ${total} queries for ${results.length} results`,
+        );
         console.warn(`  Parent: ${originalQuery.substring(0, 150)}`);
       }
       return results;
     });
   }
 
-  getSlowQueries(): QueryProfile[] { return [...this.slowQueries]; }
-
-  getTopSlowQueries(n = 10): QueryProfile[] {
-    return [...this.slowQueries].sort((a, b) => b.durationMs - a.durationMs).slice(0, n);
+  getSlowQueries(): QueryProfile[] {
+    return [...this.slowQueries];
   }
 
-  getAllQueries(): QueryProfile[] { return [...this.allQueries]; }
+  getTopSlowQueries(n = 10): QueryProfile[] {
+    return [...this.slowQueries]
+      .sort((a, b) => b.durationMs - a.durationMs)
+      .slice(0, n);
+  }
+
+  getAllQueries(): QueryProfile[] {
+    return [...this.allQueries];
+  }
 
   getStats() {
     const total = this.allQueries.length;
     const slow = this.slowQueries.length;
-    const avgDuration = total > 0 ? this.allQueries.reduce((sum, q) => sum + q.durationMs, 0) / total : 0;
+    const avgDuration =
+      total > 0
+        ? this.allQueries.reduce((sum, q) => sum + q.durationMs, 0) / total
+        : 0;
     return {
       totalQueries: total,
       slowQueries: slow,
@@ -714,7 +774,9 @@ class QueryProfiler {
 
   private calculatePercentile(pct: number): number {
     if (this.allQueries.length === 0) return 0;
-    const sorted = [...this.allQueries].sort((a, b) => a.durationMs - b.durationMs);
+    const sorted = [...this.allQueries].sort(
+      (a, b) => a.durationMs - b.durationMs,
+    );
     const idx = Math.ceil((pct / 100) * sorted.length) - 1;
     return sorted[Math.max(0, idx)].durationMs;
   }

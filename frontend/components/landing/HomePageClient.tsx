@@ -1,8 +1,9 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { motion } from "framer-motion";
-import { ArrowRight, Shield, Zap, Wallet, CheckCircle2 } from "lucide-react";
+import { motion } from 'framer-motion';
+import { useTranslations } from 'next-intl';
+import { ArrowRight, Shield, Zap, Wallet, CheckCircle2 } from 'lucide-react';
+import { Link } from '@/i18n/navigation';
 import { Button } from "@/components/ui/button";
 import { Navbar } from "@/components/landing/Navbar";
 import type { LandingSnapshot } from "@/lib/server/public-cache";
@@ -12,6 +13,10 @@ interface HomePageClientProps {
 }
 
 export function HomePageClient({ snapshot }: HomePageClientProps) {
+  const t = useTranslations('landing');
+  const tCommon = useTranslations('common');
+  const tMeta = useTranslations('metadata');
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Navbar />
@@ -31,40 +36,39 @@ export function HomePageClient({ snapshot }: HomePageClientProps) {
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-100 text-blue-700 text-sm font-medium mb-8"
             >
               <Shield className="h-4 w-4" />
-              <span>Secure / Fast / Transparent</span>
+              <span>{t('badge')}</span>
             </motion.div>
 
             <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold text-gray-900 mb-6 leading-tight">
-              Get Paid Instantly for
+              {t('headline')}
               <span className="block bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                Your Work
+                {t('headlineAccent')}
               </span>
             </h1>
 
             <p className="text-xl sm:text-2xl text-gray-600 mb-12 max-w-2xl mx-auto leading-relaxed">
-              AgenticPay revolutionizes freelancer payments with blockchain technology.
-              Get paid instantly, securely, and transparently.
+              {t('subheadline')}
             </p>
 
             <div className="grid grid-cols-2 gap-4 rounded-3xl border border-white/70 bg-white/80 p-5 text-left shadow-lg shadow-blue-100/50 backdrop-blur sm:grid-cols-4 mb-12">
-              <Metric label="Active Projects" value={String(snapshot.totals.activeProjects)} />
-              <Metric label="Paid Invoices" value={String(snapshot.totals.paidInvoices)} />
-              <Metric label="Completed Payments" value={String(snapshot.totals.completedPayments)} />
-              <Metric label="Volume Settled" value={`$${snapshot.totals.totalVolumeUsd}`} />
+              <Metric label={t('activeProjects')} value={String(snapshot.totals.activeProjects)} />
+              <Metric label={t('paidInvoices')} value={String(snapshot.totals.paidInvoices)} />
+              <Metric label={t('completedPayments')} value={String(snapshot.totals.completedPayments)} />
+              <Metric label={t('volumeSettled')} value={`$${snapshot.totals.totalVolumeUsd}`} />
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <Link href="/auth" aria-label="Get started with AgenticPay">
+              <Link href="/auth" aria-label={tMeta('title')}>
                 <Button
                   size="lg"
                   className="text-lg px-8 py-6 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all"
                 >
-                  Get Started
+                  {tCommon('getStarted')}
                   <ArrowRight className="ml-2 h-5 w-5" aria-hidden="true" />
                 </Button>
               </Link>
-              <Button size="lg" variant="outline" className="text-lg px-8 py-6 border-2" aria-label="Learn more about AgenticPay">
-                Learn More
+              <Button size="lg" variant="outline" className="text-lg px-8 py-6 border-2" aria-label={tCommon('learnMore')}>
+                {tCommon('learnMore')}
               </Button>
             </div>
           </motion.div>
