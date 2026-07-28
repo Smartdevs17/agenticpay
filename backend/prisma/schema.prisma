@@ -1,5 +1,12 @@
-// Prisma schema — Issue #207
-// Full type-safe schema with soft deletes, indexes, and relations.
+// Prisma schema — Issue #598
+// Full type-safe schema with soft deletes, indexes, relations, and base model patterns.
+//
+// Base model pattern (applied to all auditable entities):
+//   id            String    @id @default(uuid())
+//   tenantId      String    @map("tenant_id")
+//   createdAt     DateTime  @default(now()) @map("created_at")
+//   updatedAt     DateTime  @updatedAt @map("updated_at")
+//   deletedAt     DateTime? @map("deleted_at")
 
 generator client {
   provider = "prisma-client-js"

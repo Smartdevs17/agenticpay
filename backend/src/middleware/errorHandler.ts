@@ -1,5 +1,6 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { ERROR_CODE_REGISTRY, resolveErrorCode } from '@agenticpay/error-codes';
+import { PaymentError, AuthError, ProjectError, DisputeError, ValidationError, NotFoundError } from '../types/errors';
 
 type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<unknown>;
 
@@ -7,15 +8,19 @@ export class AppError extends Error {
   statusCode: number;
   code: string;
   details?: unknown;
+  metadata?: Record<string, unknown>;
 
-  constructor(statusCode: number, message: string, code = 'INTERNAL_SERVER_ERROR', details?: unknown) {
+  constructor(statusCode: number, message: string, code = 'INTERNAL_SERVER_ERROR', details?: unknown, metadata?: Record<string, unknown>) {
     super(message);
     this.name = 'AppError';
     this.statusCode = statusCode;
     this.code = code;
     this.details = details;
+    this.metadata = metadata;
   }
 }
+
+export { PaymentError, AuthError, ProjectError, DisputeError, ValidationError, NotFoundError };
 
 export function asyncHandler(handler: AsyncRouteHandler): RequestHandler {
   return (req, res, next) => {
@@ -24,7 +29,7 @@ export function asyncHandler(handler: AsyncRouteHandler): RequestHandler {
 }
 
 export function notFoundHandler(req: Request, _res: Response, next: NextFunction) {
-  next(new AppError(404, `Route not found: ${req.method} ${req.originalUrl}`, 'NOT_FOUND'));
+  next(new NotFoundError(`Route not found: ${req.method} ${req.originalUrl}`));
 }
 
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
@@ -42,7 +47,16 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
         : 'Unexpected error';
 
   const logMethod = registered.httpStatus >= 500 ? console.error : console.warn;
-  logMethod(`[${code}] ${message}`, err);
+  const logContext = {
+    code,
+    message,
+    statusCode: registered.httpStatus || statusCode,
+    ...(isAppError && err.metadata ? { metadata: err.metadata } : {}),
+    ...(req.requestId ? { requestId: req.requestId } : {}),
+    ...(req.user?.id ? { userId: req.user.id } : {}),
+    ...(!isProduction && !isAppError && err instanceof Error && err.stack ? { stack: err.stack } : {}),
+  };
+  logMethod(`[${code}] ${message}`, logContext);
 
   if (registered.deprecated && registered.sunsetAt) {
     res.setHeader('Sunset', registered.sunsetAt);

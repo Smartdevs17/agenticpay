@@ -5,6 +5,17 @@ extern crate std;
 
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec};
 
+pub mod common;
+pub mod escrow;
+pub mod dispute;
+pub mod multisig;
+pub mod htlc;
+
+pub use common::{
+    BridgeConfigData, DataKey, HtlcLock, HtlcLockInput, HtlcStatus, MultisigProposal, MultisigProposalStatus,
+    MultisigWallet, Project, ProjectInput, ProjectStatus, Receipt,
+};
+
 // ---------------------------------------------------------------------------
 // Multi-signature wallet types
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ node_modules/
 
 # Environment
 .env*
+!.env.example
 
 # OS
 .DS_Store
@@ -18,22 +19,46 @@ Thumbs.db
 dist/
 build/
 out/
-
-# Next.js
 .next/
 .vercel
 
 # Debug
 *.log
 npm-debug.log*
+lighthouse/
 
 # Keys
 *.pem
 
+# AI
 .claude
+.kilocode/
+
+# Reports
 .lhci_reports/
 bundle-reports/
 trend-data.json
+
+# Generated code
 packages/*/dist/
 frontend/src/generated/
 packages/contracts/src/generated/
+
+# Test snapshots and artifacts
+**/__snapshots__/
+**/*.snap
+coverage/
+
+# Rust
+contracts/target/
+contracts/*.wasm
+
+# Docker
+docker-compose.override.yml
+
+# Turbo
+.turbo/
+
+# Misc
+test-write.txt
+AGENTS.md

@@ -13,4 +13,15 @@ export interface AppError {
   message: string;
   statusCode: number;
   details?: Record<string, unknown>;
+  timestamp?: string;
+  requestId?: string;
+  userId?: string;
+}
+
+export type ErrorDomain = 'payment' | 'auth' | 'project' | 'dispute' | 'validation' | 'not_found' | 'internal';
+
+export interface DomainErrorConfig {
+  domain: ErrorDomain;
+  defaultCode: string;
+  defaultStatus: number;
 }
