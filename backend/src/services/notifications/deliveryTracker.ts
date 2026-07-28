@@ -6,11 +6,13 @@ export interface DeliveryRecord {
   channel: 'email' | 'sms' | 'push' | 'in-app';
   userId: string;
   templateId: string;
-  status: 'pending' | 'sent' | 'failed' | 'delivered' | 'read';
+  status: 'pending' | 'sent' | 'failed' | 'delivered' | 'opened' | 'clicked' | 'read';
   messageId?: string;
   error?: string;
   sentAt?: Date;
   deliveredAt?: Date;
+  openedAt?: Date;
+  clickedAt?: Date;
   readAt?: Date;
   retryCount: number;
   createdAt: Date;
@@ -20,7 +22,7 @@ export interface DeliveryRecord {
 export class DeliveryTracker {
   // In a real implementation, this would use a database
   // For now, we'll use an in-memory store
-  private deliveries: Map<string, DeliveryRecord> = {};
+  private deliveries: Map<string, DeliveryRecord> = new Map();
 
   async track(delivery: Omit<DeliveryRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<DeliveryRecord> {
     const now = new Date();
@@ -42,9 +44,9 @@ export class DeliveryTracker {
     };
 
     this.deliveries.set(record.id, record);
-    
+
     console.log(`[Delivery] Tracked ${delivery.channel} delivery for notification ${delivery.notificationId}: ${delivery.status}`);
-    
+
     return record;
   }
 
@@ -72,9 +74,9 @@ export class DeliveryTracker {
     }
 
     this.deliveries.set(deliveryId, record);
-    
+
     console.log(`[Delivery] Updated delivery ${deliveryId} status to ${status}`);
-    
+
     return record;
   }
 
@@ -101,5 +103,61 @@ export class DeliveryTracker {
     return Array.from(this.deliveries.values())
       .filter(d => d.status === 'failed' && d.retryCount < 3) // Max 3 retries
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()); // Oldest first
+  }
+
+  async getDeliveriesInRange(userId?: string, startDate?: Date, endDate?: Date): Promise<DeliveryRecord[]> {
+    let results = Array.from(this.deliveries.values());
+
+    if (userId) {
+      results = results.filter(d => d.userId === userId);
+    }
+    if (startDate) {
+      results = results.filter(d => d.createdAt >= startDate);
+    }
+    if (endDate) {
+      results = results.filter(d => d.createdAt <= endDate);
+    }
+
+    return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  async markAsOpened(deliveryId: string): Promise<DeliveryRecord | undefined> {
+    const record = this.deliveries.get(deliveryId);
+    if (!record) return undefined;
+    record.status = 'opened';
+    record.openedAt = new Date();
+    record.updatedAt = new Date();
+    this.deliveries.set(deliveryId, record);
+    return record;
+  }
+
+  async markAsClicked(deliveryId: string): Promise<DeliveryRecord | undefined> {
+    const record = this.deliveries.get(deliveryId);
+    if (!record) return undefined;
+    record.status = 'clicked';
+    record.clickedAt = new Date();
+    record.updatedAt = new Date();
+    this.deliveries.set(deliveryId, record);
+    return record;
+  }
+
+  async getUnreadCount(userId: string): Promise<number> {
+    return Array.from(this.deliveries.values())
+      .filter(d => d.userId === userId && d.status !== 'read' && d.status !== 'clicked' && d.channel === 'in-app')
+      .length;
+  }
+
+  async markAllAsRead(userId: string): Promise<number> {
+    let count = 0;
+    for (const [id, record] of this.deliveries) {
+      if (record.userId === userId && record.status !== 'read' && record.channel === 'in-app') {
+        record.status = 'read';
+        record.readAt = new Date();
+        record.updatedAt = new Date();
+        this.deliveries.set(id, record);
+        count++;
+      }
+    }
+    return count;
   }
 }
