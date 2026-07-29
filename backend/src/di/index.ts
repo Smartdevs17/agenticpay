@@ -9,11 +9,17 @@ import { container } from './container.js';
 import { registerProjectModule } from './modules/project.module.js';
 import { registerAuthModule } from './modules/auth.module.js';
 import { registerPaymentModule } from './modules/payment.module.js';
+import { registerComplianceModule } from './modules/compliance.module.js';
+import { registerOnboardingModule } from './modules/onboarding.module.js';
+import { registerWalletModule } from './modules/wallet.module.js';
 
 export function bootstrapDI(): void {
   registerProjectModule(container);
   registerAuthModule(container);
   registerPaymentModule(container);
+  registerComplianceModule(container);
+  registerOnboardingModule(container);
+  registerWalletModule(container);
 
   if (process.env.DI_VALIDATION !== 'false') {
     try {

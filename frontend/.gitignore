@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+**/__snapshots__/
+/e2e/__snapshots__/
 
 # next.js
 /.next/
@@ -46,3 +48,9 @@ next-env.d.ts
 /test-results
 /.playwright
 /playwright/.cache
+
+# output files
+output.txt
+/app/output.txt
+/components/layout/output.txt
+
