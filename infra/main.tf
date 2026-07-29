@@ -596,6 +596,44 @@ resource "aws_cloudwatch_dashboard" "gas_metrics" {
           view   = "timeSeries"
         }
       },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 18
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/CloudFront", "Requests", "DistributionId", aws_cloudfront_distribution.frontend.id, { stat: "Sum" }],
+            [".", "TotalErrorRate", ".", ".", { stat: "Average" }],
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Frontend CDN — Request Volume & Error Rate"
+          view   = "timeSeries"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 18
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/CloudFront", "CacheHitRate", "DistributionId", aws_cloudfront_distribution.frontend.id, { stat: "Average" }],
+            [".", "OriginLatency", ".", ".", { stat: "p95" }],
+          ]
+          period = 300
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Frontend CDN — Cache Hit Rate & Origin Latency (p95)"
+          view   = "timeSeries"
+        }
+      },
     ]
   })
 }

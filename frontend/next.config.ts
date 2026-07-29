@@ -10,6 +10,7 @@ const bundleAnalyzer = withBundleAnalyzer({
 });
 
 const nextConfig: NextConfig = {
+  assetPrefix: process.env.NEXT_PUBLIC_CDN_URL || undefined,
   experimental: {
     optimizePackageImports: [
       "lucide-react",
