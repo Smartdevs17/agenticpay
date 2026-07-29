@@ -124,6 +124,9 @@ import { pauseManagerRouter } from './routes/pause-manager.js';
 import { streamingExportRouter } from './routes/streaming-export.js';
 import { startOutboxPublisher, stopOutboxPublisher } from './outbox/index.js';
 import { gasRouter } from './routes/gas.js';
+import { paymentReconciliationRouter } from './routes/payment-reconciliation.js';
+import { fxRouter } from './routes/fx.js';
+import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { vaultsRouter } from './routes/vaults.js';
 import { createConnectionManager } from './websocket/connection-manager.js';
 import { getBridgeMonitorService } from './services/bridge-monitor/bridge-monitor.js';
@@ -388,8 +391,18 @@ app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
 app.use('/api/v1/payment-links', paymentLinksRouter);
 app.use('/api/v1/payment-strategies', paymentStrategiesRouter);
 
-// Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export)
+// Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export,
+// jurisdiction rule engine, exemptions, compliance checks, audit trail — Issue #627)
 app.use('/api/v1/tax', taxRouter);
+
+// Automated payment reconciliation: matching, exceptions, reporting, analytics (Issue #628)
+app.use('/api/v1/payment-reconciliation', paymentReconciliationRouter);
+
+// FX rate cache/history/alerts backing multi-currency invoices (Issue #626)
+app.use('/api/v1/fx', fxRouter);
+
+// Subscription cohort retention/revenue/churn analytics (Issue #629)
+app.use('/api/v1/analytics/cohorts', cohortAnalyticsRouter);
 
 // Third-party backend plugins
 app.use('/api/v1/admin/plugins', pluginsRouter);
