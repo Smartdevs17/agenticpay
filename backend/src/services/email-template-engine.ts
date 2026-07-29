@@ -2,6 +2,12 @@
 // Handlebars-style template rendering with localization support
 
 import Handlebars from 'handlebars';
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const COMPONENTS_DIR = join(__dirname, '..', 'templates', 'components');
 
 export interface TemplateVariable {
   name: string;
@@ -27,6 +33,43 @@ export class EmailTemplateEngine {
   constructor() {
     this.handlebars = Handlebars.create();
     this.registerHelpers();
+    this.registerComponents();
+  }
+
+  /**
+   * Register every .hbs file in templates/components/ (header, footer,
+   * button, layout, ...) as a reusable Handlebars partial, keyed by
+   * filename. Lets templates opt into shared components via `{{> header}}`.
+   */
+  private registerComponents(): void {
+    let files: string[] = [];
+    try {
+      files = readdirSync(COMPONENTS_DIR).filter((f) => f.endsWith('.hbs'));
+    } catch {
+      return; // components dir is optional in some deployments (e.g. bundled builds)
+    }
+    for (const file of files) {
+      const name = basename(file, '.hbs');
+      const source = readFileSync(join(COMPONENTS_DIR, file), 'utf-8');
+      this.handlebars.registerPartial(name, source);
+    }
+  }
+
+  /**
+   * Renders `contentHtml` as a standalone component, then injects the
+   * result into the shared `layout` partial (header/footer chrome) — the
+   * template-inheritance pattern: layout owns the shell, callers only
+   * supply body content and get consistent chrome for free.
+   */
+  renderWithLayout(contentHtml: string, context: TemplateContext): string {
+    const body = this.render(contentHtml, context);
+    const layoutSource = this.handlebars.partials['layout'] as string;
+    return this.render(layoutSource, {
+      currentYear: new Date().getFullYear(),
+      unsubscribeUrl: '#',
+      ...context,
+      body: new this.handlebars.SafeString(body),
+    });
   }
 
   /**

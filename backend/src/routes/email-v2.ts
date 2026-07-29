@@ -9,6 +9,7 @@ import EmailPreferenceService from '../services/email-preference.js';
 import EmailLocalizationService from '../services/email-localization.js';
 import EmailAnalyticsService from '../services/email-analytics.js';
 import EmailBatchProcessor from '../services/email-batch-processor.js';
+import { listTemplates, renderTypedTemplate, TEMPLATE_REGISTRY, type TemplateId } from '../templates/registry.js';
 
 const prisma = new PrismaClient();
 const templateEngine = new EmailTemplateEngine();
@@ -19,6 +20,36 @@ const analyticsService = new EmailAnalyticsService();
 const batchProcessor = new EmailBatchProcessor();
 
 export const emailV2Router = Router();
+
+// ── Component-based template registry (preview / A-B testing) ──────────────
+
+const SAMPLE_DATA: Record<TemplateId, Record<string, unknown>> = {
+  'welcome-email': { name: 'Alex Rivera', actionUrl: 'https://app.agenticpay.com/onboarding' },
+  'payment-received': { name: 'Alex Rivera', amount: 250, currency: 'USD', sender: 'Jordan Lee', transactionId: 'tx_9f2c1a' },
+};
+
+emailV2Router.get('/templates/registry', (_req: Request, res: Response) => {
+  res.json({ templates: listTemplates() });
+});
+
+// Template preview server (acceptance criteria): renders a registered
+// template with sample data (or caller-supplied variables) through the real
+// component/layout pipeline, optionally pinning an A/B variant.
+emailV2Router.get('/templates/registry/:id/preview', (req: Request, res: Response) => {
+  const templateId = req.params.id as TemplateId;
+  if (!(templateId in TEMPLATE_REGISTRY)) {
+    return res.status(404).json({ error: `Unknown template: ${templateId}` });
+  }
+
+  const bucketKey = (req.query.bucketKey as string) || (req.query.variant as string) || 'preview';
+  try {
+    const overrides = req.query.variables ? JSON.parse(req.query.variables as string) : {};
+    const rendered = renderTypedTemplate(templateId, { ...SAMPLE_DATA[templateId], ...overrides } as never, bucketKey);
+    res.json(rendered);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid preview variables' });
+  }
+});
 
 // ── Template Management ──────────────────────────────────────────────────────
 

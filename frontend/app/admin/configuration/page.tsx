@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { StrategyConfigPanel } from '@/components/payment/StrategyConfigPanel';
 
 type ConfigValue = string | number | boolean | null | ConfigValue[] | { [key: string]: ConfigValue };
 
@@ -146,6 +147,7 @@ export default function ConfigurationAdminPage() {
             <TabsTrigger value="values">Values</TabsTrigger>
             <TabsTrigger value="migration">Import/Export</TabsTrigger>
             <TabsTrigger value="audit">Audit</TabsTrigger>
+            <TabsTrigger value="payment-strategies">Payment Strategies</TabsTrigger>
           </TabsList>
 
           <TabsContent value="values" className="mt-4">
@@ -245,6 +247,10 @@ export default function ConfigurationAdminPage() {
               <History className="h-4 w-4" />
               {audit.length} audited changes
             </div>
+          </TabsContent>
+
+          <TabsContent value="payment-strategies" className="mt-4">
+            <StrategyConfigPanel />
           </TabsContent>
         </Tabs>
 

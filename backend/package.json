@@ -29,7 +29,11 @@
     "benchmark": "tsx src/tests/benchmarks/run-benchmarks.ts",
     "benchmark:baseline": "tsx src/tests/benchmarks/run-benchmarks.ts --write-baseline",
     "benchmark:compare": "tsx src/tests/benchmarks/compare-baseline.ts",
-    "generate:vapid-keys": "node scripts/generate-vapid-keys.js"
+    "generate:vapid-keys": "node scripts/generate-vapid-keys.js",
+    "config:validate": "tsx scripts/config-validate.ts",
+    "config:drift": "tsx scripts/config-drift.ts",
+    "config:docs": "tsx scripts/config-docs.ts",
+    "config:docs:check": "tsx scripts/config-docs.ts --check"
   },
   "dependencies": {
     "@agenticpay/api-spec": "*",

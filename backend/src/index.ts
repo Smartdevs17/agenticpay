@@ -77,6 +77,7 @@ import { escrowRouter } from './routes/escrow.js';
 import { multisigRouter } from './routes/multisig.js';
 import { fiatPaymentsRouter } from './routes/fiat-payments.js';
 import { paymentLinksRouter } from './routes/payment-links.js';
+import { paymentStrategiesRouter } from './routes/payment-strategies.js';
 import { taxRouter } from './routes/tax.js';
 import { projectsRouter } from './routes/projects.js';
 import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
@@ -377,6 +378,7 @@ app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
 
 // Merchant dynamic payment links
 app.use('/api/v1/payment-links', paymentLinksRouter);
+app.use('/api/v1/payment-strategies', paymentStrategiesRouter);
 
 // Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export)
 app.use('/api/v1/tax', taxRouter);
