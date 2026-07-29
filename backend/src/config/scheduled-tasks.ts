@@ -23,6 +23,7 @@ import { aggregateUsage, checkUsageAlerts, processDunning } from '../jobs/usageA
 import { getArchivalService } from '../services/archival/index.js';
 import { getBridgeMonitorService } from '../services/bridge-monitor/bridge-monitor.js';
 import { runScheduledReconciliation } from '../services/payment-reconciliation/index.js';
+import { runEscalationEvaluation } from '../jobs/escalation.job.js';
 import { ethers } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -244,6 +245,15 @@ const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: strin
         console.log(`[archival] Purged ${deleted.count} expired batch(es)`);
       }
     },
+  },
+  {
+    id: 'escalation-evaluation',
+    name: 'Escalation SLA Evaluation',
+    description: 'Evaluates all open issues for SLA breaches, triggers escalations, and aggregates analytics — Issue #646.',
+    defaultSchedule: '*/5 * * * *',
+    timeoutMs: 10 * 60 * 1000,
+    priority: 'high',
+    handler: runEscalationEvaluation,
   },
 ];
 

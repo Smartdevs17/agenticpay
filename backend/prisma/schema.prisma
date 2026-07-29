@@ -2856,3 +2856,182 @@ model FxRateAlert {
   @@map("fx_rate_alerts")
 }
 
+// ─── Automated Escalation & SLA Tracking — Issue #646 ─────────────────────────
+
+enum IssueType {
+  dispute
+  payment_discrepancy
+  fraud_alert
+  compliance_review
+  support_ticket
+  account_issue
+  system_incident
+}
+
+enum IssueSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum EscalationLevel {
+  level_1
+  level_2
+  level_3
+  management
+}
+
+enum SLAStatus {
+  compliant
+  at_risk
+  breached
+  resolved
+}
+
+model EscalationRule {
+  id                String          @id @default(uuid())
+  tenantId          String          @map("tenant_id")
+  name              String
+  description       String?
+  issueType         IssueType       @map("issue_type")
+  severity          IssueSeverity   @default(medium)
+  isActive          Boolean         @default(true) @map("is_active")
+  priority          Int             @default(0)
+  // Escalation conditions
+  responseTimeMins  Int             @map("response_time_mins")
+  resolutionTimeMins Int            @map("resolution_time_mins")
+  // Escalation chain: JSON array of EscalationLevel enums
+  escalationChain   Json            @map("escalation_chain")
+  // Notification targets per level
+  notifyChannels    Json            @map("notify_channels")
+  notifyRoles       String[]        @map("notify_roles")
+  // Auto-escalate when SLA breached
+  autoEscalate      Boolean         @default(true) @map("auto_escalate")
+  // Cool-down period in minutes before next escalation
+  cooldownMins      Int             @default(60) @map("cooldown_mins")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  deletedAt         DateTime?       @map("deleted_at")
+
+  slaConfigs        IssueSLA[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, issueType])
+  @@index([isActive])
+  @@map("escalation_rules")
+}
+
+model IssueSLA {
+  id                  String        @id @default(uuid())
+  tenantId            String        @map("tenant_id")
+  escalationRuleId    String?       @map("escalation_rule_id")
+  issueType           IssueType     @map("issue_type")
+  severity            IssueSeverity @default(medium)
+  name                String
+  description         String?
+  isActive            Boolean       @default(true) @map("is_active")
+  // SLA targets in minutes
+  responseTimeMins    Int           @map("response_time_mins")
+  resolutionTimeMins  Int           @map("resolution_time_mins")
+  // Warning threshold as percentage of target (e.g., 80 = warn at 80% of deadline)
+  warningThresholdPct Int           @default(80) @map("warning_threshold_pct")
+  // Business hours only flag
+  businessHoursOnly   Boolean       @default(false) @map("business_hours_only")
+  timezone            String        @default("UTC")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+  deletedAt           DateTime?     @map("deleted_at")
+
+  rule              EscalationRule? @relation(fields: [escalationRuleId], references: [id])
+  breaches          SLABreach[]
+
+  @@unique([tenantId, issueType, severity])
+  @@index([tenantId, issueType])
+  @@index([isActive])
+  @@map("issue_slas")
+}
+
+model EscalationEvent {
+  id              String          @id @default(uuid())
+  tenantId        String          @map("tenant_id")
+  ruleId          String?         @map("rule_id")
+  issueId         String          @map("issue_id")
+  issueType       IssueType       @map("issue_type")
+  severity        IssueSeverity   @default(medium)
+  fromLevel       EscalationLevel @map("from_level")
+  toLevel         EscalationLevel @map("to_level")
+  reason          String
+  triggeredBy     String?         @map("triggered_by")
+  notifiedAt      DateTime?       @map("notified_at")
+  acknowledgedAt  DateTime?       @map("acknowledged_at")
+  acknowledgedBy  String?         @map("acknowledged_by")
+  metadata        Json?
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  rule EscalationRule? @relation(fields: [ruleId], references: [id])
+
+  @@index([tenantId, issueId])
+  @@index([tenantId, issueType, createdAt])
+  @@index([createdAt])
+  @@map("escalation_events")
+}
+
+model SLABreach {
+  id              String        @id @default(uuid())
+  tenantId        String        @map("tenant_id")
+  slaId           String?       @map("sla_id")
+  issueId         String        @map("issue_id")
+  issueType       IssueType     @map("issue_type")
+  severity        IssueSeverity @default(medium)
+  breachType      String        @map("breach_type")
+  // The SLA target in minutes
+  targetMins      Int           @map("target_mins")
+  // Actual time taken in minutes
+  actualMins      Int           @map("actual_mins")
+  status          SLAStatus     @default(breached)
+  notifiedAt      DateTime?     @map("notified_at")
+  resolvedAt      DateTime?     @map("resolved_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  sla IssueSLA? @relation(fields: [slaId], references: [id])
+
+  @@index([tenantId, issueId])
+  @@index([tenantId, issueType, createdAt])
+  @@index([status])
+  @@index([createdAt])
+  @@map("sla_breaches")
+}
+
+model EscalationAnalytics {
+  id                  String    @id @default(uuid())
+  tenantId            String    @map("tenant_id")
+  issueType           IssueType @map("issue_type")
+  severity            IssueSeverity @default(medium)
+  period              String    @default("daily")
+  periodStart         DateTime  @map("period_start")
+  periodEnd           DateTime  @map("period_end")
+  // Counts
+  totalIssues         Int       @default(0) @map("total_issues")
+  escalatedCount      Int       @default(0) @map("escalated_count")
+  slaBreachCount      Int       @default(0) @map("sla_breach_count")
+  resolvedCount       Int       @default(0) @map("resolved_count")
+  // Timing averages in minutes
+  avgResponseTime     Float     @default(0) @map("avg_response_time")
+  avgResolutionTime   Float     @default(0) @map("avg_resolution_time")
+  avgEscalationTime   Float     @default(0) @map("avg_escalation_time")
+  // Compliance
+  slaCompliancePct    Float     @default(100) @map("sla_compliance_pct")
+  // Current open counts
+  openCount           Int       @default(0) @map("open_count")
+  atRiskCount         Int       @default(0) @map("at_risk_count")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tenantId, issueType, severity, period, periodStart])
+  @@index([tenantId, periodStart])
+  @@index([tenantId, issueType])
+  @@map("escalation_analytics")
+}
+
