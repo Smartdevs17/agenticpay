@@ -16,6 +16,8 @@ import {
   listScheduledBatches,
   cancelScheduledBatch,
   getScheduledBatch,
+  rollbackBatch,
+  getBatchHistory,
 } from '../services/batch.js';
 import { batchSubmitSchema, batchPaymentRowSchema } from '../schemas/batch.js';
 import type { BatchPaymentRow } from '../schemas/batch.js';
@@ -181,5 +183,33 @@ batchRouter.delete(
     const batch = cancelScheduledBatch(id);
     if (!batch) throw new AppError(404, 'Scheduled batch not found or not cancellable', 'NOT_FOUND');
     res.json(batch);
+  })
+);
+
+// POST /:id/rollback — roll back a completed or partially failed batch
+batchRouter.post(
+  '/:id/rollback',
+  asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const result = rollbackBatch(id);
+    if (!result) throw new AppError(404, 'Batch not found', 'NOT_FOUND');
+    res.json(result);
+  })
+);
+
+// GET /history/all — batch history with optional status/date filters
+const historyQuerySchema = z.object({
+  status: z.enum(['pending', 'processing', 'completed', 'partial_failure', 'failed']).optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+});
+
+batchRouter.get(
+  '/history/all',
+  validate(historyQuerySchema),
+  asyncHandler(async (req, res) => {
+    const { status, from, to } = req.body;
+    const history = getBatchHistory({ status, from, to } as any);
+    res.json({ batches: history, total: history.length });
   })
 );

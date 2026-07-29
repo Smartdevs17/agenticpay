@@ -205,3 +205,213 @@ export function listFeeRecords(): FeeRecord[] {
 export function estimateStripeFee(amountCents: number): number {
   return Math.round(amountCents * 0.029 + 30);
 }
+
+// ── Subscriptions ────────────────────────────────────────────────────────────
+
+export interface CreateSubscriptionInput {
+  customerId: string;
+  priceId: string;
+  trialPeriodDays?: number;
+  metadata?: Record<string, string>;
+}
+
+export async function createSubscription(input: CreateSubscriptionInput): Promise<Stripe.Subscription> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.subscriptions.create({
+        customer: input.customerId,
+        items: [{ price: input.priceId }],
+        trial_period_days: input.trialPeriodDays,
+        metadata: input.metadata ?? {},
+        payment_behavior: 'default_incomplete',
+        expand: ['latest_invoice.payment_intent'],
+      });
+    },
+  );
+}
+
+export async function getSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.subscriptions.retrieve(subscriptionId);
+    },
+  );
+}
+
+export async function updateSubscription(
+  subscriptionId: string,
+  params: Stripe.SubscriptionUpdateParams
+): Promise<Stripe.Subscription> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.subscriptions.update(subscriptionId, params);
+    },
+  );
+}
+
+export async function cancelSubscription(
+  subscriptionId: string,
+  cancelAtPeriodEnd = false
+): Promise<Stripe.Subscription> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      if (cancelAtPeriodEnd) {
+        return stripe.subscriptions.update(subscriptionId, {
+          cancel_at_period_end: true,
+        });
+      }
+      return stripe.subscriptions.cancel(subscriptionId);
+    },
+  );
+}
+
+export async function listSubscriptions(customerId?: string): Promise<Stripe.ApiList<Stripe.Subscription>> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.subscriptions.list(customerId ? { customer: customerId } : {});
+    },
+  );
+}
+
+// ── Prices & Products ───────────────────────────────────────────────────────
+
+export interface CreatePriceInput {
+  productId: string;
+  unitAmount: number;
+  currency: string;
+  recurring?: {
+    interval: 'day' | 'week' | 'month' | 'year';
+    interval_count?: number;
+  };
+  metadata?: Record<string, string>;
+}
+
+export async function createPrice(input: CreatePriceInput): Promise<Stripe.Price> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.prices.create({
+        product: input.productId,
+        unit_amount: input.unitAmount,
+        currency: input.currency.toLowerCase(),
+        recurring: input.recurring,
+        metadata: input.metadata ?? {},
+      });
+    },
+  );
+}
+
+export async function getPrice(priceId: string): Promise<Stripe.Price> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.prices.retrieve(priceId);
+    },
+  );
+}
+
+export interface CreateProductInput {
+  name: string;
+  description?: string;
+  metadata?: Record<string, string>;
+}
+
+export async function createProduct(input: CreateProductInput): Promise<Stripe.Product> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.products.create({
+        name: input.name,
+        description: input.description,
+        metadata: input.metadata ?? {},
+      });
+    },
+  );
+}
+
+// ── Usage Records (Metered Billing) ──────────────────────────────────────────
+
+export interface RecordUsageInput {
+  subscriptionItemId: string;
+  quantity: number;
+  timestamp?: number;
+  action?: 'increment' | 'set';
+}
+
+export async function recordUsage(input: RecordUsageInput): Promise<Stripe.UsageRecord> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.subscriptionItems.createUsageRecord(
+        input.subscriptionItemId,
+        {
+          quantity: input.quantity,
+          timestamp: input.timestamp ?? Math.floor(Date.now() / 1000),
+          action: input.action ?? 'increment',
+        }
+      );
+    },
+  );
+}
+
+export async function listUsageRecords(
+  subscriptionItemId: string,
+  limit = 100
+): Promise<Stripe.ApiList<Stripe.UsageRecordSummary>> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.subscriptionItems.listUsageRecordSummaries(
+        subscriptionItemId,
+        { limit }
+      );
+    },
+  );
+}
+
+// ── Invoices ─────────────────────────────────────────────────────────────────
+
+export async function getInvoice(invoiceId: string): Promise<Stripe.Invoice> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.invoices.retrieve(invoiceId);
+    },
+  );
+}
+
+export async function listInvoices(customerId?: string): Promise<Stripe.ApiList<Stripe.Invoice>> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.invoices.list(customerId ? { customer: customerId } : {});
+    },
+  );
+}
+
+export async function payInvoice(invoiceId: string): Promise<Stripe.Invoice> {
+  return withCircuitBreaker(
+    STRIPE_CIRCUIT_NAME,
+    async () => {
+      const stripe = getStripe();
+      return stripe.invoices.pay(invoiceId);
+    },
+  );
+}

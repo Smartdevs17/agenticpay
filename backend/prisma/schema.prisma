@@ -233,6 +233,14 @@ model Invoice {
   updatedAt     DateTime      @updatedAt @map("updated_at")
   deletedAt     DateTime?     @map("deleted_at")
 
+  // Multi-currency FX (Issue #626) — `amount`/`currency` above stay the
+  // merchant's settlement currency; these track the customer-facing
+  // presentment currency and the rate locked at generation/payment time.
+  presentmentCurrency String?   @map("presentment_currency")
+  presentmentAmount   Decimal?  @map("presentment_amount") @db.Decimal(20, 8)
+  fxRate              Decimal?  @map("fx_rate") @db.Decimal(24, 10)
+  fxRateLockedAt      DateTime? @map("fx_rate_locked_at")
+
   project   Project    @relation(fields: [projectId], references: [id])
   milestone Milestone? @relation(fields: [milestoneId], references: [id])
 
@@ -334,6 +342,45 @@ model OutboxEvent {
   @@index([eventType])
   @@index([publishedAt])
   @@map("outbox_events")
+}
+
+// ─── Event Sourcing Models ─────────────────────────────────────────────────────
+
+model EventStore {
+  id            String   @id @default(uuid())
+  streamId      String   @map("stream_id")
+  eventType     String   @map("event_type")
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  version       Int
+  payload       Json
+  metadata      Json?
+  occurredAt    DateTime @map("occurred_at")
+  sequenceNumber BigInt  @map("sequence_number")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([streamId, version])
+  @@index([streamId])
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+  @@index([sequenceNumber])
+  @@index([occurredAt])
+  @@map("event_store")
+}
+
+model EventSnapshot {
+  id            String   @id @default(uuid())
+  streamId      String   @map("stream_id")
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  version       Int
+  state         Json
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([streamId])
+  @@index([aggregateType, aggregateId])
+  @@index([version])
+  @@map("event_snapshots")
 }
 
 model Plugin {
@@ -870,6 +917,193 @@ model EmailAnalytics {
   @@map("email_analytics")
 }
 
+// ─── Subscription & Billing Models ─────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  active
+  past_due
+  canceled
+  unpaid
+  trialing
+  paused
+}
+
+enum UsageMetricType {
+  api_calls
+  storage_gb
+  compute_hours
+  transactions
+  custom
+}
+
+enum BillingInterval {
+  monthly
+  yearly
+}
+
+model SubscriptionPlan {
+  id                String          @id @default(uuid())
+  tenantId          String          @map("tenant_id")
+  name              String
+  description       String?
+  stripePriceId     String?         @map("stripe_price_id")
+  basePrice         Decimal         @db.Decimal(10, 2)
+  currency          String          @default("USD")
+  billingInterval   BillingInterval @map("billing_interval")
+  features          Json?           // Array of feature names
+  usageLimits       Json?           @map("usage_limits") // { api_calls: 10000, storage_gb: 100 }
+  isActive          Boolean         @default(true) @map("is_active")
+  trialDays         Int             @default(0) @map("trial_days")
+  gracePeriodDays   Int             @default(3) @map("grace_period_days")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  deletedAt         DateTime?       @map("deleted_at")
+
+  subscriptions     Subscription[]
+  meteredPricing    MeteredPricing[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([isActive])
+  @@map("subscription_plans")
+}
+
+model MeteredPricing {
+  id                String          @id @default(uuid())
+  planId            String          @map("plan_id")
+  metricType        UsageMetricType @map("metric_type")
+  stripeMeterId     String?         @map("stripe_meter_id")
+  unitPrice         Decimal         @db.Decimal(10, 4) @map("unit_price")
+  currency          String          @default("USD")
+  includedUnits     Int             @default(0) @map("included_units") // Free tier
+  tiers             Json?           // Volume discount tiers: [{ upTo: 1000, price: 0.01 }, { upTo: null, price: 0.005 }]
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  plan              SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@unique([planId, metricType])
+  @@index([planId])
+  @@map("metered_pricing")
+}
+
+model Subscription {
+  id                    String              @id @default(uuid())
+  tenantId              String              @map("tenant_id")
+  userId                String              @map("user_id")
+  planId                String              @map("plan_id")
+  stripeSubscriptionId  String?             @unique @map("stripe_subscription_id")
+  stripeCustomerId      String?             @map("stripe_customer_id")
+  status                SubscriptionStatus  @default(trialing)
+  currentPeriodStart    DateTime            @map("current_period_start")
+  currentPeriodEnd      DateTime            @map("current_period_end")
+  cancelAtPeriodEnd     Boolean             @default(false) @map("cancel_at_period_end")
+  canceledAt            DateTime?           @map("canceled_at")
+  trialStart            DateTime?           @map("trial_start")
+  trialEnd              DateTime?           @map("trial_end")
+  metadata              Json?
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+  deletedAt             DateTime?           @map("deleted_at")
+
+  plan                  SubscriptionPlan    @relation(fields: [planId], references: [id])
+  usageRecords          UsageRecord[]
+  invoices              SubscriptionInvoice[]
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([planId])
+  @@index([status])
+  @@index([stripeSubscriptionId])
+  @@map("subscriptions")
+}
+
+model UsageRecord {
+  id              String          @id @default(uuid())
+  subscriptionId  String          @map("subscription_id")
+  tenantId        String          @map("tenant_id")
+  metricType      UsageMetricType @map("metric_type")
+  quantity        Int
+  timestamp       DateTime        @default(now())
+  metadata        Json?
+  aggregatedAt    DateTime?       @map("aggregated_at")
+  billedAt        DateTime?       @map("billed_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  subscription    Subscription    @relation(fields: [subscriptionId], references: [id])
+
+  @@index([subscriptionId])
+  @@index([tenantId])
+  @@index([metricType])
+  @@index([timestamp])
+  @@index([aggregatedAt])
+  @@map("usage_records")
+}
+
+model UsageAggregate {
+  id              String          @id @default(uuid())
+  subscriptionId  String          @map("subscription_id")
+  tenantId        String          @map("tenant_id")
+  metricType      UsageMetricType @map("metric_type")
+  totalQuantity   Int             @map("total_quantity")
+  periodStart     DateTime        @map("period_start")
+  periodEnd       DateTime        @map("period_end")
+  cost            Decimal         @db.Decimal(10, 4)
+  currency        String          @default("USD")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@unique([subscriptionId, metricType, periodStart])
+  @@index([subscriptionId])
+  @@index([tenantId])
+  @@index([periodStart])
+  @@map("usage_aggregates")
+}
+
+model SubscriptionInvoice {
+  id                  String   @id @default(uuid())
+  subscriptionId      String   @map("subscription_id")
+  tenantId            String   @map("tenant_id")
+  stripeInvoiceId     String?  @unique @map("stripe_invoice_id")
+  amount              Decimal  @db.Decimal(10, 2)
+  currency            String   @default("USD")
+  status              String   // draft, open, paid, void, uncollectible
+  periodStart         DateTime @map("period_start")
+  periodEnd           DateTime @map("period_end")
+  dueDate             DateTime @map("due_date")
+  paidAt              DateTime? @map("paid_at")
+  attemptCount        Int      @default(0) @map("attempt_count")
+  nextPaymentAttempt  DateTime? @map("next_payment_attempt")
+  metadata            Json?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  subscription        Subscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([subscriptionId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("subscription_invoices")
+}
+
+model UsageAlert {
+  id              String          @id @default(uuid())
+  subscriptionId  String          @map("subscription_id")
+  tenantId        String          @map("tenant_id")
+  metricType      UsageMetricType @map("metric_type")
+  threshold       Int             // Percentage: 80 or 100
+  triggered       Boolean         @default(false)
+  triggeredAt     DateTime?       @map("triggered_at")
+  notifiedAt      DateTime?       @map("notified_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@unique([subscriptionId, metricType, threshold])
+  @@index([subscriptionId])
+  @@index([triggered])
+  @@map("usage_alerts")
+}
 // ─── Push Notification Models ──────────────────────────────────────────────────
 
 model PushSubscription {
@@ -2148,6 +2382,208 @@ model PiiAuditLog {
   @@map("pii_audit_logs")
 }
 
+// ─── Workspace / Multi-Tenant Models ─────────────────────────────────────────
+
+enum WorkspaceRole {
+  owner
+  admin
+  member
+  viewer
+}
+
+enum WorkspaceInvitationStatus {
+  pending
+  accepted
+  declined
+  expired
+}
+
+model Workspace {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  description   String?
+  logoUrl       String?  @map("logo_url")
+  ownerId       String   @map("owner_id")
+  isActive      Boolean  @default(true) @map("is_active")
+  settings      Json?    // workspace-level settings (branding, features, etc.)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  members       WorkspaceMember[]
+  invitations   WorkspaceInvitation[]
+  auditLogs     WorkspaceAuditLog[]
+
+  @@index([slug])
+  @@index([ownerId])
+  @@index([isActive])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid())
+  workspaceId String        @map("workspace_id")
+  userId      String        @map("user_id")
+  role        WorkspaceRole @default(member)
+  joinedAt    DateTime      @default(now()) @map("joined_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([role])
+  @@map("workspace_members")
+}
+
+model WorkspaceInvitation {
+  id            String                     @id @default(uuid())
+  workspaceId   String                     @map("workspace_id")
+  email         String
+  role          WorkspaceRole              @default(member)
+  token         String                     @unique
+  invitedBy     String                     @map("invited_by")
+  status        WorkspaceInvitationStatus  @default(pending)
+  expiresAt     DateTime                   @map("expires_at")
+  acceptedAt    DateTime?                  @map("accepted_at")
+  declinedAt    DateTime?                  @map("declined_at")
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @updatedAt @map("updated_at")
+
+  workspace     Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
+  @@index([email])
+  @@index([token])
+  @@index([status])
+  @@map("workspace_invitations")
+}
+
+model WorkspaceAuditLog {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  actorId     String?  @map("actor_id")
+  action      String
+  resource    String
+  details     Json?
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([actorId])
+  @@index([action])
+  @@map("workspace_audit_logs")
+}
+
+// ─── Enhanced Refund Models ──────────────────────────────────────────────────
+
+enum RefundStatus {
+  pending
+  approved
+  rejected
+  processing
+  completed
+  failed
+}
+
+enum RefundApprovalLevel {
+  first
+  second
+  third
+}
+
+model RefundPolicy {
+  id                       String   @id @default(uuid())
+  workspaceId              String   @map("workspace_id")
+  name                     String
+  fullRefundWindowDays     Int      @default(30) @map("full_refund_window_days")
+  autoApprovalThreshold    Decimal  @default(100) @map("auto_approval_threshold") @db.Decimal(20, 8)
+  alwaysRefundUnderAmount  Decimal  @default(25) @map("always_refund_under_amount") @db.Decimal(20, 8)
+  maxPartialRefundPct      Int      @default(100) @map("max_partial_refund_pct")
+  requireReason            Boolean  @default(true) @map("require_reason")
+  firstApprovalThreshold   Decimal  @default(500) @map("first_approval_threshold") @db.Decimal(20, 8)
+  secondApprovalThreshold  Decimal  @default(5000) @map("second_approval_threshold") @db.Decimal(20, 8)
+  isActive                 Boolean  @default(true) @map("is_active")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+  deletedAt                DateTime? @map("deleted_at")
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@index([isActive])
+  @@map("refund_policies")
+}
+
+model Refund {
+  id              String       @id @default(uuid())
+  workspaceId     String       @map("workspace_id")
+  paymentId       String       @map("payment_id")
+  stripeRefundId  String?      @unique @map("stripe_refund_id")
+  amount          Decimal      @db.Decimal(20, 8)
+  currency        String       @default("USD")
+  reason          String?
+  status          RefundStatus @default(pending)
+  decision        String?      // 'approved' | 'rejected' | 'manual_review'
+  decisionReasons String[]     @map("decision_reasons")
+  requestedBy     String?      @map("requested_by")
+  approvedBy      String?      @map("approved_by")
+  processedAt     DateTime?    @map("processed_at")
+  completedAt     DateTime?    @map("completed_at")
+  metadata        Json?
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  deletedAt       DateTime?    @map("deleted_at")
+
+  lineItems       RefundLineItem[]
+  approvals       RefundApproval[]
+
+  @@index([workspaceId, createdAt])
+  @@index([paymentId])
+  @@index([status])
+  @@index([stripeRefundId])
+  @@map("refunds")
+}
+
+model RefundLineItem {
+  id        String   @id @default(uuid())
+  refundId  String   @map("refund_id")
+  label     String
+  amount    Decimal  @db.Decimal(20, 8)
+  quantity  Int      @default(1)
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  refund    Refund   @relation(fields: [refundId], references: [id], onDelete: Cascade)
+
+  @@index([refundId])
+  @@map("refund_line_items")
+}
+
+model RefundApproval {
+  id            String              @id @default(uuid())
+  refundId      String              @map("refund_id")
+  level         RefundApprovalLevel
+  approverId    String              @map("approver_id")
+  status        String              @default("pending") // pending | approved | rejected
+  comment       String?
+  approvedAt    DateTime?           @map("approved_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  refund        Refund              @relation(fields: [refundId], references: [id], onDelete: Cascade)
+
+  @@unique([refundId, level])
+  @@index([refundId])
+  @@index([approverId])
+  @@map("refund_approvals")
+}
+
 // ─── Chain Reorganization Models ─────────────────────────────────────────────
 
 model ReorgEvent {
@@ -2197,5 +2633,222 @@ model TransactionReorg {
   @@index([status])
   @@index([network, createdAt])
   @@map("transaction_reorgs")
+}
+
+// ─── Payment reconciliation (Issue #628) ──────────────────────────────────────
+// Note: distinct from the on-chain balance reconciliation feature (Issue
+// #465, `services/reconciliation/`) — this is payment-matching against
+// external bank/PSP statement records, named `payment-reconciliation`
+// throughout to avoid colliding with that unrelated feature.
+
+enum ReconciliationBatchStatus {
+  pending
+  running
+  completed
+  completed_with_exceptions
+  failed
+}
+
+enum ReconciliationRecordSource {
+  internal
+  bank_statement
+  psp_settlement
+  onchain
+}
+
+enum ReconciliationMatchType {
+  exact
+  fuzzy
+  manual
+}
+
+enum ReconciliationExceptionStatus {
+  open
+  investigating
+  resolved
+  written_off
+}
+
+model ReconciliationBatch {
+  id              String                    @id @default(uuid())
+  tenantId        String                    @map("tenant_id")
+  periodStart     DateTime                  @map("period_start")
+  periodEnd       DateTime                  @map("period_end")
+  status          ReconciliationBatchStatus @default(pending)
+  totalRecords    Int                       @default(0) @map("total_records")
+  matchedCount    Int                       @default(0) @map("matched_count")
+  exceptionCount  Int                       @default(0) @map("exception_count")
+  matchedAmount   Decimal                   @default(0) @map("matched_amount") @db.Decimal(20, 8)
+  unmatchedAmount Decimal                   @default(0) @map("unmatched_amount") @db.Decimal(20, 8)
+  startedAt       DateTime?                 @map("started_at")
+  completedAt     DateTime?                 @map("completed_at")
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  updatedAt       DateTime                  @updatedAt @map("updated_at")
+
+  records    ReconciliationRecord[]
+  matches    ReconciliationMatch[]
+  exceptions ReconciliationException[]
+
+  @@index([tenantId, periodStart])
+  @@index([status])
+  @@map("reconciliation_batches")
+}
+
+model ReconciliationRecord {
+  id          String                     @id @default(uuid())
+  batchId     String                     @map("batch_id")
+  tenantId    String                     @map("tenant_id")
+  source      ReconciliationRecordSource
+  externalRef String?                    @map("external_ref")
+  paymentId   String?                    @map("payment_id")
+  amount      Decimal                    @db.Decimal(20, 8)
+  currency    String
+  occurredAt  DateTime                   @map("occurred_at")
+  matched     Boolean                    @default(false)
+  metadata    Json?
+  createdAt   DateTime                   @default(now()) @map("created_at")
+
+  batch ReconciliationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([tenantId, occurredAt])
+  @@index([paymentId])
+  @@map("reconciliation_records")
+}
+
+model ReconciliationMatch {
+  id               String                  @id @default(uuid())
+  batchId          String                  @map("batch_id")
+  internalRecordId String                  @map("internal_record_id")
+  externalRecordId String                  @map("external_record_id")
+  matchType        ReconciliationMatchType @default(exact)
+  confidence       Decimal                 @default(1) @db.Decimal(5, 4)
+  amountDelta      Decimal                 @default(0) @map("amount_delta") @db.Decimal(20, 8)
+  createdAt        DateTime                @default(now()) @map("created_at")
+
+  batch ReconciliationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@map("reconciliation_matches")
+}
+
+model ReconciliationException {
+  id             String                        @id @default(uuid())
+  batchId        String                        @map("batch_id")
+  tenantId       String                        @map("tenant_id")
+  recordId       String?                       @map("record_id")
+  reason         String
+  status         ReconciliationExceptionStatus @default(open)
+  amount         Decimal                       @db.Decimal(20, 8)
+  currency       String
+  assignedTo     String?                       @map("assigned_to")
+  resolutionNote String?                       @map("resolution_note")
+  resolvedAt     DateTime?                     @map("resolved_at")
+  createdAt      DateTime                      @default(now()) @map("created_at")
+  updatedAt      DateTime                      @updatedAt @map("updated_at")
+
+  batch ReconciliationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([tenantId, status])
+  @@map("reconciliation_exceptions")
+}
+
+// ─── Jurisdiction-aware tax engine (Issue #627) ───────────────────────────────
+
+enum TaxRuleType {
+  vat
+  gst
+  sales_tax
+  withholding
+}
+
+model TaxJurisdictionRule {
+  id            String      @id @default(uuid())
+  jurisdiction  String
+  name          String
+  ruleType      TaxRuleType @map("rule_type")
+  rate          Decimal     @db.Decimal(7, 6)
+  appliesAbove  Decimal?    @map("applies_above") @db.Decimal(20, 8)
+  active        Boolean     @default(true)
+  effectiveFrom DateTime    @map("effective_from")
+  effectiveTo   DateTime?   @map("effective_to")
+  metadata      Json?
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  @@index([jurisdiction, active])
+  @@map("tax_jurisdiction_rules")
+}
+
+model TaxExemption {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  merchantId    String    @map("merchant_id")
+  jurisdiction  String
+  certificateId String?   @map("certificate_id")
+  reason        String
+  validFrom     DateTime  @map("valid_from")
+  validTo       DateTime? @map("valid_to")
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId, merchantId, jurisdiction])
+  @@map("tax_exemptions")
+}
+
+model TaxCalculationAuditLog {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  merchantId    String   @map("merchant_id")
+  paymentId     String?  @map("payment_id")
+  jurisdiction  String
+  taxableAmount Decimal  @map("taxable_amount") @db.Decimal(20, 8)
+  taxAmount     Decimal  @map("tax_amount") @db.Decimal(20, 8)
+  rate          Decimal  @db.Decimal(7, 6)
+  ruleId        String?  @map("rule_id")
+  exemptionId   String?  @map("exemption_id")
+  exempt        Boolean  @default(false)
+  currency      String
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, merchantId, createdAt])
+  @@index([paymentId])
+  @@map("tax_calculation_audit_logs")
+}
+
+// ─── Multi-currency FX conversion (Issue #626) ────────────────────────────────
+
+model FxRate {
+  id            String   @id @default(uuid())
+  baseCurrency  String   @map("base_currency")
+  quoteCurrency String   @map("quote_currency")
+  rate          Decimal  @db.Decimal(24, 10)
+  source        String   @default("manual")
+  fetchedAt     DateTime @default(now()) @map("fetched_at")
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([baseCurrency, quoteCurrency, expiresAt])
+  @@index([baseCurrency, quoteCurrency, fetchedAt])
+  @@map("fx_rates")
+}
+
+model FxRateAlert {
+  id                String    @id @default(uuid())
+  tenantId          String    @map("tenant_id")
+  baseCurrency      String    @map("base_currency")
+  quoteCurrency     String    @map("quote_currency")
+  thresholdPct      Decimal   @map("threshold_pct") @db.Decimal(6, 4)
+  direction         String    @default("both")
+  active            Boolean   @default(true)
+  lastTriggeredAt   DateTime? @map("last_triggered_at")
+  lastTriggeredRate Decimal?  @map("last_triggered_rate") @db.Decimal(24, 10)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId, baseCurrency, quoteCurrency])
+  @@map("fx_rate_alerts")
 }
 

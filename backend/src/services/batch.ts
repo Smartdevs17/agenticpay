@@ -136,6 +136,69 @@ export function executeBatch(payments: BatchPaymentItem[], label?: string): Batc
   return record;
 }
 
+export interface RollbackResult {
+  batchId: string;
+  rolledBackPayments: string[];
+  failedRollbacks: Array<{ recipient: string; error: string }>;
+  status: 'fully_rolled_back' | 'partially_rolled_back';
+}
+
+export function rollbackBatch(batchId: string): RollbackResult | undefined {
+  const record = batchStore.get(batchId);
+  if (!record) return undefined;
+  if (record.status === 'failed') {
+    return {
+      batchId,
+      rolledBackPayments: [],
+      failedRollbacks: record.payments.map((p) => ({ recipient: p.recipient, error: 'Batch had no successful payments' })),
+      status: 'fully_rolled_back',
+    };
+  }
+
+  const rolledBackPayments: string[] = [];
+  const failedRollbacks: Array<{ recipient: string; error: string }> = [];
+
+  for (const result of record.results) {
+    if (result.status === 'success') {
+      rolledBackPayments.push(result.recipient);
+    }
+  }
+
+  if (failedRollbacks.length === 0) {
+    record.status = 'completed';
+    for (const r of record.results) {
+      if (r.status === 'success') r.status = 'failed';
+      r.error = r.error ? `${r.error}; rolled back` : 'rolled back';
+    }
+  }
+
+  record.updatedAt = new Date().toISOString();
+  batchStore.set(batchId, record);
+
+  return {
+    batchId,
+    rolledBackPayments,
+    failedRollbacks,
+    status: failedRollbacks.length === 0 ? 'fully_rolled_back' : 'partially_rolled_back',
+  };
+}
+
+export function getBatchHistory(filters?: { status?: BatchStatus; from?: string; to?: string }): BatchRecord[] {
+  let entries = Array.from(batchStore.values());
+  if (filters?.status) {
+    entries = entries.filter((e) => e.status === filters.status);
+  }
+  if (filters?.from) {
+    const from = new Date(filters.from).getTime();
+    entries = entries.filter((e) => new Date(e.createdAt).getTime() >= from);
+  }
+  if (filters?.to) {
+    const to = new Date(filters.to).getTime();
+    entries = entries.filter((e) => new Date(e.createdAt).getTime() <= to);
+  }
+  return entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
 export function getBatch(id: string): BatchRecord | undefined {
   return batchStore.get(id);
 }

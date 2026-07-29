@@ -111,6 +111,18 @@ export function createAnalyticsRouter(wsServer: AgenticPayWebSocketServer) {
     res.json({ ok: true, schedule });
   });
 
+  // Revenue forecast
+  router.get('/forecast', (req: Request, res: Response) => {
+    const since = parseSince(req);
+    res.json({ forecast: analyticsService.buildRevenueForecast(since) });
+  });
+
+  // Cohort analysis
+  router.get('/cohorts', (req: Request, res: Response) => {
+    const since = parseSince(req);
+    res.json({ cohorts: analyticsService.buildCohortAnalysis(since) });
+  });
+
   // Ingest a payment event and broadcast via WebSocket
   router.post('/track', (req: Request, res: Response) => {
     const { id, amount, currency, network, status } = req.body as Record<string, unknown>;

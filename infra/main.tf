@@ -197,6 +197,32 @@ resource "aws_secretsmanager_secret" "db_credentials" {
   name = "agenticpay-${var.environment}-db-credentials"
 }
 
+# Secrets Manager for application-level secrets (Stripe, OpenAI, VAPID keys, etc).
+# Loaded at runtime by backend/src/config/environments/secrets-manager.ts when
+# AWS_SECRETS_MANAGER_ENABLED=true. Not managed for dev — dev uses local env vars.
+resource "aws_secretsmanager_secret" "app_secrets" {
+  count = var.environment == "dev" ? 0 : 1
+
+  name = "agenticpay-${var.environment}-app-secrets"
+}
+
+resource "aws_iam_policy" "app_secrets_read" {
+  count = var.environment == "dev" ? 0 : 1
+
+  name = "agenticpay-${var.environment}-app-secrets-read-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action   = "secretsmanager:GetSecretValue"
+        Effect   = "Allow"
+        Resource = aws_secretsmanager_secret.app_secrets[0].arn
+      }
+    ]
+  })
+}
+
 resource "aws_secretsmanager_secret_version" "db_credentials" {
   secret_id = aws_secretsmanager_secret.db_credentials.id
   secret_string = jsonencode({

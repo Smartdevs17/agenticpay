@@ -6,6 +6,8 @@ import { tokenBucketRateLimit } from './middleware/rate-limit.js';
 import { apiExpressRateLimit } from './middleware/express-api-rate-limit.js';
 import { slidingWindowRateLimit } from './middleware/sliding-window-rate-limit.js';
 import { compressionMiddleware, getCompressionMetrics } from './middleware/compression.js';
+import { paginationMiddleware, etagMiddleware } from './middleware/pagination.js';
+import { poolMonitorRouter } from './routes/pool-monitor.js';
 import { poolMetrics } from './config/database.js';
 import { config } from './config.js';
 import { versionMiddleware } from './middleware/versioning.js';
@@ -75,6 +77,7 @@ import { escrowRouter } from './routes/escrow.js';
 import { multisigRouter } from './routes/multisig.js';
 import { fiatPaymentsRouter } from './routes/fiat-payments.js';
 import { paymentLinksRouter } from './routes/payment-links.js';
+import { paymentStrategiesRouter } from './routes/payment-strategies.js';
 import { taxRouter } from './routes/tax.js';
 import { projectsRouter } from './routes/projects.js';
 import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
@@ -91,6 +94,7 @@ import { createAnalyticsRouter } from './routes/analytics.js';
 import { paymentQueue } from './queue/payment-queue.js';
 import './events/projections.js';
 import { stripeRouter } from './routes/stripe.js';
+import subscriptionsRouter from './routes/subscriptions.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
 import { requestSizeLimit } from './middleware/request-size-limit.js';
@@ -118,6 +122,9 @@ import { pauseManagerRouter } from './routes/pause-manager.js';
 import { streamingExportRouter } from './routes/streaming-export.js';
 import { startOutboxPublisher, stopOutboxPublisher } from './outbox/index.js';
 import { gasRouter } from './routes/gas.js';
+import { paymentReconciliationRouter } from './routes/payment-reconciliation.js';
+import { fxRouter } from './routes/fx.js';
+import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { vaultsRouter } from './routes/vaults.js';
 import { createConnectionManager } from './websocket/connection-manager.js';
 import { getBridgeMonitorService } from './services/bridge-monitor/bridge-monitor.js';
@@ -136,6 +143,15 @@ import piiRouter from './routes/pii.js';
 import { piiRedactionMiddleware } from './middleware/pii-redaction.js';
 import { reorgRouter } from './routes/reorg.js';
 import { getReorgDetector } from './services/chain/reorg-detector.js';
+import { workspacesRouter } from './routes/workspaces.js';
+import { refundsEnhancedRouter } from './routes/refunds-enhanced.js';
+
+// TSOA Controllers for OpenAPI generation
+import { HealthController } from './controllers/health.controller.js';
+import { GasController } from './controllers/gas.controller.js';
+
+// Swagger UI for API documentation
+import { swaggerRouter } from './routes/swagger.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -182,9 +198,9 @@ const apiRateLimiter = tokenBucketRateLimit({ keyPrefix: 'rl:api' });
 const invoiceLimiter = tokenBucketRateLimit({
   keyPrefix: 'rl:invoice',
   endpointConfig: {
-    free:       { capacity: 10,  refillRate: 0.1, burstAllowance: 2  },
-    pro:        { capacity: 60,  refillRate: 1,   burstAllowance: 10 },
-    enterprise: { capacity: 300, refillRate: 5,   burstAllowance: 50 },
+    free: { capacity: 10, refillRate: 0.1, burstAllowance: 2 },
+    pro: { capacity: 60, refillRate: 1, burstAllowance: 10 },
+    enterprise: { capacity: 300, refillRate: 5, burstAllowance: 50 },
   },
 });
 
@@ -234,6 +250,9 @@ app.use(
   })
 );
 
+app.use(paginationMiddleware);
+app.use(etagMiddleware);
+
 app.use(slaTrackingMiddleware);
 app.use(sessionMiddleware);
 app.use(tokenAuthMiddleware);
@@ -242,6 +261,7 @@ app.use(cacheControlNoStore);
 app.use(healthRouter);
 app.use('/docs', docsRouter);
 app.use('/api-docs', docsRouter);
+app.use('/swagger', swaggerRouter);
 app.use('/api', errorsRouter);
 
 // Cold start monitoring dashboard — available before auth/rate-limit middleware
@@ -261,7 +281,7 @@ app.use('/api/', slidingWindowRateLimit({ keyPrefix: 'sw:api' }));
 app.use('/api/', requestCoalescer());
 
 // Apply sandbox-aware rate limiting for sandbox endpoints
-const sandboxRateLimiter = tokenBucketRateLimit({ 
+const sandboxRateLimiter = tokenBucketRateLimit({
   keyPrefix: 'rl:sandbox',
   sandboxMode: env.NODE_ENV === 'sandbox' || env.NODE_ENV === 'development'
 });
@@ -361,9 +381,20 @@ app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
 
 // Merchant dynamic payment links
 app.use('/api/v1/payment-links', paymentLinksRouter);
+app.use('/api/v1/payment-strategies', paymentStrategiesRouter);
 
-// Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export)
+// Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export,
+// jurisdiction rule engine, exemptions, compliance checks, audit trail — Issue #627)
 app.use('/api/v1/tax', taxRouter);
+
+// Automated payment reconciliation: matching, exceptions, reporting, analytics (Issue #628)
+app.use('/api/v1/payment-reconciliation', paymentReconciliationRouter);
+
+// FX rate cache/history/alerts backing multi-currency invoices (Issue #626)
+app.use('/api/v1/fx', fxRouter);
+
+// Subscription cohort retention/revenue/churn analytics (Issue #629)
+app.use('/api/v1/analytics/cohorts', cohortAnalyticsRouter);
 
 // Third-party backend plugins
 app.use('/api/v1/admin/plugins', pluginsRouter);
@@ -432,12 +463,24 @@ app.use('/api/v1/routing/ai', aiRoutingRouter);
 // PII classification and redaction audit — Issue #668
 app.use('/api/v1/pii', piiRouter);
 
+// Multi-tenant workspaces with RBAC
+app.use('/api/v1/workspaces', workspacesRouter);
+
+// Enhanced refund processing with policy engine and multi-level approval
+app.use('/api/v1/refunds-enhanced', refundsEnhancedRouter);
+
+// Database connection pool and performance monitoring
+app.use('/api/v1/monitoring/pool', poolMonitorRouter);
+
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());
 app.use('/api/v1/sandbox', sandboxRateLimiter, sandboxRouter);
 
 // Email system v2 with templates, analytics, and localization
 app.use('/api/v2/email', emailV2Router);
+
+// Subscription billing with metered usage and tiered pricing (Issue #570)
+app.use('/api/v1/subscriptions', subscriptionsRouter);
 
 // GraphQL gateway with federation-ready schema and subscriptions stream
 app.use('/graphql', graphQLRouter);
@@ -446,7 +489,7 @@ app.use('/graphql/ws', graphQLWsRouter);
 // Dev tooling routes (only in development)
 if (env.NODE_ENV === 'development') {
   app.use('/api/dev', devDevRouter);
-  
+
   // Initialize dev log WebSocket transport
   import('./logger/dev-transport.js').then(({ createDevLogTransport }) => {
     createDevLogTransport(server, '/ws/logs');

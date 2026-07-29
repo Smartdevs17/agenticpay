@@ -3,6 +3,8 @@ import type { Result } from '../../../lib/result.js';
 export interface PaymentInput {
   amount: number;
   currency: string;
+  /** Token symbol/contract when the payment is a specific token rather than the network's native asset (e.g. "USDC"). */
+  token?: string;
   fromAddress?: string;
   toAddress: string;
   network: string;

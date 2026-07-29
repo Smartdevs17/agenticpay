@@ -19,8 +19,10 @@ import { markOverdueRequests } from '../services/gdpr.js';
 import { sandboxCleanupJobs } from '../jobs/sandbox-cleanup.js';
 import { SubscriptionService } from '../services/subscription.service.js';
 import { SubscriptionProcessor } from '../jobs/subscription-processor.js';
+import { aggregateUsage, checkUsageAlerts, processDunning } from '../jobs/usageAggregation.js';
 import { getArchivalService } from '../services/archival/index.js';
 import { getBridgeMonitorService } from '../services/bridge-monitor/bridge-monitor.js';
+import { runScheduledReconciliation } from '../services/payment-reconciliation/index.js';
 import { ethers } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -161,6 +163,28 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     handler: sandboxCleanupJobs.find((j) => j.id === 'sandbox-maintenance-stats')!.handler,
   },
   {
+    id: 'usage-aggregation',
+    name: 'Usage Aggregation and Billing',
+    description: 'Aggregates metered usage records and syncs to Stripe for subscription billing.',
+    defaultSchedule: '0 * * * *', // Hourly
+    timeoutMs: 10 * 60 * 1000, // 10 minutes
+    handler: aggregateUsage,
+  },
+  {
+    id: 'usage-alerts-check',
+    name: 'Usage Alerts Check',
+    description: 'Checks subscription usage against limits and triggers alerts at 80% and 100%.',
+    defaultSchedule: '0 * * * *', // Hourly
+    timeoutMs: 5 * 60 * 1000, // 5 minutes
+    handler: checkUsageAlerts,
+  },
+  {
+    id: 'subscription-dunning',
+    name: 'Subscription Dunning Process',
+    description: 'Processes failed payments with retry logic and grace period management.',
+    defaultSchedule: '0 0 * * *', // Daily
+    timeoutMs: 15 * 60 * 1000, // 15 minutes
+    handler: processDunning,
     id: 'daily-onchain-archival',
     name: 'Daily On-Chain Data Archival',
     description: 'Backs up transaction data, event logs, and contract state to IPFS with integrity verification.',
@@ -184,6 +208,17 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     timeoutMs: 5 * 60 * 1000,
     handler: async () => {
       await getBridgeMonitorService().pollAndReconcile();
+    },
+  },
+  {
+    id: 'daily-payment-reconciliation',
+    name: 'Daily Payment Reconciliation',
+    description: 'Matches internal payments against external statement records for the previous day and files exceptions for mismatches.',
+    defaultSchedule: '0 5 * * *',
+    timezone: 'UTC',
+    timeoutMs: 30 * 60 * 1000,
+    handler: async () => {
+      await runScheduledReconciliation();
     },
   },
   {
