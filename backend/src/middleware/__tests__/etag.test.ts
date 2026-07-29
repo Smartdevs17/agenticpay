@@ -177,36 +177,37 @@ describe('etag() middleware', () => {
     const expectedTag = generateETag(JSON.stringify(body));
 
     const req = makeReq({ headers: { 'if-none-match': expectedTag } });
-    const { res, sentStatus, endCalled } = makeRes();
+    const wrapper = makeRes();
     const mw = etag();
 
-    mw(req, res, next);
-    (res.json as ReturnType<typeof vi.fn>)(body);
+    mw(req, wrapper.res, next);
+    (wrapper.res.json as ReturnType<typeof vi.fn>)(body);
 
-    expect(sentStatus).toBe(304);
+    expect(wrapper.sentStatus).toBe(304);
   });
 
   it('returns full response when If-None-Match does not match', () => {
     const req = makeReq({ headers: { 'if-none-match': '"stale-etag"' } });
-    const { res, sentStatus, jsonCalled } = makeRes();
+    const result = makeRes();
+    const { res, jsonCalled } = result;
     const mw = etag();
 
     mw(req, res, next);
     (res.json as ReturnType<typeof vi.fn>)({ data: 'fresh' });
 
-    expect(sentStatus).toBeNull();
-    expect(jsonCalled).toBe(true);
+    expect(result.sentStatus).toBeNull();
+    expect(result.jsonCalled).toBe(true);
   });
 
   it('handles wildcard * in If-None-Match', () => {
     const req = makeReq({ headers: { 'if-none-match': '*' } });
-    const { res, sentStatus } = makeRes();
+    const wrapper = makeRes();
     const mw = etag();
 
-    mw(req, res, next);
-    (res.json as ReturnType<typeof vi.fn>)({ data: 'any' });
+    mw(req, wrapper.res, next);
+    (wrapper.res.json as ReturnType<typeof vi.fn>)({ data: 'any' });
 
-    expect(sentStatus).toBe(304);
+    expect(wrapper.sentStatus).toBe(304);
   });
 
   it('bypasses authenticated requests when configured', () => {

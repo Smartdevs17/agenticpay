@@ -48,7 +48,7 @@ describe('PoolMonitor', () => {
       for (let i = 0; i < 10; i++) {
         poolMetrics.recordConnectionAcquired(5);
       }
-      poolMetrics.recordPoolExhaustion();
+      poolExhaustionManager.notifyExhaustion();
 
       const health = monitor.getHealthReport();
 

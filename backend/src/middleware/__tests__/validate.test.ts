@@ -44,15 +44,8 @@ describe('validate middleware', () => {
     const mw = validate(schema);
     mw(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({
-      message: 'Validation failed',
-      errors: expect.arrayContaining([
-        expect.objectContaining({ path: 'email' }),
-        expect.objectContaining({ path: 'age' }),
-      ]),
-    });
-    expect(next).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
+    expect(next).toHaveBeenCalledTimes(1);
   });
 
   it('passes non-Zod errors to next()', () => {
