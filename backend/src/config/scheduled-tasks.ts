@@ -23,6 +23,7 @@ import { aggregateUsage, checkUsageAlerts, processDunning } from '../jobs/usageA
 import { getArchivalService } from '../services/archival/index.js';
 import { getBridgeMonitorService } from '../services/bridge-monitor/bridge-monitor.js';
 import { runScheduledReconciliation } from '../services/payment-reconciliation/index.js';
+import { complianceService } from '../compliance/service.js';
 import { ethers } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -138,6 +139,30 @@ const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: strin
       } else {
         console.log('[gdpr-jobs] No overdue GDPR requests found');
       }
+    },
+  },
+  {
+    id: 'automated-compliance-checks',
+    name: 'Automated Compliance Checks',
+    description: 'Runs security, audit, regulatory-monitoring, reporting, alerting, dashboard, and documentation compliance controls.',
+    defaultSchedule: '0 * * * *',
+    timeoutMs: 5 * 60 * 1000,
+    priority: 'critical',
+    handler: async () => {
+      const run = await complianceService.runAutomatedChecks({ source: 'scheduler', emitAlerts: true });
+      console.log(`[compliance] Automated run ${run.id}: score=${run.summary.complianceScore} failed=${run.summary.failed} warnings=${run.summary.warned}`);
+    },
+  },
+  {
+    id: 'regulatory-update-monitoring',
+    name: 'Regulatory Update Monitoring',
+    description: 'Checks configured regulatory feeds and records changed guidance for compliance review.',
+    defaultSchedule: '0 */6 * * *',
+    timeoutMs: 5 * 60 * 1000,
+    priority: 'high',
+    handler: async () => {
+      const result = await complianceService.monitorRegulatoryUpdates();
+      console.log(`[compliance] Regulatory monitor checked ${result.sourcesChecked} source(s); detected ${result.updatesDetected} update(s)`);
     },
   },
   {

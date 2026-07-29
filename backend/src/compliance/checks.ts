@@ -1,5 +1,3 @@
-import { config as getEnvConfig } from '../config/env.js';
-
 export type ComplianceCheckResult = {
   id: string;
   description: string;
@@ -8,45 +6,71 @@ export type ComplianceCheckResult = {
   checkedAtMs: number;
 };
 
-export function runComplianceChecks(): ComplianceCheckResult[] {
-  const env = getEnvConfig();
-  const checkedAtMs = Date.now();
+function envFlag(name: string): boolean {
+  return String(process.env[name] ?? '').toLowerCase() === 'true';
+}
 
+/**
+ * Lightweight, synchronous baseline compliance checks.
+ *
+ * These checks intentionally avoid network and database access so they can run
+ * in health-style endpoints, tests, and bootstrapping code. The richer
+ * ComplianceService composes these baseline checks with audit integrity,
+ * regulatory monitoring, reporting, dashboard, and alert workflows.
+ */
+export function runComplianceChecks(): ComplianceCheckResult[] {
+  const checkedAtMs = Date.now();
+  const nodeEnv = process.env.NODE_ENV || 'development';
   const results: ComplianceCheckResult[] = [];
 
-  // Encryption in transit (best-effort): behind a proxy TLS termination is external, so we surface env expectations.
   results.push({
     id: 'encryption_in_transit',
     description: 'TLS termination enforced at edge / proxy',
-    status: env.NODE_ENV === 'production' ? 'warn' : 'pass',
+    status: nodeEnv === 'production' && !envFlag('TLS_TERMINATION_VERIFIED') ? 'warn' : 'pass',
     details: {
-      note:
-        env.NODE_ENV === 'production'
-          ? 'Verify that the deployment terminates TLS and forwards only HTTPS traffic to the app.'
-          : 'Non-production environment.',
+      evidence:
+        nodeEnv === 'production'
+          ? 'Set TLS_TERMINATION_VERIFIED=true after validating load balancer / proxy HTTPS-only forwarding.'
+          : 'Non-production environment; local HTTP is allowed.',
     },
     checkedAtMs,
   });
 
-  // Backup verification: this repo includes backup routes/providers; we ensure configuration is present if enabled.
   results.push({
     id: 'backup_configuration',
     description: 'Backup configuration present when enabled',
-    status: 'warn',
+    status: envFlag('BACKUP_ENABLED') && !process.env.BACKUP_PROVIDER ? 'fail' : 'pass',
     details: {
-      note:
-        'Backup routes exist, but backup enablement/provider env vars are not standardized yet. Define and validate BACKUP_* env vars for automated verification.',
+      backupEnabled: envFlag('BACKUP_ENABLED'),
+      providerConfigured: Boolean(process.env.BACKUP_PROVIDER),
+      evidence: envFlag('BACKUP_ENABLED')
+        ? 'BACKUP_PROVIDER must identify the active evidence backup provider.'
+        : 'Backups are not explicitly enabled in this environment.',
     },
     checkedAtMs,
   });
 
-  // Basic access control logging: audit routes present; enforce that audit feature flag is enabled by config.
   results.push({
     id: 'access_control_logging',
     description: 'Audit logging available for privileged operations',
     status: 'pass',
     details: {
-      note: 'Use /api/v1/audit/* endpoints to capture and export evidence.',
+      evidence: 'Immutable audit logging service and /api/v1/audit endpoints are available.',
+    },
+    checkedAtMs,
+  });
+
+  results.push({
+    id: 'regulatory_monitoring_configuration',
+    description: 'Regulatory watchlist sources are configured',
+    status: 'pass',
+    details: {
+      evidence:
+        'Default watchlist sources are bundled; optional COMPLIANCE_REGULATORY_FEEDS URLs can be added for live monitoring.',
+      configuredFeeds: (process.env.COMPLIANCE_REGULATORY_FEEDS || '')
+        .split(',')
+        .map((url) => url.trim())
+        .filter(Boolean).length,
     },
     checkedAtMs,
   });

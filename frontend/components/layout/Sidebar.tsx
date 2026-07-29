@@ -21,6 +21,7 @@ export function Sidebar() {
     { name: t('payments'), href: '/dashboard/payments', icon: Wallet },
     { name: t('qrPay'), href: '/dashboard/payments/qr', icon: QrCode },
     { name: t('disputes'), href: '/dashboard/disputes', icon: Scale },
+    { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
     { name: t('bridgeMonitoring'), href: '/dashboard/monitoring/bridges', icon: Activity },
     { name: t('archival'), href: '/dashboard/admin/archival', icon: Archive },
     { name: t('upgradeSafety'), href: '/dashboard/admin/contracts/upgrades', icon: ShieldCheck },
