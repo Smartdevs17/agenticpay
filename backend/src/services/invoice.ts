@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config/env.js';
 import { withQueryProfiling } from '../config/database.js';
 import { EmailDeliveryService } from './email-delivery.js';
+import { fxService } from './fx/index.js';
 
 let openaiClient: OpenAI | null = null;
 const emailService = new EmailDeliveryService();
@@ -79,6 +80,22 @@ export type InvoiceRecord = {
   status: InvoiceStatus;
   countryCode: string;
   taxBreakdown: InvoiceTaxBreakdown[];
+  // Multi-currency FX (Issue #626) — `currency`/`total` above stay the
+  // merchant's settlement currency; these track the customer-facing
+  // presentment currency and the rate locked at generation/payment time.
+  // Mirrors the Invoice.presentmentCurrency/presentmentAmount/fxRate/
+  // fxRateLockedAt columns added to the Prisma schema for this feature.
+  presentmentCurrency: string | null;
+  presentmentAmount: number | null;
+  fxRate: number | null;
+  fxRateLockedAt: string | null;
+};
+
+export type FxLockInfo = {
+  presentmentCurrency: string;
+  presentmentAmount: number;
+  fxRate: number;
+  fxRateLockedAt: string;
 };
 
 const invoices = new Map<string, InvoiceRecord>();
@@ -158,6 +175,32 @@ interface InvoiceRequest {
   hoursWorked: number;
   hourlyRate: number;
   countryCode: string;
+  /**
+   * Customer-facing display currency, if different from the invoice's
+   * settlement currency ('USD'). When set, the FX rate is fetched/cached via
+   * `fxService` and locked onto the invoice at generation time (Issue #626).
+   */
+  presentmentCurrency?: string;
+}
+
+/**
+ * Computes and locks the FX conversion for a multi-currency invoice against
+ * its settlement `currency`/`total`, using the shared `fxService` rate
+ * cache. Used both at generation time and to re-lock the rate at payment
+ * time (the generation-time rate may have expired or moved by then).
+ */
+async function lockFxForInvoice(invoice: InvoiceRecord, presentmentCurrency: string): Promise<FxLockInfo> {
+  const conversion = await fxService.convert(invoice.total, invoice.currency, presentmentCurrency);
+  if (!conversion.ok) {
+    throw new Error(`FX conversion failed for ${invoice.currency}->${presentmentCurrency}: ${conversion.error.message}`);
+  }
+
+  return {
+    presentmentCurrency: conversion.value.quoteCurrency,
+    presentmentAmount: conversion.value.convertedAmount,
+    fxRate: conversion.value.rate,
+    fxRateLockedAt: new Date().toISOString(),
+  };
 }
 
 export async function generateInvoice(request: InvoiceRequest): Promise<InvoiceRecord> {
@@ -251,7 +294,20 @@ export async function generateInvoice(request: InvoiceRequest): Promise<InvoiceR
         description: `${countryCode} VAT/GST`,
       },
     ],
+    presentmentCurrency: null,
+    presentmentAmount: null,
+    fxRate: null,
+    fxRateLockedAt: null,
   };
+
+  const presentmentCurrency = request.presentmentCurrency?.trim().toUpperCase();
+  if (presentmentCurrency && presentmentCurrency !== invoice.currency) {
+    const lock = await lockFxForInvoice(invoice, presentmentCurrency);
+    invoice.presentmentCurrency = lock.presentmentCurrency;
+    invoice.presentmentAmount = lock.presentmentAmount;
+    invoice.fxRate = lock.fxRate;
+    invoice.fxRateLockedAt = lock.fxRateLockedAt;
+  }
 
   invoices.set(invoice.id, invoice);
   return invoice;
@@ -393,6 +449,109 @@ export function processOverdueInvoices(): InvoiceReminder[] {
 export function getInvoiceReminders(invoiceId: string): InvoiceReminder[] {
   const invoice = invoices.get(invoiceId);
   return invoice?.reminders ?? [];
+}
+
+/**
+ * Re-locks the FX rate for an existing multi-currency invoice — call this
+ * when the invoice is actually paid, since the rate locked at generation
+ * time may have expired or moved. Only updates the invoice's stored FX
+ * fields; it does not touch payment processing/webhook handling.
+ */
+export async function reconvertInvoiceFxAtPayment(
+  invoiceId: string,
+  presentmentCurrency?: string,
+): Promise<InvoiceRecord> {
+  const invoice = invoices.get(invoiceId);
+  if (!invoice) {
+    throw new Error(`Invoice not found: ${invoiceId}`);
+  }
+
+  const targetCurrency = (presentmentCurrency ?? invoice.presentmentCurrency)?.trim().toUpperCase();
+  if (!targetCurrency) {
+    throw new Error(`Invoice ${invoiceId} has no presentment currency to reconvert`);
+  }
+  if (targetCurrency === invoice.currency) {
+    throw new Error(`presentmentCurrency must differ from settlement currency (${invoice.currency})`);
+  }
+
+  const lock = await lockFxForInvoice(invoice, targetCurrency);
+  invoice.presentmentCurrency = lock.presentmentCurrency;
+  invoice.presentmentAmount = lock.presentmentAmount;
+  invoice.fxRate = lock.fxRate;
+  invoice.fxRateLockedAt = lock.fxRateLockedAt;
+  invoice.updatedAt = new Date().toISOString();
+
+  invoices.set(invoice.id, invoice);
+  return invoice;
+}
+
+export type MultiCurrencyReportRow = {
+  currency: string;
+  presentmentCurrency: string;
+  invoiceCount: number;
+  totalSettlement: number;
+  totalPresentment: number;
+  averageFxRate: number | null;
+};
+
+/**
+ * Aggregates invoices by (currency, presentmentCurrency) pair — counts and
+ * totals per pair — for multi-currency reporting. Single-currency invoices
+ * (no presentmentCurrency set) are grouped under presentmentCurrency ===
+ * currency with a null-equivalent fxRate of 1.
+ */
+export function generateMultiCurrencyReport(input: { merchantId?: string } = {}): {
+  rows: MultiCurrencyReportRow[];
+  totalInvoices: number;
+  multiCurrencyInvoices: number;
+} {
+  const relevant = [...invoices.values()].filter(
+    (invoice) => !input.merchantId || invoice.merchantId === input.merchantId,
+  );
+
+  const groups = new Map<
+    string,
+    { currency: string; presentmentCurrency: string; count: number; settlement: number; presentment: number; rateSum: number; rateCount: number }
+  >();
+
+  for (const invoice of relevant) {
+    const presentmentCurrency = invoice.presentmentCurrency ?? invoice.currency;
+    const key = `${invoice.currency}:${presentmentCurrency}`;
+    const group = groups.get(key) ?? {
+      currency: invoice.currency,
+      presentmentCurrency,
+      count: 0,
+      settlement: 0,
+      presentment: 0,
+      rateSum: 0,
+      rateCount: 0,
+    };
+
+    group.count += 1;
+    group.settlement += invoice.total;
+    group.presentment += invoice.presentmentAmount ?? invoice.total;
+    if (invoice.fxRate !== null) {
+      group.rateSum += invoice.fxRate;
+      group.rateCount += 1;
+    }
+
+    groups.set(key, group);
+  }
+
+  const rows: MultiCurrencyReportRow[] = [...groups.values()].map((g) => ({
+    currency: g.currency,
+    presentmentCurrency: g.presentmentCurrency,
+    invoiceCount: g.count,
+    totalSettlement: Number(g.settlement.toFixed(2)),
+    totalPresentment: Number(g.presentment.toFixed(2)),
+    averageFxRate: g.rateCount > 0 ? Number((g.rateSum / g.rateCount).toFixed(10)) : null,
+  }));
+
+  return {
+    rows: rows.sort((a, b) => a.currency.localeCompare(b.currency) || a.presentmentCurrency.localeCompare(b.presentmentCurrency)),
+    totalInvoices: relevant.length,
+    multiCurrencyInvoices: relevant.filter((i) => i.presentmentCurrency !== null).length,
+  };
 }
 
 export function listInvoices(): InvoiceRecord[] {

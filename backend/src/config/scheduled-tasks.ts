@@ -22,6 +22,7 @@ import { SubscriptionProcessor } from '../jobs/subscription-processor.js';
 import { aggregateUsage, checkUsageAlerts, processDunning } from '../jobs/usageAggregation.js';
 import { getArchivalService } from '../services/archival/index.js';
 import { getBridgeMonitorService } from '../services/bridge-monitor/bridge-monitor.js';
+import { runScheduledReconciliation } from '../services/payment-reconciliation/index.js';
 import { ethers } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -207,6 +208,17 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     timeoutMs: 5 * 60 * 1000,
     handler: async () => {
       await getBridgeMonitorService().pollAndReconcile();
+    },
+  },
+  {
+    id: 'daily-payment-reconciliation',
+    name: 'Daily Payment Reconciliation',
+    description: 'Matches internal payments against external statement records for the previous day and files exceptions for mismatches.',
+    defaultSchedule: '0 5 * * *',
+    timezone: 'UTC',
+    timeoutMs: 30 * 60 * 1000,
+    handler: async () => {
+      await runScheduledReconciliation();
     },
   },
   {
