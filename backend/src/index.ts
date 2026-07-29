@@ -123,6 +123,8 @@ import { streamingExportRouter } from './routes/streaming-export.js';
 import { startOutboxPublisher, stopOutboxPublisher } from './outbox/index.js';
 import { gasRouter } from './routes/gas.js';
 import { paymentReconciliationRouter } from './routes/payment-reconciliation.js';
+import { disputeResolutionRouter } from './routes/dispute-resolution.js';
+import { runScheduledDisputeEscalations } from './services/dispute-resolution/index.js';
 import { fxRouter } from './routes/fx.js';
 import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { vaultsRouter } from './routes/vaults.js';
@@ -391,6 +393,10 @@ app.use('/api/v1/tax', taxRouter);
 // Automated payment reconciliation: matching, exceptions, reporting, analytics (Issue #628)
 app.use('/api/v1/payment-reconciliation', paymentReconciliationRouter);
 
+// Structured payment dispute resolution: workflow, evidence, resolution tracking,
+// notifications, analytics (Issue #641)
+app.use('/api/v1/dispute-resolution', disputeResolutionRouter);
+
 // FX rate cache/history/alerts backing multi-currency invoices (Issue #626)
 app.use('/api/v1/fx', fxRouter);
 
@@ -549,10 +555,11 @@ if (config.queue.enabled) {
 startWebhookWorker();
 startOutboxPublisher({ useBullMQ: Boolean(process.env.REDIS_URL) });
 
-// Auto-escalation cron
+// Auto-escalation cron (legacy escrow disputes + Issue #641 dispute-resolution)
 setInterval(async () => {
   const count = await disputeService.processEscalations();
   if (count > 0) console.log(`Escalated ${count} disputes`);
+  await runScheduledDisputeEscalations();
 }, 5 * 60 * 1000);
 
 if (featureFlags.evaluate('batch-operations')) {
@@ -632,10 +639,11 @@ server.listen(config.server.port, () => {
       });
     }
 
-    // Auto-escalation cron
+    // Auto-escalation cron (legacy escrow disputes + Issue #641 dispute-resolution)
     setInterval(async () => {
       const count = await disputeService.processEscalations();
       if (count > 0) console.log(`Escalated ${count} disputes`);
+      await runScheduledDisputeEscalations();
     }, 5 * 60 * 1000);
 
     // Batch processor
