@@ -336,6 +336,45 @@ model OutboxEvent {
   @@map("outbox_events")
 }
 
+// ─── Event Sourcing Models ─────────────────────────────────────────────────────
+
+model EventStore {
+  id            String   @id @default(uuid())
+  streamId      String   @map("stream_id")
+  eventType     String   @map("event_type")
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  version       Int
+  payload       Json
+  metadata      Json?
+  occurredAt    DateTime @map("occurred_at")
+  sequenceNumber BigInt  @map("sequence_number")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([streamId, version])
+  @@index([streamId])
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+  @@index([sequenceNumber])
+  @@index([occurredAt])
+  @@map("event_store")
+}
+
+model EventSnapshot {
+  id            String   @id @default(uuid())
+  streamId      String   @map("stream_id")
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  version       Int
+  state         Json
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([streamId])
+  @@index([aggregateType, aggregateId])
+  @@index([version])
+  @@map("event_snapshots")
+}
+
 model Plugin {
   id            String       @id @default(uuid())
   name          String       @unique
