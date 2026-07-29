@@ -22,6 +22,8 @@ import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
 import { onboardingRouter } from './routes/onboarding.js';
+import { roleOnboardingRouter } from './routes/role-onboarding.js';
+import { paymentMethodsRouter } from './routes/payment-methods.js';
 import { splitsRouter } from './routes/splits.js';
 import { refundsRouter } from './routes/refunds.js';
 import allowancesRouter from './routes/allowances.js';
@@ -296,6 +298,12 @@ apiV1Router.use('/queue', bullMQMonitorRouter);
 apiV1Router.use('/outbox', outboxRouter);
 apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/onboarding', onboardingRouter);
+
+// Role-based onboarding checklist — Issue #632
+apiV1Router.use('/onboarding-checklist', roleOnboardingRouter);
+
+// Payment method micro-deposit verification — Issue #633
+apiV1Router.use('/payment-methods', paymentMethodsRouter);
 apiV1Router.use('/legacy', legacyRouter);
 apiV1Router.use('/flags', flagsRouter);
 apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);

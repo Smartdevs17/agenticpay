@@ -2627,3 +2627,53 @@ model TransactionReorg {
   @@map("transaction_reorgs")
 }
 
+// ─── Issue #633: Payment Method Micro-Deposit Verification ────────────────────
+
+enum PaymentMethodVerificationStatus {
+  pending
+  verified
+  failed
+  locked
+}
+
+model PaymentMethod {
+  id                    String                           @id @default(uuid())
+  tenantId              String                           @map("tenant_id")
+  userId                String                           @map("user_id")
+  type                  String                           @default("bank_account")
+  last4                 String?                          @map("last4")
+  status                PaymentMethodVerificationStatus  @default(pending)
+  depositAmount1Cents   Int?                              @map("deposit_amount1_cents")
+  depositAmount2Cents   Int?                              @map("deposit_amount2_cents")
+  verificationAttempts  Int                               @default(0) @map("verification_attempts")
+  maxVerificationAttempts Int                             @default(5) @map("max_verification_attempts")
+  depositsIssuedAt      DateTime?                         @map("deposits_issued_at")
+  verifiedAt            DateTime?                         @map("verified_at")
+  createdAt             DateTime                          @default(now()) @map("created_at")
+  updatedAt             DateTime                          @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([status])
+  @@map("payment_methods")
+}
+
+// ─── Issue #632: Role-Based Onboarding Checklist ───────────────────────────────
+
+model OnboardingChecklist {
+  id                String        @id @default(uuid())
+  tenantId          String        @map("tenant_id")
+  userId            String        @map("user_id")
+  role              WorkspaceRole @default(member)
+  tasks             Json          // ordered list of { id, title, completed, completedAt }
+  completionPercent Int           @default(0) @map("completion_percent")
+  completedAt       DateTime?     @map("completed_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("onboarding_checklists")
+}
+
