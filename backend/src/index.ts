@@ -145,6 +145,7 @@ import { reorgRouter } from './routes/reorg.js';
 import { getReorgDetector } from './services/chain/reorg-detector.js';
 import { workspacesRouter } from './routes/workspaces.js';
 import { refundsEnhancedRouter } from './routes/refunds-enhanced.js';
+import { databaseRouter } from './routes/database.js';
 
 // TSOA Controllers for OpenAPI generation
 import { HealthController } from './controllers/health.controller.js';
@@ -471,6 +472,9 @@ app.use('/api/v1/refunds-enhanced', refundsEnhancedRouter);
 
 // Database connection pool and performance monitoring
 app.use('/api/v1/monitoring/pool', poolMonitorRouter);
+
+// Database query performance, index usage, and slow query dashboard
+app.use('/api/v1/database', databaseRouter);
 
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());

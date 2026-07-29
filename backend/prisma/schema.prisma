@@ -172,6 +172,8 @@ model Payment {
   @@index([txHash])
   @@index([projectId])
   @@index([providerId])
+  @@index([toAddress, status])
+  @@index([createdAt, status])
   @@map("payments")
 }
 
@@ -247,6 +249,7 @@ model Invoice {
   @@index([tenantId, generatedAt])
   @@index([projectId])
   @@index([status])
+  @@index([projectId, createdAt])
   @@map("invoices")
 }
 
@@ -2548,6 +2551,7 @@ model Refund {
   @@index([paymentId])
   @@index([status])
   @@index([stripeRefundId])
+  @@index([paymentId, createdAt])
   @@map("refunds")
 }
 

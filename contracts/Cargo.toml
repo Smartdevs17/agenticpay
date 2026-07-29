@@ -8,6 +8,9 @@ description = "AI Agent Payment Infrastructure on Stellar/Soroban"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+gas_benchmarks = []
+
 [dependencies]
 soroban-sdk = "21.0.0"
 
