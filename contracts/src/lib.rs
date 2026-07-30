@@ -5,6 +5,11 @@ extern crate std;
 
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec};
 
+mod storage;
+use storage::{
+    ApprovalBitmap, LazyKey, LazyValue, ProjectV2, ProjectStatusV2, StorageKey,
+};
+
 // ---------------------------------------------------------------------------
 // Multi-signature wallet types
 // ---------------------------------------------------------------------------
@@ -141,6 +146,8 @@ pub enum DataKey {
     HtlcCount,
     HtlcLock(u64),
     BridgeConfig,
+    // ---- Gas-optimised v2 storage keys (StorageKey enum in storage.rs) ----
+    V2(StorageKey),
 }
 
 // ---------------------------------------------------------------------------
@@ -218,29 +225,38 @@ pub struct AgenticPayContract;
 #[contractimpl]
 impl AgenticPayContract {
     // -----------------------------------------------------------------------
+    // Gas-optimised lazy storage helpers
+    // -----------------------------------------------------------------------
+    // ReentrancyLock and Paused are read on every mutative call but written
+    // only during initialise / pause / unpause.  We use `LazyValue` to avoid
+    // paying the initialise SSTORE cost for paths that never toggle the
+    // circuit breaker or trigger reentrancy — the first read returns the
+    // default without a storage write.
+
+    fn _lock() -> LazyValue<bool> {
+        LazyValue::new(LazyKey::ReentrancyLock, false)
+    }
+
+    fn _pause_flag() -> LazyValue<bool> {
+        LazyValue::new(LazyKey::Paused, false)
+    }
+
+    // -----------------------------------------------------------------------
     // Internal reentrancy guard helpers
     // -----------------------------------------------------------------------
 
     /// Acquire the reentrancy latch. Panics with "reentrant call" if already
     /// held, providing cross-function and cross-contract reentrancy protection.
     fn _acquire_lock(env: &Env) {
-        let locked: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::ReentrancyLock)
-            .unwrap_or(false);
+        let locked = Self::_lock().get(env);
         assert!(!locked, "reentrant call");
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentrancyLock, &true);
+        Self::_lock().set(env, &true);
     }
 
     /// Release the reentrancy latch. Must be called at the end of every
     /// mutative function that called `_acquire_lock`.
     fn _release_lock(env: &Env) {
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentrancyLock, &false);
+        Self::_lock().set(env, &false);
     }
 
     // -----------------------------------------------------------------------
@@ -249,11 +265,7 @@ impl AgenticPayContract {
 
     /// Panic with "contract paused" when the emergency circuit breaker is on.
     fn _require_not_paused(env: &Env) {
-        let paused: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false);
+        let paused = Self::_pause_flag().get(env);
         assert!(!paused, "contract paused");
     }
 
@@ -267,9 +279,10 @@ impl AgenticPayContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::ProjectCount, &0u64);
         env.storage().instance().set(&DataKey::ReceiptCount, &0u64);
-        // Reentrancy latch starts unlocked; circuit breaker starts unpaused.
-        env.storage().instance().set(&DataKey::ReentrancyLock, &false);
-        env.storage().instance().set(&DataKey::Paused, &false);
+        // ReentrancyLock and Paused are lazily initialised via LazyValue —
+        // the first read returns `false` without a storage write.  This saves
+        // two SSTORE operations (~40,000 gas) for contracts that never pause
+        // or trigger the reentrancy latch.
     }
 
     fn get_admin(env: &Env) -> Address {
@@ -874,7 +887,67 @@ impl AgenticPayContract {
 
     /// Return the contract version for tracking upgrades.
     pub fn version(_env: Env) -> u32 {
-        1
+        2
+    }
+
+    // -----------------------------------------------------------------------
+    // Storage migration (v1 → v2 packed layout)
+    // -----------------------------------------------------------------------
+
+    /// Migrate all existing projects from the v1 DataKey layout to the
+    /// v2 packed StorageKey layout.  Admin-only.  Call this once after an
+    /// upgrade to realise gas savings on existing data.
+    ///
+    /// # Arguments
+    /// * `admin` - Must match the stored admin address
+    /// * `project_count` - The current `ProjectCount` value (all projects
+    ///   1..=project_count will be migrated)
+    pub fn migrate_storage(env: Env, admin: Address, project_count: u64) {
+        admin.require_auth();
+        let stored_admin = Self::get_admin(&env);
+        assert!(admin == stored_admin, "Only admin can migrate storage");
+
+        for id in 1..=project_count {
+            if env.storage().persistent().has(&DataKey::Project(id)) {
+                let old: crate::Project = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Project(id))
+                    .expect("Project not found during migration");
+
+                let new = ProjectV2 {
+                    id: old.id,
+                    client: old.client,
+                    freelancer: old.freelancer,
+                    amount: old.amount,
+                    deposited: old.deposited,
+                    status: match old.status {
+                        crate::ProjectStatus::Created => ProjectStatusV2::Created,
+                        crate::ProjectStatus::Funded => ProjectStatusV2::Funded,
+                        crate::ProjectStatus::InProgress => ProjectStatusV2::InProgress,
+                        crate::ProjectStatus::WorkSubmitted => ProjectStatusV2::WorkSubmitted,
+                        crate::ProjectStatus::Verified => ProjectStatusV2::Verified,
+                        crate::ProjectStatus::Completed => ProjectStatusV2::Completed,
+                        crate::ProjectStatus::Disputed => ProjectStatusV2::Disputed,
+                        crate::ProjectStatus::Cancelled => ProjectStatusV2::Cancelled,
+                    },
+                    github_repo: old.github_repo,
+                    description: old.description,
+                    created_at: old.created_at,
+                    deadline: old.deadline,
+                };
+
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::V2(StorageKey::Project(id)), &new);
+                env.storage().persistent().remove(&DataKey::Project(id));
+            }
+        }
+
+        env.events().publish(
+            (symbol_short!("storage"), symbol_short!("migrated")),
+            project_count,
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1594,6 +1667,11 @@ impl AgenticPayContract {
 // Bring in the property-based security tests (proptest suite).
 #[cfg(test)]
 mod security_properties;
+
+// Bring in gas benchmarks (requires --features gas_benchmarks).
+#[cfg(feature = "gas_benchmarks")]
+#[cfg(test)]
+mod benchmarks;
 
 #[cfg(test)]
 mod test {

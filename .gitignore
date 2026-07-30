@@ -3,6 +3,7 @@ node_modules/
 
 # Environment
 .env*
+!.env.example
 
 # OS
 .DS_Store
@@ -26,6 +27,8 @@ out/
 # Debug
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Keys
 *.pem
@@ -41,10 +44,63 @@ npm-debug.log*
 *.bak
 *.orig
 
+# Test artifacts & snapshots
+**/coverage/
+**/__snapshots__/
+**/*.snap
+**/test-results/
+**/playwright-report/
+**/blob-report/
+**/.playwright/
+**/playwright/.cache/
+
+# Security scan reports (generated — do not commit)
+security-reports/
+
+# Build & cache artefacts
+*.tsbuildinfo
+.turbo/
+# Tools
 .claude
 .lhci_reports/
 bundle-reports/
 trend-data.json
+
+# Package dist
 packages/*/dist/
+
+# Generated code
 frontend/src/generated/
 packages/contracts/src/generated/
+node_modules/.cache/
+
+# Misc
+.claude
+test-write.txt
+
+# Test snapshots & output
+**/__snapshots__/
+**/e2e/__snapshots__/
+frontend/e2e/__snapshots__/
+output.txt
+**/output.txt
+frontend/components/layout/output.txt
+frontend/app/output.txt
+
+# Turbo
+.turbo/cookies/
+.turbo/daemon/
+
+# TypeScript
+*.tsbuildinfo
+
+# Playwright / test results
+/playwright-report
+/blob-report
+/test-results
+/.playwright
+/playwright/.cache
+/coverage
+
+# Misc
+test-write.txt

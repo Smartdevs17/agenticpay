@@ -20,6 +20,7 @@ const PRECACHE_URLS = [
   '/dashboard',
   '/dashboard/payments',
   '/dashboard/transactions',
+  '/offline',
   '/manifest.webmanifest',
   '/icons/image-192.png',
   '/icons/image-512.png',
@@ -152,7 +153,13 @@ async function networkFirstDocument(request) {
     if (response.ok) await safeCachePut(RUNTIME, request, response.clone());
     return response;
   } catch {
-    return (await caches.match(request)) || (await caches.match('/dashboard')) || (await caches.match('/')) || offlineResponse('Offline dashboard shell unavailable');
+    return (
+      (await caches.match(request)) ||
+      (await caches.match('/dashboard')) ||
+      (await caches.match('/')) ||
+      (await caches.match('/offline')) ||
+      offlineResponse('Offline dashboard shell unavailable')
+    );
   }
 }
 

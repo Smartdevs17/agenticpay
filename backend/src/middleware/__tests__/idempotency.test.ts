@@ -32,6 +32,7 @@ function makeRes(): {
       sentBody = body;
       return res;
     }),
+    on: vi.fn(),
     get statusCode() { return statusCode; },
     set statusCode(v: number) { statusCode = v; },
   } as unknown as Response;
@@ -65,10 +66,10 @@ describe('idempotency middleware', () => {
     const { res } = makeRes();
     const next = vi.fn();
 
+    const originalJson = res.json;
     const mw = idempotency();
     mw(req, res, next);
 
-    const originalJson = res.json;
     expect(res.json).not.toBe(originalJson);
     expect(next).toHaveBeenCalledOnce();
   });
@@ -106,11 +107,11 @@ describe('idempotency middleware', () => {
     const req2 = makeReq({ headers: { 'x-idempotency-key': 'key-b' } });
     const { res: res2 } = makeRes();
     const next2 = vi.fn();
+    const originalJson = res2.json;
 
     mw(req2, res2, next2);
 
     expect(next2).toHaveBeenCalledOnce();
-    const originalJson = res2.json;
     expect(res2.json).not.toBe(originalJson);
   });
 

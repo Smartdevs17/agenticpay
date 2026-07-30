@@ -613,6 +613,222 @@ export function getRecommendedIndexes(): CompositeIndex[] {
   return RECOMMENDED_INDEXES;
 }
 
+// ── Index Recommendation Engine ──────────────────────────────────────────────
+// Analyses pg_stat_user_indexes and pg_stat_all_tables to detect unused,
+// missing, or redundant indexes.  Hooked into the query logger middleware
+// and exposed via GET /api/v1/database/index-recommendations.
+
+export interface IndexUsageStat {
+  indexName: string;
+  table: string;
+  columns: string;
+  unique: boolean;
+  idxScan: number;
+  idxTupRead: number;
+  idxTupFetch: number;
+  sizeBytes: number;
+  lastUsed: string | null;
+}
+
+export interface TableScanStat {
+  table: string;
+  seqScan: number;
+  seqTupRead: number;
+  estimatedRows: number;
+}
+
+export interface IndexRecommendation {
+  type: "missing" | "unused" | "redundant" | "composite";
+  table: string;
+  columns: string[];
+  reason: string;
+  estimatedImpact: string;
+  ddl: string;
+}
+
+class IndexRecommendationEngine {
+  async getIndexUsageStats(): Promise<IndexUsageStat[]> {
+    try {
+      const { PrismaClient } = await import("@prisma/client");
+      const prisma = new PrismaClient();
+      const stats = await prisma.$queryRawUnsafe<IndexUsageStat[]>(`
+        SELECT
+          i.relname AS "indexName",
+          t.relname AS "table",
+          pg_get_indexdef(i.oid) AS columns,
+          i.indisunique AS unique,
+          COALESCE(s.idx_scan, 0) AS "idxScan",
+          COALESCE(s.idx_tup_read, 0) AS "idxTupRead",
+          COALESCE(s.idx_tup_fetch, 0) AS "idxTupFetch",
+          pg_relation_size(i.oid) AS "sizeBytes",
+          (SELECT MAX(statime) FROM pg_stat_all_indexes WHERE indexrelid = i.oid) AS "lastUsed"
+        FROM pg_index i
+        JOIN pg_class t ON i.indrelid = t.oid
+        LEFT JOIN pg_stat_user_indexes s ON i.indexrelid = s.indexrelid
+        WHERE t.relkind = 'r'
+          AND t.relnamespace NOT IN ('pg_catalog'::regnamespace, 'information_schema'::regnamespace)
+        ORDER BY s.idx_scan ASC NULLS FIRST
+      `);
+      await prisma.$disconnect();
+      return stats;
+    } catch {
+      return [];
+    }
+  }
+
+  async getTableScanStats(): Promise<TableScanStat[]> {
+    try {
+      const { PrismaClient } = await import("@prisma/client");
+      const prisma = new PrismaClient();
+      const stats = await prisma.$queryRawUnsafe<TableScanStat[]>(`
+        SELECT
+          relname AS "table",
+          COALESCE(seq_scan, 0) AS "seqScan",
+          COALESCE(seq_tup_read, 0) AS "seqTupRead",
+          COALESCE(n_live_tup, 0) AS "estimatedRows"
+        FROM pg_stat_user_tables
+        ORDER BY seq_scan DESC
+      `);
+      await prisma.$disconnect();
+      return stats;
+    } catch {
+      return [];
+    }
+  }
+
+  async recommendIndexes(): Promise<IndexRecommendation[]> {
+    const recommendations: IndexRecommendation[] = [];
+    const indexStats = await this.getIndexUsageStats();
+    const tableStats = await this.getTableScanStats();
+
+    // 1. Detect unused indexes
+    for (const idx of indexStats) {
+      if (idx.idxScan === 0 && idx.sizeBytes > 0) {
+        recommendations.push({
+          type: "unused",
+          table: idx.table,
+          columns: [idx.indexName],
+          reason: `Index ${idx.indexName} on ${idx.table} has never been scanned but uses ${(idx.sizeBytes / 1024).toFixed(0)} KB`,
+          estimatedImpact: `Save ${(idx.sizeBytes / 1024).toFixed(0)} KB by dropping`,
+          ddl: `DROP INDEX CONCURRENTLY IF EXISTS ${idx.indexName};`,
+        });
+      }
+    }
+
+    // 2. Detect tables with high seq_scan (potential missing indexes)
+    for (const tbl of tableStats) {
+      if (tbl.seqScan > 100 && tbl.estimatedRows > 1000) {
+        const matchedIndex = indexStats.find((i) => i.table === tbl.table && i.idxScan > 0);
+        if (!matchedIndex) {
+          recommendations.push({
+            type: "missing",
+            table: tbl.table,
+            columns: [],
+            reason: `Table ${tbl.table} has ${tbl.seqScan} sequential scans on ${tbl.estimatedRows.toLocaleString()} rows — consider adding indexes on filter/join columns`,
+            estimatedImpact: "High — sequential scans on large table",
+            ddl: `-- Run EXPLAIN on hot queries against ${tbl.table} to identify columns`,
+          });
+        }
+      }
+    }
+
+    // 3. Recommend composite indexes from RECOMMENDED_INDEXES that don't exist
+    for (const idx of RECOMMENDED_INDEXES) {
+      const exists = indexStats.some(
+        (s) => s.table === idx.table && idx.columns.every((c) => s.columns.includes(c)),
+      );
+      if (!exists) {
+        const unique = idx.unique ? " UNIQUE" : "";
+        const cols = idx.columns.join(", ");
+        recommendations.push({
+          type: "composite",
+          table: idx.table,
+          columns: idx.columns,
+          reason: idx.description,
+          estimatedImpact: "Medium — optimises query pattern",
+          ddl: `CREATE${unique} INDEX CONCURRENTLY ${idx.name} ON "${idx.table}" (${cols});`,
+        });
+      }
+    }
+
+    return recommendations;
+  }
+
+  async getQueryPlans(): Promise<Array<{ query: string; plan: unknown; durationMs: number }>> {
+    const slowQueries = queryProfiler.getTopSlowQueries(10);
+    const plans: Array<{ query: string; plan: unknown; durationMs: number }> = [];
+
+    for (const q of slowQueries) {
+      try {
+        const { PrismaClient } = await import("@prisma/client");
+        const prisma = new PrismaClient();
+        const result = await prisma.$queryRawUnsafe(
+          `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${q.query}`,
+        );
+        plans.push({ query: q.query, plan: result, durationMs: q.durationMs });
+        await prisma.$disconnect();
+      } catch {
+        plans.push({ query: q.query, plan: { error: "EXPLAIN failed" }, durationMs: q.durationMs });
+      }
+    }
+    return plans;
+  }
+}
+
+export const indexRecommendationEngine = new IndexRecommendationEngine();
+
+// ── Database performance alerts ──────────────────────────────────────────────
+
+export interface DbAlert {
+  type: "high_seq_scan" | "unused_index" | "pool_exhaustion" | "query_performance";
+  severity: "info" | "warn" | "critical";
+  message: string;
+  timestamp: string;
+  details?: Record<string, unknown>;
+}
+
+class DbAlertManager {
+  private alerts: DbAlert[] = [];
+  private maxAlerts = 100;
+
+  addAlert(alert: Omit<DbAlert, "timestamp">): void {
+    this.alerts.push({ ...alert, timestamp: new Date().toISOString() });
+    if (this.alerts.length > this.maxAlerts) this.alerts.shift();
+  }
+
+  getAlerts(severity?: DbAlert["severity"]): DbAlert[] {
+    if (severity) return this.alerts.filter((a) => a.severity === severity);
+    return [...this.alerts];
+  }
+
+  async checkAndAlert(): Promise<void> {
+    try {
+      const tableStats = await indexRecommendationEngine.getTableScanStats();
+      for (const tbl of tableStats) {
+        if (tbl.seqScan > 1000 && tbl.estimatedRows > 10000) {
+          this.addAlert({
+            type: "high_seq_scan",
+            severity: "warn",
+            message: `High sequential scans on ${tbl.table}: ${tbl.seqScan} scans on ${tbl.estimatedRows.toLocaleString()} rows`,
+            details: { table: tbl.table, seqScan: tbl.seqScan, rows: tbl.estimatedRows },
+          });
+        }
+      }
+    } catch {
+      // alert check is best-effort
+    }
+  }
+}
+
+export const dbAlertManager = new DbAlertManager();
+
+// Periodic health check (every 5 minutes)
+if (typeof setInterval !== "undefined") {
+  setInterval(() => {
+    void dbAlertManager.checkAndAlert();
+  }, 300_000);
+}
+
 // ── Read replica routing ───────────────────────────────────────────────────────
 
 export interface ReplicaConfig {

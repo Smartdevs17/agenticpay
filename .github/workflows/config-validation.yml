@@ -1,0 +1,44 @@
+name: Config Validation
+
+on:
+  pull_request:
+    paths:
+      - 'backend/src/config.ts'
+      - 'backend/src/config/**'
+      - 'backend/src/services/config/**'
+      - 'backend/scripts/config-*.ts'
+      - 'infra/main.tf'
+      - 'infra/environments/**'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/src/config.ts'
+      - 'backend/src/config/**'
+      - 'backend/src/services/config/**'
+
+jobs:
+  validate:
+    name: Validate & compare environment configs
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate config schemas (Zod) for every environment
+        run: npm run config:validate
+
+      - name: Detect config drift between environments
+        run: npm run config:drift
+
+      - name: Check generated config documentation is up to date
+        run: npm run config:docs:check

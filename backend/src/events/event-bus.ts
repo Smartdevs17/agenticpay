@@ -1,6 +1,7 @@
 import type { DomainEventType, EventHandler, StoredEvent } from './event-types.js';
 import type { AgenticPayWebSocketServer } from '../websocket/server.js';
 import { addToDeadLetterQueue } from './dead-letter-queue.js';
+import { eventSchemaRegistry } from './schemas/index.js';
 
 type WildcardHandler = (event: StoredEvent) => void | Promise<void>;
 
@@ -45,6 +46,18 @@ async function invokeHandler(
 }
 
 export async function publish(event: StoredEvent): Promise<void> {
+  // Validate event payload against schema
+  if (eventSchemaRegistry.hasSchema(event.type)) {
+    const validation = eventSchemaRegistry.safeValidate(event.type, event.payload);
+    if (!validation.success) {
+      const error = validation.error;
+      console.error(`[event-bus] Schema validation failed for event "${event.type}":`, error.errors);
+      throw new Error(`Event schema validation failed for ${event.type}: ${error.errors.map(e => e.message).join(', ')}`);
+    }
+  } else {
+    console.warn(`[event-bus] No schema registered for event type: ${event.type}. Skipping validation.`);
+  }
+
   const typed = handlers.get(event.type);
   if (typed) {
     await Promise.all(Array.from(typed).map((h) => invokeHandler(h, event)));

@@ -6,6 +6,8 @@ import { tokenBucketRateLimit } from './middleware/rate-limit.js';
 import { apiExpressRateLimit } from './middleware/express-api-rate-limit.js';
 import { slidingWindowRateLimit } from './middleware/sliding-window-rate-limit.js';
 import { compressionMiddleware, getCompressionMetrics } from './middleware/compression.js';
+import { paginationMiddleware, etagMiddleware } from './middleware/pagination.js';
+import { poolMonitorRouter } from './routes/pool-monitor.js';
 import { poolMetrics } from './config/database.js';
 import { config } from './config.js';
 import { versionMiddleware } from './middleware/versioning.js';
@@ -20,6 +22,8 @@ import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { legacyRouter } from './routes/legacy.js';
 import { onboardingRouter } from './routes/onboarding.js';
+import { roleOnboardingRouter } from './routes/role-onboarding.js';
+import { paymentMethodsRouter } from './routes/payment-methods.js';
 import { splitsRouter } from './routes/splits.js';
 import { refundsRouter } from './routes/refunds.js';
 import allowancesRouter from './routes/allowances.js';
@@ -75,6 +79,7 @@ import { escrowRouter } from './routes/escrow.js';
 import { multisigRouter } from './routes/multisig.js';
 import { fiatPaymentsRouter } from './routes/fiat-payments.js';
 import { paymentLinksRouter } from './routes/payment-links.js';
+import { paymentStrategiesRouter } from './routes/payment-strategies.js';
 import { taxRouter } from './routes/tax.js';
 import { projectsRouter } from './routes/projects.js';
 import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
@@ -119,6 +124,11 @@ import { pauseManagerRouter } from './routes/pause-manager.js';
 import { streamingExportRouter } from './routes/streaming-export.js';
 import { startOutboxPublisher, stopOutboxPublisher } from './outbox/index.js';
 import { gasRouter } from './routes/gas.js';
+import { paymentReconciliationRouter } from './routes/payment-reconciliation.js';
+import { disputeResolutionRouter } from './routes/dispute-resolution.js';
+import { runScheduledDisputeEscalations } from './services/dispute-resolution/index.js';
+import { fxRouter } from './routes/fx.js';
+import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { vaultsRouter } from './routes/vaults.js';
 import { createConnectionManager } from './websocket/connection-manager.js';
 import { getBridgeMonitorService } from './services/bridge-monitor/bridge-monitor.js';
@@ -139,6 +149,17 @@ import { reorgRouter } from './routes/reorg.js';
 import { getReorgDetector } from './services/chain/reorg-detector.js';
 import { workspacesRouter } from './routes/workspaces.js';
 import { refundsEnhancedRouter } from './routes/refunds-enhanced.js';
+import { refundsAutomatedRouter } from './routes/refunds-automated.js';
+import { refundQueue } from './queue/refund-queue.js';
+import { databaseRouter } from './routes/database.js';
+import { escalationRouter } from './routes/escalation.js';
+
+// TSOA Controllers for OpenAPI generation
+import { HealthController } from './controllers/health.controller.js';
+import { GasController } from './controllers/gas.controller.js';
+
+// Swagger UI for API documentation
+import { swaggerRouter } from './routes/swagger.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -237,6 +258,9 @@ app.use(
   })
 );
 
+app.use(paginationMiddleware);
+app.use(etagMiddleware);
+
 app.use(slaTrackingMiddleware);
 app.use(sessionMiddleware);
 app.use(tokenAuthMiddleware);
@@ -245,6 +269,7 @@ app.use(cacheControlNoStore);
 app.use(healthRouter);
 app.use('/docs', docsRouter);
 app.use('/api-docs', docsRouter);
+app.use('/swagger', swaggerRouter);
 app.use('/api', errorsRouter);
 
 // Cold start monitoring dashboard — available before auth/rate-limit middleware
@@ -282,6 +307,12 @@ apiV1Router.use('/queue', bullMQMonitorRouter);
 apiV1Router.use('/outbox', outboxRouter);
 apiV1Router.use('/sla', slaRouter);
 apiV1Router.use('/onboarding', onboardingRouter);
+
+// Role-based onboarding checklist — Issue #632
+apiV1Router.use('/onboarding-checklist', roleOnboardingRouter);
+
+// Payment method micro-deposit verification — Issue #633
+apiV1Router.use('/payment-methods', paymentMethodsRouter);
 apiV1Router.use('/legacy', legacyRouter);
 apiV1Router.use('/flags', flagsRouter);
 apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
@@ -364,9 +395,24 @@ app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
 
 // Merchant dynamic payment links
 app.use('/api/v1/payment-links', paymentLinksRouter);
+app.use('/api/v1/payment-strategies', paymentStrategiesRouter);
 
-// Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export)
+// Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export,
+// jurisdiction rule engine, exemptions, compliance checks, audit trail — Issue #627)
 app.use('/api/v1/tax', taxRouter);
+
+// Automated payment reconciliation: matching, exceptions, reporting, analytics (Issue #628)
+app.use('/api/v1/payment-reconciliation', paymentReconciliationRouter);
+
+// Structured payment dispute resolution: workflow, evidence, resolution tracking,
+// notifications, analytics (Issue #641)
+app.use('/api/v1/dispute-resolution', disputeResolutionRouter);
+
+// FX rate cache/history/alerts backing multi-currency invoices (Issue #626)
+app.use('/api/v1/fx', fxRouter);
+
+// Subscription cohort retention/revenue/churn analytics (Issue #629)
+app.use('/api/v1/analytics/cohorts', cohortAnalyticsRouter);
 
 // Third-party backend plugins
 app.use('/api/v1/admin/plugins', pluginsRouter);
@@ -441,6 +487,21 @@ app.use('/api/v1/workspaces', workspacesRouter);
 // Enhanced refund processing with policy engine and multi-level approval
 app.use('/api/v1/refunds-enhanced', refundsEnhancedRouter);
 
+// Automated refund processing with policy engine, queue, notifications, and analytics (Issue #642)
+app.use('/api/v1/refunds-automated', refundsAutomatedRouter);
+
+// Start the refund background queue processor
+refundQueue.start();
+
+// Database connection pool and performance monitoring
+app.use('/api/v1/monitoring/pool', poolMonitorRouter);
+
+// Database query performance, index usage, and slow query dashboard
+app.use('/api/v1/database', databaseRouter);
+
+// Automated escalation with SLA tracking — Issue #646
+app.use('/api/v1/escalation', escalationRouter);
+
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());
 app.use('/api/v1/sandbox', sandboxRateLimiter, sandboxRouter);
@@ -514,10 +575,11 @@ if (config.queue.enabled) {
 startWebhookWorker();
 startOutboxPublisher({ useBullMQ: Boolean(process.env.REDIS_URL) });
 
-// Auto-escalation cron
+// Auto-escalation cron (legacy escrow disputes + Issue #641 dispute-resolution)
 setInterval(async () => {
   const count = await disputeService.processEscalations();
   if (count > 0) console.log(`Escalated ${count} disputes`);
+  await runScheduledDisputeEscalations();
 }, 5 * 60 * 1000);
 
 if (featureFlags.evaluate('batch-operations')) {
@@ -597,10 +659,11 @@ server.listen(config.server.port, () => {
       });
     }
 
-    // Auto-escalation cron
+    // Auto-escalation cron (legacy escrow disputes + Issue #641 dispute-resolution)
     setInterval(async () => {
       const count = await disputeService.processEscalations();
       if (count > 0) console.log(`Escalated ${count} disputes`);
+      await runScheduledDisputeEscalations();
     }, 5 * 60 * 1000);
 
     // Batch processor

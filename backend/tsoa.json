@@ -1,0 +1,80 @@
+{
+  "entryFile": "src/index.ts",
+  "noImplicitAdditionalProperties": "silent",
+  "controllerPathGlobs": ["src/controllers/**/*.ts"],
+  "spec": {
+    "outputDirectory": "docs/api/openapi",
+    "specVersion": 3,
+    "spec": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "AgenticPay API",
+        "version": "1.0.0",
+        "description": "AI-Powered Payment Infrastructure for Autonomous Agents on Stellar",
+        "contact": {
+          "name": "AgenticPay Team",
+          "url": "https://github.com/Smartdevs17/agenticpay",
+          "email": "hello@agenticpay.com"
+        },
+        "license": {
+          "name": "Apache-2.0",
+          "url": "https://opensource.org/licenses/Apache-2.0"
+        }
+      },
+      "servers": [
+        {
+          "url": "http://localhost:3001/api/v1",
+          "description": "Development server"
+        },
+        {
+          "url": "https://api.agenticpay.com/api/v1",
+          "description": "Production server"
+        }
+      ],
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ],
+      "components": {
+        "securitySchemes": {
+          "bearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "JWT authentication token"
+          }
+        }
+      },
+      "tags": [
+        {
+          "name": "Health",
+          "description": "Service health and readiness checks"
+        },
+        {
+          "name": "Payments",
+          "description": "Payment processing and management"
+        },
+        {
+          "name": "Projects",
+          "description": "Project and milestone management"
+        },
+        {
+          "name": "Gas",
+          "description": "Gas estimation and optimization"
+        },
+        {
+          "name": "Webhooks",
+          "description": "Webhook configuration and management"
+        },
+        {
+          "name": "Auth",
+          "description": "Authentication and authorization"
+        }
+      ]
+    }
+  },
+  "routes": {
+    "routesDir": "src/routes"
+  }
+}

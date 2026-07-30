@@ -4,14 +4,14 @@ import type { QueueJobDefinition } from '../types.js';
 
 // Mock BullMQ entirely — no real Redis needed in unit tests
 vi.mock('bullmq', () => {
-  const Queue = vi.fn().mockImplementation(() => ({
-    add: vi.fn().mockResolvedValue(undefined),
-    close: vi.fn().mockResolvedValue(undefined),
-  }));
-  const Worker = vi.fn().mockImplementation(() => ({
-    close: vi.fn().mockResolvedValue(undefined),
-  }));
-  return { Queue, Worker };
+  const mockQueue = vi.fn();
+  mockQueue.prototype.add = vi.fn().mockResolvedValue(undefined);
+  mockQueue.prototype.close = vi.fn().mockResolvedValue(undefined);
+
+  const mockWorker = vi.fn();
+  mockWorker.prototype.close = vi.fn().mockResolvedValue(undefined);
+
+  return { Queue: mockQueue, Worker: mockWorker };
 });
 
 const redisConn = { host: 'localhost', port: 6379 };

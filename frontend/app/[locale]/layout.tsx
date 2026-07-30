@@ -7,6 +7,7 @@ import { Providers } from '@/components/providers';
 import PWAWrapper from '@/components/PWAWrapper';
 import { OfflineProvider } from '@/components/offline/OfflineProvider';
 import { WebVitals } from '@/components/WebVitals';
+import { RouteTransitionMetrics } from '@/components/analytics/RouteTransitionMetrics';
 
 const APP_DOMAIN = process.env.NEXT_PUBLIC_API_URL || 'https://agenticpay.com';
 const CDN_DOMAIN = process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN || 'cdn.agenticpay.com';
@@ -79,6 +80,7 @@ export default async function LocaleLayout({ children, params }: Props) {
             <OfflineProvider>
               {children}
               <WebVitals />
+              <RouteTransitionMetrics />
             </OfflineProvider>
             <PWAWrapper />
           </Providers>
