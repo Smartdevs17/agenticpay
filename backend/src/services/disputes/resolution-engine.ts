@@ -68,6 +68,7 @@ export interface DisputeAnalyticsSummary {
   resolutionBreakdown: Record<ResolutionRecommendation, number>;
   slaBreachCount: number;
   averageResolutionHours: number;
+  averageEvidenceScore: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +178,11 @@ export function listDisputes(status?: DisputeStatus): DisputeRecord[] {
 }
 
 export function getEscalationQueue(): DisputeRecord[] {
-  return listDisputes('escalated');
+  return listDisputes('escalated').filter((d) => {
+    const result = d.mediationResult;
+    if (!result) return true;
+    return result.complexityScore >= 0.6 || result.escalatedToHuman;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +226,8 @@ export function getDisputeAnalytics(): DisputeAnalyticsSummary {
   let humanResolved = 0;
   let totalResolutionMs = 0;
   let resolvedCount = 0;
+  let totalEvidenceScore = 0;
+  let evidenceScoredCount = 0;
 
   for (const log of logs) {
     resolutionBreakdown[log.recommendation] = (resolutionBreakdown[log.recommendation] ?? 0) + 1;
@@ -231,6 +238,10 @@ export function getDisputeAnalytics(): DisputeAnalyticsSummary {
   }
 
   for (const d of allDisputes) {
+    if (d.mediationResult?.evidenceScore) {
+      totalEvidenceScore += d.mediationResult.evidenceScore.overall;
+      evidenceScoredCount++;
+    }
     if (d.resolution) {
       const ms =
         new Date(d.resolution.createdAt).getTime() - new Date(d.createdAt).getTime();
@@ -242,6 +253,7 @@ export function getDisputeAnalytics(): DisputeAnalyticsSummary {
   const slaBreachCount = checkSLABreaches().length;
   const avgHours =
     resolvedCount > 0 ? totalResolutionMs / resolvedCount / 3_600_000 : 0;
+  const avgEvidenceScore = evidenceScoredCount > 0 ? totalEvidenceScore / evidenceScoredCount : 0;
 
   return {
     total: allDisputes.length,
@@ -252,6 +264,7 @@ export function getDisputeAnalytics(): DisputeAnalyticsSummary {
     resolutionBreakdown,
     slaBreachCount,
     averageResolutionHours: avgHours,
+    averageEvidenceScore: avgEvidenceScore,
   };
 }
 

@@ -33,6 +33,33 @@ yarn-error.log*
 *.pem
 
 # AI
+# Test snapshots
+*.snap
+*.snap.new
+**/__snapshots__/
+**/snapshots/
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
+# Test artifacts & snapshots
+**/coverage/
+**/__snapshots__/
+**/*.snap
+**/test-results/
+**/playwright-report/
+**/blob-report/
+**/.playwright/
+**/playwright/.cache/
+
+# Security scan reports (generated — do not commit)
+security-reports/
+
+# Build & cache artefacts
+*.tsbuildinfo
+.turbo/
 # Tools
 .claude
 .kilocode/
@@ -45,8 +72,15 @@ trend-data.json
 # Generated code
 # Package dist
 packages/*/dist/
+
+# Generated code
 frontend/src/generated/
 packages/contracts/src/generated/
+node_modules/.cache/
+
+# Misc
+.claude
+test-write.txt
 
 # Test snapshots and artifacts
 **/__snapshots__/

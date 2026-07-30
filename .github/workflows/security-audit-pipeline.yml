@@ -1,0 +1,385 @@
+name: Security Audit Pipeline — SAST/DAST/Dependency Scanning
+
+on:
+  push:
+    branches: [main, master, develop, "feature/**"]
+  pull_request:
+    branches: [main, master, develop]
+  schedule:
+    # Run every Monday at 03:00 UTC
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: "Scan type to run"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - sast
+          - dast
+          - dependencies
+
+concurrency:
+  group: security-pipeline-${{ github.ref }}
+  cancel-in-progress: false   # never cancel security scans mid-run
+
+env:
+  SECURITY_REPORT_DIR: security-reports
+  NODE_VERSION: "20"
+
+# ── Permissions ────────────────────────────────────────────────────────────────
+
+permissions:
+  contents: read
+  security-events: write   # for SARIF uploads
+  pull-requests: write     # for PR comments
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 1 — SAST: ESLint Security Rules + Semgrep
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  sast:
+    name: SAST — Static Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'sast' || github.event_name != 'workflow_dispatch' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend deps
+        run: npm ci --prefix backend
+
+      - name: Install frontend deps
+        run: npm ci --prefix frontend
+
+      - name: Run backend ESLint (security rules)
+        continue-on-error: true
+        run: |
+          mkdir -p ${{ env.SECURITY_REPORT_DIR }}
+          cd backend
+          npx eslint src --format json \
+            --output-file ../${{ env.SECURITY_REPORT_DIR }}/eslint-backend.json \
+            || true
+
+      - name: Run frontend ESLint (security rules)
+        continue-on-error: true
+        run: |
+          cd frontend
+          npx eslint app components lib --format json \
+            --output-file ../${{ env.SECURITY_REPORT_DIR }}/eslint-frontend.json \
+            || true
+
+      - name: Run Semgrep SAST
+        uses: semgrep/semgrep-action@v1
+        continue-on-error: true
+        with:
+          config: >-
+            p/security-audit
+            p/typescript
+            p/nodejs
+            p/react
+          sarif_file: ${{ env.SECURITY_REPORT_DIR }}/semgrep.sarif
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ env.SECURITY_REPORT_DIR }}/semgrep.sarif
+          category: semgrep-sast
+        continue-on-error: true
+
+      - name: TypeScript type-check (backend)
+        continue-on-error: true
+        run: |
+          cd backend
+          npx tsc --noEmit 2>&1 | tee ../${{ env.SECURITY_REPORT_DIR }}/tsc-backend.txt || true
+
+      - name: TypeScript type-check (frontend)
+        continue-on-error: true
+        run: |
+          cd frontend
+          npx tsc --noEmit 2>&1 | tee ../${{ env.SECURITY_REPORT_DIR }}/tsc-frontend.txt || true
+
+      - name: Upload SAST artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-reports
+          path: ${{ env.SECURITY_REPORT_DIR }}/
+          retention-days: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 2 — Dependency scanning (npm audit + Snyk)
+# ─────────────────────────────────────────────────────────────────────────────
+
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'dependencies' || github.event_name != 'workflow_dispatch' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: npm audit — backend
+        id: audit_backend
+        continue-on-error: true
+        run: |
+          mkdir -p ${{ env.SECURITY_REPORT_DIR }}
+          cd backend
+          npm audit --json > ../${{ env.SECURITY_REPORT_DIR }}/npm-audit-backend.json 2>&1 || true
+          npm audit --audit-level=high 2>&1 | tee ../${{ env.SECURITY_REPORT_DIR }}/npm-audit-backend.txt || true
+
+      - name: npm audit — frontend
+        id: audit_frontend
+        continue-on-error: true
+        run: |
+          cd frontend
+          npm audit --json > ../${{ env.SECURITY_REPORT_DIR }}/npm-audit-frontend.json 2>&1 || true
+          npm audit --audit-level=high 2>&1 | tee ../${{ env.SECURITY_REPORT_DIR }}/npm-audit-frontend.txt || true
+
+      - name: Snyk dependency scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: >-
+            --all-projects
+            --severity-threshold=high
+            --sarif-file-output=${{ env.SECURITY_REPORT_DIR }}/snyk.sarif
+
+      - name: Upload Snyk SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ env.SECURITY_REPORT_DIR }}/snyk.sarif
+          category: snyk-dependencies
+        continue-on-error: true
+
+      - name: Cargo audit (Rust/Soroban contracts)
+        continue-on-error: true
+        run: |
+          if command -v cargo &> /dev/null; then
+            cargo install cargo-audit --quiet 2>/dev/null || true
+            cd contracts
+            cargo audit --json > ../${{ env.SECURITY_REPORT_DIR }}/cargo-audit.json 2>&1 || true
+          else
+            echo "cargo not available — skipping"
+          fi
+
+      - name: Summarise dependency audit
+        if: always()
+        run: |
+          echo "## 📦 Dependency Audit Summary" >> $GITHUB_STEP_SUMMARY
+          for f in ${{ env.SECURITY_REPORT_DIR }}/npm-audit-backend.txt ${{ env.SECURITY_REPORT_DIR }}/npm-audit-frontend.txt; do
+            if [ -f "$f" ]; then
+              echo "### $(basename $f)" >> $GITHUB_STEP_SUMMARY
+              cat "$f" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+      - name: Upload dependency scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-scan-reports
+          path: ${{ env.SECURITY_REPORT_DIR }}/
+          retention-days: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 3 — DAST: OWASP ZAP baseline scan
+# ─────────────────────────────────────────────────────────────────────────────
+
+  dast:
+    name: DAST — Dynamic Application Security Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Only run DAST on push/schedule/manual (requires a running application)
+    if: >-
+      ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        && (github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'dast' || github.event_name != 'workflow_dispatch') }}
+    services:
+      backend:
+        image: node:20-alpine
+        ports:
+          - 3001:3001
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install and start backend
+        run: |
+          cd backend
+          npm ci
+          NODE_ENV=test JOBS_ENABLED=false npm start &
+          # Wait for backend to be ready
+          timeout 60 bash -c 'until curl -s http://localhost:3001/api/v1/health; do sleep 2; done'
+        env:
+          PORT: 3001
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-placeholder' }}
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.10.0
+        continue-on-error: true
+        with:
+          target: "http://localhost:3001"
+          rules_file_name: ".zap/rules.tsv"
+          cmd_options: "-a"
+          artifact_name: zap-baseline-report
+
+      - name: Upload DAST artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dast-reports
+          path: |
+            report_html.html
+            report_md.md
+            report_json.json
+          retention-days: 30
+        continue-on-error: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 4 — Smart contract security (Slither)
+# ─────────────────────────────────────────────────────────────────────────────
+
+  smart-contract-scan:
+    name: Smart Contract Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: >-
+      ${{ github.event.inputs.scan_type == 'all' || github.event_name != 'workflow_dispatch' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect contract changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            solidity:
+              - 'contracts/**/*.sol'
+            rust:
+              - 'contracts/soroban/**'
+              - 'contracts/src/**/*.rs'
+
+      - name: Setup Python for Slither
+        if: steps.changes.outputs.solidity == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Slither
+        if: steps.changes.outputs.solidity == 'true'
+        run: pip install slither-analyzer
+
+      - name: Run Slither on Solidity contracts
+        if: steps.changes.outputs.solidity == 'true'
+        continue-on-error: true
+        run: |
+          mkdir -p ${{ env.SECURITY_REPORT_DIR }}
+          slither contracts/ \
+            --json ${{ env.SECURITY_REPORT_DIR }}/slither.json \
+            --exclude-dependencies \
+            --exclude-low \
+            2>&1 | tee ${{ env.SECURITY_REPORT_DIR }}/slither.txt || true
+
+      - name: Cargo audit for Soroban
+        if: steps.changes.outputs.rust == 'true'
+        continue-on-error: true
+        run: |
+          if command -v cargo &> /dev/null; then
+            cargo install cargo-audit --quiet 2>/dev/null || true
+            cargo audit --json > ${{ env.SECURITY_REPORT_DIR }}/cargo-soroban-audit.json 2>&1 || true
+          fi
+
+      - name: Upload contract scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-contract-reports
+          path: ${{ env.SECURITY_REPORT_DIR }}/
+          retention-days: 30
+        continue-on-error: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 5 — Aggregate & report
+# ─────────────────────────────────────────────────────────────────────────────
+
+  report:
+    name: Aggregate Security Report
+    runs-on: ubuntu-latest
+    needs: [sast, dependency-scan]
+    if: always()
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-reports
+        continue-on-error: true
+
+      - name: Generate summary
+        run: |
+          echo "# 🔒 Security Audit Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| SAST | ${{ needs.sast.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Scan | ${{ needs.dependency-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Full reports available as workflow artifacts." >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: [
+                '## 🔒 Security Scan Results',
+                '',
+                '| Scan | Result |',
+                '|------|--------|',
+                `| SAST | ${{ needs.sast.result }} |`,
+                `| Dependencies | ${{ needs.dependency-scan.result }} |`,
+                '',
+                'Download the detailed reports from the workflow artifacts.',
+              ].join('\n')
+            })
+        continue-on-error: true

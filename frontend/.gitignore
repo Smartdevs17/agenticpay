@@ -12,6 +12,13 @@
 
 # testing
 /coverage
+/__snapshots__/
+*.snap
+/test-results/
+/playwright-report/
+/blob-report/
+/.playwright/
+/playwright/.cache/
 **/__snapshots__/
 /e2e/__snapshots__/
 
@@ -42,6 +49,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# storybook
+storybook-static/
 # playwright
 /playwright-report
 /blob-report
