@@ -82,6 +82,7 @@ import { paymentLinksRouter } from './routes/payment-links.js';
 import { paymentStrategiesRouter } from './routes/payment-strategies.js';
 import { taxRouter } from './routes/tax.js';
 import { projectsRouter } from './routes/projects.js';
+import { projectArchivalRouter } from './routes/project-archival.js';
 import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
 import { fraudDetectionRouter } from './routes/fraud-detection.js';
 import { bridgeRouter } from './routes/bridge.js';
@@ -332,6 +333,7 @@ apiV1Router.use('/emails', emailRouter);
 apiV1Router.use('/portfolio', portfolioRouter);
 apiV1Router.use('/backup', backupRouter);
 apiV1Router.use('/archival', archivalRouter);
+apiV1Router.use('/project-archival', projectArchivalRouter);
 apiV1Router.use('/admin/contracts/upgrade', upgradeValidatorRouter);
 apiV1Router.use('/bridge/monitor', bridgeMonitorRouter);
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
@@ -431,6 +433,9 @@ app.use('/api/v1/exports', streamingExportRouter);
 
 // Project + milestone delivery approval workflow
 app.use('/api/v1/projects', projectsRouter);
+
+// Automated project archival + data retention
+app.use('/api/v1/project-archival', projectArchivalRouter);
 
 // Payment categories — Issue #251
 app.use('/api/v1/categories', categoriesRouter);

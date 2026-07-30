@@ -185,6 +185,26 @@ export class ProjectsService {
     return project;
   }
 
+  /** Reverse an archival, returning the project to its pre-archive status. */
+  restoreProject(projectId: string, previousStatus: ProjectStatus = 'active'): ProjectRecord | undefined {
+    const project = this.projects.get(projectId);
+    if (!project) return undefined;
+
+    project.status = previousStatus === 'archived' ? 'active' : previousStatus;
+    project.archivedAt = null;
+    project.updatedAt = this.nowIso();
+    this.projects.set(projectId, project);
+    return project;
+  }
+
+  /** Permanently drop a project and its milestones once retention has elapsed. */
+  purgeProject(projectId: string): boolean {
+    const existed = this.projects.delete(projectId);
+    this.milestones.delete(projectId);
+    this.releases = this.releases.filter((release) => release.projectId !== projectId);
+    return existed;
+  }
+
   markAbandoned(projectId: string): ProjectRecord | undefined {
     const project = this.projects.get(projectId);
     if (!project) return undefined;

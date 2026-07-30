@@ -24,6 +24,7 @@ import { getArchivalService } from '../services/archival/index.js';
 import { getBridgeMonitorService } from '../services/bridge-monitor/bridge-monitor.js';
 import { runScheduledReconciliation } from '../services/payment-reconciliation/index.js';
 import { runEscalationEvaluation } from '../jobs/escalation.job.js';
+import { runProjectArchivalSweep } from '../services/project-archival/index.js';
 import { ethers } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -244,6 +245,19 @@ const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: strin
       if (deleted.count > 0) {
         console.log(`[archival] Purged ${deleted.count} expired batch(es)`);
       }
+    },
+  },
+  {
+    id: 'project-archival-sweep',
+    name: 'Automated Project Archival',
+    description:
+      'Archives projects that have exceeded their retention policy window, warns about upcoming purges, and purges archives past retention.',
+    defaultSchedule: '0 4 * * *',
+    timezone: 'UTC',
+    timeoutMs: 10 * 60 * 1000,
+    priority: 'normal',
+    handler: () => {
+      runProjectArchivalSweep();
     },
   },
   {
