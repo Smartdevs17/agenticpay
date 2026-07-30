@@ -145,6 +145,8 @@ import { reorgRouter } from './routes/reorg.js';
 import { getReorgDetector } from './services/chain/reorg-detector.js';
 import { workspacesRouter } from './routes/workspaces.js';
 import { refundsEnhancedRouter } from './routes/refunds-enhanced.js';
+import { refundsAutomatedRouter } from './routes/refunds-automated.js';
+import { refundQueue } from './queue/refund-queue.js';
 import { databaseRouter } from './routes/database.js';
 
 // TSOA Controllers for OpenAPI generation
@@ -469,6 +471,12 @@ app.use('/api/v1/workspaces', workspacesRouter);
 
 // Enhanced refund processing with policy engine and multi-level approval
 app.use('/api/v1/refunds-enhanced', refundsEnhancedRouter);
+
+// Automated refund processing with policy engine, queue, notifications, and analytics (Issue #642)
+app.use('/api/v1/refunds-automated', refundsAutomatedRouter);
+
+// Start the refund background queue processor
+refundQueue.start();
 
 // Database connection pool and performance monitoring
 app.use('/api/v1/monitoring/pool', poolMonitorRouter);
