@@ -162,8 +162,48 @@ export function compressionMiddleware(config?: Partial<CompressionConfig>) {
   };
 }
 
+interface CompressionMetrics {
+  totalRequests: number;
+  compressedRequests: number;
+  totalOriginalSize: number;
+  totalCompressedSize: number;
+  compressionRatio: number;
+  brotliRequests: number;
+  gzipRequests: number;
+  averageCompressionTimeMs: number;
+}
+
+const metrics: CompressionMetrics = {
+  totalRequests: 0,
+  compressedRequests: 0,
+  totalOriginalSize: 0,
+  totalCompressedSize: 0,
+  compressionRatio: 1,
+  brotliRequests: 0,
+  gzipRequests: 0,
+  averageCompressionTimeMs: 0,
+};
+
+const compressionTimes: number[] = [];
+
+export function recordCompressionMetric(originalSize: number, compressedSize: number, encoding: string, timeMs: number): void {
+  metrics.totalRequests++;
+  if (compressedSize < originalSize) {
+    metrics.compressedRequests++;
+    metrics.totalOriginalSize += originalSize;
+    metrics.totalCompressedSize += compressedSize;
+    if (encoding === 'br') metrics.brotliRequests++;
+    else if (encoding === 'gzip') metrics.gzipRequests++;
+  }
+  compressionTimes.push(timeMs);
+  if (compressionTimes.length > 1000) compressionTimes.shift();
+  metrics.compressionRatio = metrics.totalOriginalSize > 0 ? (1 - metrics.totalCompressedSize / metrics.totalOriginalSize) * 100 : 0;
+  metrics.averageCompressionTimeMs = compressionTimes.reduce((a, b) => a + b, 0) / compressionTimes.length || 0;
+}
+
 export function getCompressionMetrics() {
   return {
     activeEndpoints: Array.from(configs.keys()),
+    ...metrics,
   };
 }

@@ -179,6 +179,8 @@ model Payment {
   @@index([txHash])
   @@index([projectId])
   @@index([providerId])
+  @@index([toAddress, status])
+  @@index([createdAt, status])
   @@map("payments")
 }
 
@@ -240,12 +242,21 @@ model Invoice {
   updatedAt     DateTime      @updatedAt @map("updated_at")
   deletedAt     DateTime?     @map("deleted_at")
 
+  // Multi-currency FX (Issue #626) — `amount`/`currency` above stay the
+  // merchant's settlement currency; these track the customer-facing
+  // presentment currency and the rate locked at generation/payment time.
+  presentmentCurrency String?   @map("presentment_currency")
+  presentmentAmount   Decimal?  @map("presentment_amount") @db.Decimal(20, 8)
+  fxRate              Decimal?  @map("fx_rate") @db.Decimal(24, 10)
+  fxRateLockedAt      DateTime? @map("fx_rate_locked_at")
+
   project   Project    @relation(fields: [projectId], references: [id])
   milestone Milestone? @relation(fields: [milestoneId], references: [id])
 
   @@index([tenantId, generatedAt])
   @@index([projectId])
   @@index([status])
+  @@index([projectId, createdAt])
   @@map("invoices")
 }
 
@@ -341,6 +352,45 @@ model OutboxEvent {
   @@index([eventType])
   @@index([publishedAt])
   @@map("outbox_events")
+}
+
+// ─── Event Sourcing Models ─────────────────────────────────────────────────────
+
+model EventStore {
+  id            String   @id @default(uuid())
+  streamId      String   @map("stream_id")
+  eventType     String   @map("event_type")
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  version       Int
+  payload       Json
+  metadata      Json?
+  occurredAt    DateTime @map("occurred_at")
+  sequenceNumber BigInt  @map("sequence_number")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([streamId, version])
+  @@index([streamId])
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+  @@index([sequenceNumber])
+  @@index([occurredAt])
+  @@map("event_store")
+}
+
+model EventSnapshot {
+  id            String   @id @default(uuid())
+  streamId      String   @map("stream_id")
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  version       Int
+  state         Json
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([streamId])
+  @@index([aggregateType, aggregateId])
+  @@index([version])
+  @@map("event_snapshots")
 }
 
 model Plugin {
@@ -2508,6 +2558,7 @@ model Refund {
   @@index([paymentId])
   @@index([status])
   @@index([stripeRefundId])
+  @@index([paymentId, createdAt])
   @@map("refunds")
 }
 
@@ -2593,5 +2644,451 @@ model TransactionReorg {
   @@index([status])
   @@index([network, createdAt])
   @@map("transaction_reorgs")
+}
+
+// ─── Issue #633: Payment Method Micro-Deposit Verification ────────────────────
+
+enum PaymentMethodVerificationStatus {
+  pending
+  verified
+  failed
+  locked
+}
+
+model PaymentMethod {
+  id                    String                           @id @default(uuid())
+  tenantId              String                           @map("tenant_id")
+  userId                String                           @map("user_id")
+  type                  String                           @default("bank_account")
+  last4                 String?                          @map("last4")
+  status                PaymentMethodVerificationStatus  @default(pending)
+  depositAmount1Cents   Int?                              @map("deposit_amount1_cents")
+  depositAmount2Cents   Int?                              @map("deposit_amount2_cents")
+  verificationAttempts  Int                               @default(0) @map("verification_attempts")
+  maxVerificationAttempts Int                             @default(5) @map("max_verification_attempts")
+  depositsIssuedAt      DateTime?                         @map("deposits_issued_at")
+  verifiedAt            DateTime?                         @map("verified_at")
+  createdAt             DateTime                          @default(now()) @map("created_at")
+  updatedAt             DateTime                          @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([status])
+  @@map("payment_methods")
+}
+
+// ─── Issue #632: Role-Based Onboarding Checklist ───────────────────────────────
+
+model OnboardingChecklist {
+  id                String        @id @default(uuid())
+  tenantId          String        @map("tenant_id")
+  userId            String        @map("user_id")
+  role              WorkspaceRole @default(member)
+  tasks             Json          // ordered list of { id, title, completed, completedAt }
+  completionPercent Int           @default(0) @map("completion_percent")
+  completedAt       DateTime?     @map("completed_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("onboarding_checklists")
+}
+
+// ─── Payment reconciliation (Issue #628) ──────────────────────────────────────
+// Note: distinct from the on-chain balance reconciliation feature (Issue
+// #465, `services/reconciliation/`) — this is payment-matching against
+// external bank/PSP statement records, named `payment-reconciliation`
+// throughout to avoid colliding with that unrelated feature.
+
+enum ReconciliationBatchStatus {
+  pending
+  running
+  completed
+  completed_with_exceptions
+  failed
+}
+
+enum ReconciliationRecordSource {
+  internal
+  bank_statement
+  psp_settlement
+  onchain
+}
+
+enum ReconciliationMatchType {
+  exact
+  fuzzy
+  manual
+}
+
+enum ReconciliationExceptionStatus {
+  open
+  investigating
+  resolved
+  written_off
+}
+
+model ReconciliationBatch {
+  id              String                    @id @default(uuid())
+  tenantId        String                    @map("tenant_id")
+  periodStart     DateTime                  @map("period_start")
+  periodEnd       DateTime                  @map("period_end")
+  status          ReconciliationBatchStatus @default(pending)
+  totalRecords    Int                       @default(0) @map("total_records")
+  matchedCount    Int                       @default(0) @map("matched_count")
+  exceptionCount  Int                       @default(0) @map("exception_count")
+  matchedAmount   Decimal                   @default(0) @map("matched_amount") @db.Decimal(20, 8)
+  unmatchedAmount Decimal                   @default(0) @map("unmatched_amount") @db.Decimal(20, 8)
+  startedAt       DateTime?                 @map("started_at")
+  completedAt     DateTime?                 @map("completed_at")
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  updatedAt       DateTime                  @updatedAt @map("updated_at")
+
+  records    ReconciliationRecord[]
+  matches    ReconciliationMatch[]
+  exceptions ReconciliationException[]
+
+  @@index([tenantId, periodStart])
+  @@index([status])
+  @@map("reconciliation_batches")
+}
+
+model ReconciliationRecord {
+  id          String                     @id @default(uuid())
+  batchId     String                     @map("batch_id")
+  tenantId    String                     @map("tenant_id")
+  source      ReconciliationRecordSource
+  externalRef String?                    @map("external_ref")
+  paymentId   String?                    @map("payment_id")
+  amount      Decimal                    @db.Decimal(20, 8)
+  currency    String
+  occurredAt  DateTime                   @map("occurred_at")
+  matched     Boolean                    @default(false)
+  metadata    Json?
+  createdAt   DateTime                   @default(now()) @map("created_at")
+
+  batch ReconciliationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([tenantId, occurredAt])
+  @@index([paymentId])
+  @@map("reconciliation_records")
+}
+
+model ReconciliationMatch {
+  id               String                  @id @default(uuid())
+  batchId          String                  @map("batch_id")
+  internalRecordId String                  @map("internal_record_id")
+  externalRecordId String                  @map("external_record_id")
+  matchType        ReconciliationMatchType @default(exact)
+  confidence       Decimal                 @default(1) @db.Decimal(5, 4)
+  amountDelta      Decimal                 @default(0) @map("amount_delta") @db.Decimal(20, 8)
+  createdAt        DateTime                @default(now()) @map("created_at")
+
+  batch ReconciliationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@map("reconciliation_matches")
+}
+
+model ReconciliationException {
+  id             String                        @id @default(uuid())
+  batchId        String                        @map("batch_id")
+  tenantId       String                        @map("tenant_id")
+  recordId       String?                       @map("record_id")
+  reason         String
+  status         ReconciliationExceptionStatus @default(open)
+  amount         Decimal                       @db.Decimal(20, 8)
+  currency       String
+  assignedTo     String?                       @map("assigned_to")
+  resolutionNote String?                       @map("resolution_note")
+  resolvedAt     DateTime?                     @map("resolved_at")
+  createdAt      DateTime                      @default(now()) @map("created_at")
+  updatedAt      DateTime                      @updatedAt @map("updated_at")
+
+  batch ReconciliationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([tenantId, status])
+  @@map("reconciliation_exceptions")
+}
+
+// ─── Jurisdiction-aware tax engine (Issue #627) ───────────────────────────────
+
+enum TaxRuleType {
+  vat
+  gst
+  sales_tax
+  withholding
+}
+
+model TaxJurisdictionRule {
+  id            String      @id @default(uuid())
+  jurisdiction  String
+  name          String
+  ruleType      TaxRuleType @map("rule_type")
+  rate          Decimal     @db.Decimal(7, 6)
+  appliesAbove  Decimal?    @map("applies_above") @db.Decimal(20, 8)
+  active        Boolean     @default(true)
+  effectiveFrom DateTime    @map("effective_from")
+  effectiveTo   DateTime?   @map("effective_to")
+  metadata      Json?
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  @@index([jurisdiction, active])
+  @@map("tax_jurisdiction_rules")
+}
+
+model TaxExemption {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  merchantId    String    @map("merchant_id")
+  jurisdiction  String
+  certificateId String?   @map("certificate_id")
+  reason        String
+  validFrom     DateTime  @map("valid_from")
+  validTo       DateTime? @map("valid_to")
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId, merchantId, jurisdiction])
+  @@map("tax_exemptions")
+}
+
+model TaxCalculationAuditLog {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  merchantId    String   @map("merchant_id")
+  paymentId     String?  @map("payment_id")
+  jurisdiction  String
+  taxableAmount Decimal  @map("taxable_amount") @db.Decimal(20, 8)
+  taxAmount     Decimal  @map("tax_amount") @db.Decimal(20, 8)
+  rate          Decimal  @db.Decimal(7, 6)
+  ruleId        String?  @map("rule_id")
+  exemptionId   String?  @map("exemption_id")
+  exempt        Boolean  @default(false)
+  currency      String
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, merchantId, createdAt])
+  @@index([paymentId])
+  @@map("tax_calculation_audit_logs")
+}
+
+// ─── Multi-currency FX conversion (Issue #626) ────────────────────────────────
+
+model FxRate {
+  id            String   @id @default(uuid())
+  baseCurrency  String   @map("base_currency")
+  quoteCurrency String   @map("quote_currency")
+  rate          Decimal  @db.Decimal(24, 10)
+  source        String   @default("manual")
+  fetchedAt     DateTime @default(now()) @map("fetched_at")
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([baseCurrency, quoteCurrency, expiresAt])
+  @@index([baseCurrency, quoteCurrency, fetchedAt])
+  @@map("fx_rates")
+}
+
+model FxRateAlert {
+  id                String    @id @default(uuid())
+  tenantId          String    @map("tenant_id")
+  baseCurrency      String    @map("base_currency")
+  quoteCurrency     String    @map("quote_currency")
+  thresholdPct      Decimal   @map("threshold_pct") @db.Decimal(6, 4)
+  direction         String    @default("both")
+  active            Boolean   @default(true)
+  lastTriggeredAt   DateTime? @map("last_triggered_at")
+  lastTriggeredRate Decimal?  @map("last_triggered_rate") @db.Decimal(24, 10)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId, baseCurrency, quoteCurrency])
+  @@map("fx_rate_alerts")
+}
+
+// ─── Automated Escalation & SLA Tracking — Issue #646 ─────────────────────────
+
+enum IssueType {
+  dispute
+  payment_discrepancy
+  fraud_alert
+  compliance_review
+  support_ticket
+  account_issue
+  system_incident
+}
+
+enum IssueSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum EscalationLevel {
+  level_1
+  level_2
+  level_3
+  management
+}
+
+enum SLAStatus {
+  compliant
+  at_risk
+  breached
+  resolved
+}
+
+model EscalationRule {
+  id                String          @id @default(uuid())
+  tenantId          String          @map("tenant_id")
+  name              String
+  description       String?
+  issueType         IssueType       @map("issue_type")
+  severity          IssueSeverity   @default(medium)
+  isActive          Boolean         @default(true) @map("is_active")
+  priority          Int             @default(0)
+  // Escalation conditions
+  responseTimeMins  Int             @map("response_time_mins")
+  resolutionTimeMins Int            @map("resolution_time_mins")
+  // Escalation chain: JSON array of EscalationLevel enums
+  escalationChain   Json            @map("escalation_chain")
+  // Notification targets per level
+  notifyChannels    Json            @map("notify_channels")
+  notifyRoles       String[]        @map("notify_roles")
+  // Auto-escalate when SLA breached
+  autoEscalate      Boolean         @default(true) @map("auto_escalate")
+  // Cool-down period in minutes before next escalation
+  cooldownMins      Int             @default(60) @map("cooldown_mins")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  deletedAt         DateTime?       @map("deleted_at")
+
+  slaConfigs        IssueSLA[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, issueType])
+  @@index([isActive])
+  @@map("escalation_rules")
+}
+
+model IssueSLA {
+  id                  String        @id @default(uuid())
+  tenantId            String        @map("tenant_id")
+  escalationRuleId    String?       @map("escalation_rule_id")
+  issueType           IssueType     @map("issue_type")
+  severity            IssueSeverity @default(medium)
+  name                String
+  description         String?
+  isActive            Boolean       @default(true) @map("is_active")
+  // SLA targets in minutes
+  responseTimeMins    Int           @map("response_time_mins")
+  resolutionTimeMins  Int           @map("resolution_time_mins")
+  // Warning threshold as percentage of target (e.g., 80 = warn at 80% of deadline)
+  warningThresholdPct Int           @default(80) @map("warning_threshold_pct")
+  // Business hours only flag
+  businessHoursOnly   Boolean       @default(false) @map("business_hours_only")
+  timezone            String        @default("UTC")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+  deletedAt           DateTime?     @map("deleted_at")
+
+  rule              EscalationRule? @relation(fields: [escalationRuleId], references: [id])
+  breaches          SLABreach[]
+
+  @@unique([tenantId, issueType, severity])
+  @@index([tenantId, issueType])
+  @@index([isActive])
+  @@map("issue_slas")
+}
+
+model EscalationEvent {
+  id              String          @id @default(uuid())
+  tenantId        String          @map("tenant_id")
+  ruleId          String?         @map("rule_id")
+  issueId         String          @map("issue_id")
+  issueType       IssueType       @map("issue_type")
+  severity        IssueSeverity   @default(medium)
+  fromLevel       EscalationLevel @map("from_level")
+  toLevel         EscalationLevel @map("to_level")
+  reason          String
+  triggeredBy     String?         @map("triggered_by")
+  notifiedAt      DateTime?       @map("notified_at")
+  acknowledgedAt  DateTime?       @map("acknowledged_at")
+  acknowledgedBy  String?         @map("acknowledged_by")
+  metadata        Json?
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  rule EscalationRule? @relation(fields: [ruleId], references: [id])
+
+  @@index([tenantId, issueId])
+  @@index([tenantId, issueType, createdAt])
+  @@index([createdAt])
+  @@map("escalation_events")
+}
+
+model SLABreach {
+  id              String        @id @default(uuid())
+  tenantId        String        @map("tenant_id")
+  slaId           String?       @map("sla_id")
+  issueId         String        @map("issue_id")
+  issueType       IssueType     @map("issue_type")
+  severity        IssueSeverity @default(medium)
+  breachType      String        @map("breach_type")
+  // The SLA target in minutes
+  targetMins      Int           @map("target_mins")
+  // Actual time taken in minutes
+  actualMins      Int           @map("actual_mins")
+  status          SLAStatus     @default(breached)
+  notifiedAt      DateTime?     @map("notified_at")
+  resolvedAt      DateTime?     @map("resolved_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  sla IssueSLA? @relation(fields: [slaId], references: [id])
+
+  @@index([tenantId, issueId])
+  @@index([tenantId, issueType, createdAt])
+  @@index([status])
+  @@index([createdAt])
+  @@map("sla_breaches")
+}
+
+model EscalationAnalytics {
+  id                  String    @id @default(uuid())
+  tenantId            String    @map("tenant_id")
+  issueType           IssueType @map("issue_type")
+  severity            IssueSeverity @default(medium)
+  period              String    @default("daily")
+  periodStart         DateTime  @map("period_start")
+  periodEnd           DateTime  @map("period_end")
+  // Counts
+  totalIssues         Int       @default(0) @map("total_issues")
+  escalatedCount      Int       @default(0) @map("escalated_count")
+  slaBreachCount      Int       @default(0) @map("sla_breach_count")
+  resolvedCount       Int       @default(0) @map("resolved_count")
+  // Timing averages in minutes
+  avgResponseTime     Float     @default(0) @map("avg_response_time")
+  avgResolutionTime   Float     @default(0) @map("avg_resolution_time")
+  avgEscalationTime   Float     @default(0) @map("avg_escalation_time")
+  // Compliance
+  slaCompliancePct    Float     @default(100) @map("sla_compliance_pct")
+  // Current open counts
+  openCount           Int       @default(0) @map("open_count")
+  atRiskCount         Int       @default(0) @map("at_risk_count")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tenantId, issueType, severity, period, periodStart])
+  @@index([tenantId, periodStart])
+  @@index([tenantId, issueType])
+  @@map("escalation_analytics")
 }
 

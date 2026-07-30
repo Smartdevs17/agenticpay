@@ -26,11 +26,14 @@ out/
 *.log
 npm-debug.log*
 lighthouse/
+yarn-debug.log*
+yarn-error.log*
 
 # Keys
 *.pem
 
 # AI
+# Tools
 .claude
 .kilocode/
 
@@ -40,6 +43,7 @@ bundle-reports/
 trend-data.json
 
 # Generated code
+# Package dist
 packages/*/dist/
 frontend/src/generated/
 packages/contracts/src/generated/
@@ -62,3 +66,29 @@ docker-compose.override.yml
 # Misc
 test-write.txt
 AGENTS.md
+# Test snapshots & output
+**/__snapshots__/
+**/e2e/__snapshots__/
+frontend/e2e/__snapshots__/
+output.txt
+**/output.txt
+frontend/components/layout/output.txt
+frontend/app/output.txt
+
+# Turbo
+.turbo/cookies/
+.turbo/daemon/
+
+# TypeScript
+*.tsbuildinfo
+
+# Playwright / test results
+/playwright-report
+/blob-report
+/test-results
+/.playwright
+/playwright/.cache
+/coverage
+
+# Misc
+test-write.txt

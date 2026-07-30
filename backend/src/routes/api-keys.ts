@@ -65,6 +65,15 @@ apiKeysRouter.get('/:keyId/usage', asyncHandler(async (req, res) => {
   res.json(summary);
 }));
 
+apiKeysRouter.get('/:keyId/usage/daily', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  const days = Math.min(Math.max(parseInt(req.query.days as string) || 7, 1), 90);
+  const daily = await quotaManagerService.getDailyUsage(req.params.keyId as string, days);
+  res.json({ keyId: req.params.keyId, days, daily });
+}));
+
 apiKeysRouter.put('/:keyId/quota', asyncHandler(async (req, res) => {
   const tenantId = resolveTenant(req);
   const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });

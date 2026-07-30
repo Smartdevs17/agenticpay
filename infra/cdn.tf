@@ -35,6 +35,28 @@ variable "origin_shield_region" {
 
 # ─── Cache policies ───────────────────────────────────────────────────────────
 
+resource "aws_cloudfront_cache_policy" "static_assets" {
+  name        = "agenticpay-${var.environment}-static-assets"
+  comment     = "Static frontend assets: 1 year TTL, immutable"
+  default_ttl = 86400
+  max_ttl     = 31536000
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+  }
+}
+
 resource "aws_cloudfront_cache_policy" "static_data" {
   name        = "agenticpay-${var.environment}-static-data"
   comment     = "Static API data: 5 min TTL (config, metadata)"
@@ -185,6 +207,37 @@ resource "aws_cloudfront_distribution" "api" {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.auth_hash.arn
     }
+  }
+
+  # ── Static assets (_next/static, fonts, images) ──────────────────────────
+  ordered_cache_behavior {
+    path_pattern           = "/_next/static/*"
+    target_origin_id       = "agenticpay-api-origin"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = aws_cloudfront_cache_policy.static_assets.id
+    compress               = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern           = "/fonts/*"
+    target_origin_id       = "agenticpay-api-origin"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = aws_cloudfront_cache_policy.static_assets.id
+    compress               = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern           = "/images/*"
+    target_origin_id       = "agenticpay-api-origin"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = aws_cloudfront_cache_policy.static_assets.id
+    compress               = true
   }
 
   # ── Static / public API data (GET /api/v1/config, /api/v1/currencies …) ──

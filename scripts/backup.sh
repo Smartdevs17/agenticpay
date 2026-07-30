@@ -39,13 +39,38 @@ notify_slack() {
 verify_backup_integrity() {
     local file="$1"
     log "Verifying backup integrity: $file"
-    if gunzip -t "$file" 2>/dev/null; then
-        log "Integrity check passed: $file"
-        return 0
-    else
-        log "ERROR: Integrity check failed: $file"
+
+    if ! gunzip -t "$file" 2>/dev/null; then
+        log "ERROR: Integrity check failed (corrupt gzip): $file"
         return 1
     fi
+
+    local checksum_file="${file}.sha256"
+    if [ ! -f "$checksum_file" ]; then
+        log "ERROR: Missing checksum file: $checksum_file"
+        return 1
+    fi
+
+    # The stored checksum file is `sha256sum`-format ("<digest>  <path>").
+    # Recompute the digest for the current file and compare, rather than
+    # trusting `sha256sum -c` to resolve the original recorded path.
+    local expected_checksum
+    expected_checksum=$(awk '{print $1}' "$checksum_file")
+    local actual_checksum
+    actual_checksum=$(sha256sum "$file" | awk '{print $1}')
+
+    if [ -z "$expected_checksum" ]; then
+        log "ERROR: Checksum file is empty or malformed: $checksum_file"
+        return 1
+    fi
+
+    if [ "$expected_checksum" != "$actual_checksum" ]; then
+        log "ERROR: Checksum mismatch for $file (expected $expected_checksum, got $actual_checksum)"
+        return 1
+    fi
+
+    log "Integrity check passed (gzip + checksum): $file"
+    return 0
 }
 
 do_full_backup() {

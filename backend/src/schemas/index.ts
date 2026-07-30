@@ -206,6 +206,83 @@ export const refundEvaluationSchema = z.object({
   hasDispute: z.boolean().default(false),
 });
 
+// ── Automated Refund Schemas (Issue #642) ────────────────────────────────────
+
+export const policyRuleSchema = z.object({
+  field: z.enum([
+    'amount_paid', 'requested_amount', 'days_since_payment', 'payment_type',
+    'customer_tier', 'customer_total_spent', 'previous_refund_count',
+    'previous_refund_amount', 'has_chargeback', 'has_dispute',
+    'has_reason', 'reason', 'currency',
+  ]),
+  operator: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'not_in', 'contains']),
+  value: z.unknown(),
+  outcome: z.enum(['approve', 'reject', 'manual_review']),
+  priority: z.number().int().min(0).default(0),
+});
+
+export const refundEnginePolicySchema = z.object({
+  workspaceId: z.string().min(1),
+  name: z.string().min(1).max(100),
+  fullRefundWindowDays: z.number().int().min(0).default(30),
+  autoApprovalThreshold: z.number().nonnegative().default(100),
+  alwaysRefundUnderAmount: z.number().nonnegative().default(25),
+  maxPartialRefundPct: z.number().min(0).max(100).default(100),
+  requireReason: z.boolean().default(true),
+  firstApprovalThreshold: z.number().nonnegative().default(500),
+  secondApprovalThreshold: z.number().nonnegative().default(5000),
+  rules: z.array(policyRuleSchema).default([]),
+  isActive: z.boolean().default(true),
+});
+
+export const refundEngineEvaluationSchema = z.object({
+  workspaceId: z.string().min(1),
+  paymentId: z.string().min(1),
+  paymentType: z.enum(['card', 'crypto', 'bank_transfer']),
+  amountPaid: z.number().positive(),
+  requestedAmount: z.number().positive(),
+  currency: z.string().default('USD'),
+  daysSincePayment: z.number().int().min(0),
+  reason: z.string().optional(),
+  hasChargeback: z.boolean().default(false),
+  hasDispute: z.boolean().default(false),
+  customerTier: z.enum(['basic', 'premium', 'enterprise']).optional(),
+  customerTotalSpent: z.number().nonnegative().optional(),
+  previousRefundCount: z.number().int().min(0).optional(),
+  previousRefundAmount: z.number().nonnegative().optional(),
+  lineItems: z.array(z.object({
+    label: z.string().min(1),
+    amount: z.number().nonnegative(),
+    quantity: z.number().int().min(1).default(1),
+    reason: z.string().optional(),
+  })).optional(),
+});
+
+export const refundApprovalSchema = z.object({
+  level: z.enum(['first', 'second', 'third']),
+  comment: z.string().optional(),
+});
+
+export const refundCancelSchema = z.object({
+  reason: z.string().optional(),
+});
+
+export const refundAnalyticsQuerySchema = z.object({
+  fromDate: z.string().optional(),
+  toDate: z.string().optional(),
+  granularity: z.enum(['day', 'week', 'month']).default('day'),
+});
+
+export const refundWebhookSubscribeSchema = z.object({
+  url: z.string().url(),
+  events: z.array(z.string()).min(1),
+  secret: z.string().optional(),
+});
+
+export const retryRefundSchema = z.object({
+  refundId: z.string().min(1),
+});
+
 // Multisig Wallet Schemas
 export const createMultisigGroupSchema = z.object({
   name: z.string().min(1, 'Wallet name is required').max(100),

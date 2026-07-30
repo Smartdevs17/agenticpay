@@ -1,0 +1,233 @@
+name: SDK Generation and Publishing
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/src/routes/**'
+      - 'backend/src/controllers/**'
+      - 'backend/tsoa.json'
+      - 'backend/openapi-generator.config.json'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/src/routes/**'
+      - 'backend/src/controllers/**'
+      - 'backend/tsoa.json'
+      - 'backend/openapi-generator.config.json'
+  workflow_dispatch:
+    inputs:
+      language:
+        description: 'SDK language to generate'
+        required: false
+        default: 'typescript'
+        type: choice
+        options:
+          - typescript
+          - python
+          - go
+          - all
+
+jobs:
+  generate-openapi:
+    name: Generate OpenAPI Spec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Generate OpenAPI spec
+        working-directory: backend
+        run: npm run openapi:generate
+
+      - name: Upload OpenAPI spec
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: backend/docs/api/openapi/swagger.json
+          retention-days: 7
+
+  breaking-change-detection:
+    name: Detect Breaking Changes
+    runs-on: ubuntu-latest
+    needs: generate-openapi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download OpenAPI spec
+        uses: actions/download-artifact@v4
+        with:
+          name: openapi-spec
+          path: backend/docs/api/openapi/
+
+      - name: Install oasdiff
+        run: npm install -g @openapi-diff/openapi-diff
+
+      - name: Fetch previous OpenAPI spec
+        run: |
+          git fetch origin main
+          git checkout origin/main -- backend/docs/api/openapi/swagger.json || echo "No previous spec found"
+
+      - name: Compare OpenAPI specs
+        id: diff
+        run: |
+          if [ -f "backend/docs/api/openapi/swagger.json" ]; then
+            mv backend/docs/api/openapi/swagger.json backend/docs/api/openapi/swagger.new.json
+            git checkout origin/main -- backend/docs/api/openapi/swagger.json || echo "No previous spec"
+            
+            if [ -f "backend/docs/api/openapi/swagger.json" ]; then
+              oasdiff backend/docs/api/openapi/swagger.json backend/docs/api/openapi/swagger.new.json --format json > diff-output.json || true
+              
+              if [ -s diff-output.json ]; then
+                echo "Breaking changes detected"
+                cat diff-output.json
+                echo "BREAKING_CHANGES=true" >> $GITHUB_OUTPUT
+              else
+                echo "No breaking changes detected"
+                echo "BREAKING_CHANGES=false" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "First API version - no previous spec to compare"
+              echo "BREAKING_CHANGES=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No new spec generated"
+            echo "BREAKING_CHANGES=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment breaking changes on PR
+        if: github.event_name == 'pull_request' && steps.diff.outputs.BREAKING_CHANGES == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const diffOutput = fs.readFileSync('diff-output.json', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ⚠️ Breaking API Changes Detected\n\n\`\`\`json\n${diffOutput}\n\`\`\`\n\nPlease review these changes carefully before merging.`
+            });
+
+  generate-sdk:
+    name: Generate SDK
+    runs-on: ubuntu-latest
+    needs: [generate-openapi, breaking-change-detection]
+    strategy:
+      matrix:
+        language: [typescript, python, go]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Download OpenAPI spec
+        uses: actions/download-artifact@v4
+        with:
+          name: openapi-spec
+          path: backend/docs/api/openapi/
+
+      - name: Generate ${{ matrix.language }} SDK
+        working-directory: backend
+        run: npm run sdk:generate:${{ matrix.language }}
+
+      - name: Upload ${{ matrix.language }} SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-${{ matrix.language }}
+          path: packages/sdk/generated/${{ matrix.language }}
+          retention-days: 7
+
+  publish-sdk:
+    name: Publish SDK to npm
+    runs-on: ubuntu-latest
+    needs: [generate-sdk]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download TypeScript SDK
+        uses: actions/download-artifact@v4
+        with:
+          name: sdk-typescript
+          path: packages/sdk/generated/typescript
+
+      - name: Copy generated SDK to packages/sdk
+        run: |
+          rm -rf packages/sdk/src
+          cp -r packages/sdk/generated/typescript packages/sdk/src
+
+      - name: Install dependencies
+        working-directory: packages/sdk
+        run: npm ci
+
+      - name: Build SDK
+        working-directory: packages/sdk
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: packages/sdk
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  generate-changelog:
+    name: Generate API Changelog
+    runs-on: ubuntu-latest
+    needs: [generate-openapi, breaking-change-detection]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install conventional-changelog
+        run: npm install -g conventional-changelog-cli
+
+      - name: Generate changelog
+        run: |
+          conventional-changelog -p angular -i CHANGELOG.md -s -r 0 || true
+          echo "API Changelog generated"
+
+      - name: Upload changelog
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: CHANGELOG.md
+          retention-days: 7

@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { validate } from '../middleware/validate.js';
 import {
+  addVariantsSchema,
   bulkCreatePaymentLinkSchema,
   createPaymentLinkSchema,
   paymentLinkCompletionSchema,
@@ -81,6 +82,15 @@ paymentLinksRouter.get(
 );
 
 paymentLinksRouter.get(
+  '/merchant/:merchantId/summary',
+  asyncHandler(async (req, res) => {
+    const merchantId = Array.isArray(req.params.merchantId) ? req.params.merchantId[0] : req.params.merchantId;
+    const summary = paymentLinksService.getMerchantDashboardSummary(merchantId);
+    res.json({ data: summary });
+  })
+);
+
+paymentLinksRouter.get(
   '/id/:id',
   asyncHandler(async (req, res) => {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -111,6 +121,19 @@ paymentLinksRouter.patch(
 );
 
 paymentLinksRouter.post(
+  '/id/:id/variants',
+  validate(addVariantsSchema),
+  asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const updated = paymentLinksService.addOrUpdateVariants(id, req.body.variants);
+    if (!updated) {
+      throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
+    }
+    res.json({ data: updated });
+  })
+);
+
+paymentLinksRouter.post(
   '/id/:id/expire',
   asyncHandler(async (req, res) => {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -130,7 +153,46 @@ paymentLinksRouter.get(
     if (!link) {
       throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
     }
-    res.json({ data: link.analytics });
+    res.json({
+      data: {
+        ...link.analytics,
+        conversions: paymentLinksService.getConversions(link.id),
+      },
+    });
+  })
+);
+
+paymentLinksRouter.get(
+  '/id/:id/conversions',
+  asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const link = paymentLinksService.getById(id);
+    if (!link) {
+      throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
+    }
+    const conversions = paymentLinksService.getConversions(id);
+    res.json({ data: conversions, count: conversions.length });
+  })
+);
+
+paymentLinksRouter.get(
+  '/id/:id/qr',
+  asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const link = paymentLinksService.getById(id);
+    if (!link) {
+      throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
+    }
+
+    const type = req.query.type === 'svg' ? 'svg' : 'data-url';
+    const qrData = await paymentLinksService.getQrCodeDataUrl(link.slug, type);
+
+    if (type === 'svg') {
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.send(qrData);
+    } else {
+      res.json({ dataUrl: qrData, linkUrl: `https://pay.agenticpay.com/r/${link.slug}` });
+    }
   })
 );
 
@@ -142,7 +204,11 @@ paymentLinksRouter.get(
     if (!link) {
       throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
     }
-    res.json({ data: paymentLinksService.getShareLinks(link.slug) });
+
+    const variantId = req.query.variant ? String(req.query.variant) : undefined;
+    const source = req.query.source ? String(req.query.source) : undefined;
+
+    res.json({ data: paymentLinksService.getShareLinks(link.slug, variantId, source) });
   })
 );
 
@@ -170,6 +236,7 @@ paymentLinksRouter.get(
   asyncHandler(async (req, res) => {
     const slug = Array.isArray(req.params.slug) ? req.params.slug[0] : req.params.slug;
     const source = req.query.source ? String(req.query.source) : 'direct';
+    const requestedVariantId = req.query.variant ? String(req.query.variant) : undefined;
 
     const existing = paymentLinksService.getBySlug(slug);
     if (!existing) {
@@ -183,35 +250,43 @@ paymentLinksRouter.get(
     // can't inflate analytics.
     enforcePassword(slug, existing, req.query.password);
 
-    const link = paymentLinksService.trackView(slug, source);
+    const selectedVariant = paymentLinksService.selectVariant(existing, requestedVariantId);
+    const link = paymentLinksService.trackView(slug, source, selectedVariant?.id);
     if (!link) {
       throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
     }
 
-    const accentColor = link.brand?.accentColor || '#0B3A80';
+    const accentColor = selectedVariant?.accentColor || link.brand?.accentColor || '#0B3A80';
     const brandName = link.brand?.brandName || 'AgenticPay';
+    const title = selectedVariant?.name ? `${brandName} - ${selectedVariant.name}` : `${brandName} Payment Link`;
+    const description = selectedVariant?.description || link.description || 'Secure checkout link';
+    const amount = selectedVariant?.amount ?? link.amount;
+    const ctaText = selectedVariant?.ctaText || 'Continue to Pay';
+
     const html = `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${brandName} Payment Link</title>
+    <title>${title}</title>
     <style>
       body { font-family: sans-serif; margin: 0; background: linear-gradient(120deg, #f4f7ff, #eefaf8); }
       main { max-width: 520px; margin: 8vh auto; background: #fff; border-radius: 16px; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,.08); }
       .pill { display: inline-block; background: ${accentColor}; color: white; border-radius: 999px; padding: 4px 10px; font-size: 12px; }
-      .cta { margin-top: 20px; display: inline-block; background: ${accentColor}; color: white; text-decoration: none; padding: 10px 14px; border-radius: 10px; }
+      .cta { margin-top: 20px; display: inline-block; background: ${accentColor}; color: white; text-decoration: none; padding: 10px 14px; border-radius: 10px; font-weight: bold; }
       .muted { color: #5c6270; font-size: 14px; }
+      ${selectedVariant ? '.variant-badge { font-size: 12px; font-weight: 600; color: #4b5563; background: #f3f4f6; padding: 2px 8px; border-radius: 4px; margin-top: 4px; display: inline-block; }' : ''}
     </style>
   </head>
   <body>
     <main>
       <span class="pill">${brandName}</span>
+      ${selectedVariant ? `<br/><span class="variant-badge">Variant: ${selectedVariant.name}</span>` : ''}
       <h1>Payment Request</h1>
-      <p class="muted">${link.description || 'Secure checkout link'}</p>
-      <h2>${link.amount.toFixed(2)} ${link.currency}</h2>
+      <p class="muted">${description}</p>
+      <h2>${amount.toFixed(2)} ${link.currency}</h2>
       <p class="muted">Expires ${new Date(link.expiresAt).toUTCString()}</p>
-      <a class="cta" href="${link.brand?.redirectUrl || '/checkout'}">Continue to Pay</a>
+      <a class="cta" href="${link.brand?.redirectUrl || '/checkout'}">${ctaText}</a>
     </main>
   </body>
 </html>`;
@@ -227,6 +302,8 @@ paymentLinksRouter.post(
   asyncHandler(async (req, res) => {
     const slug = Array.isArray(req.params.slug) ? req.params.slug[0] : req.params.slug;
     const source = req.body.source || 'direct';
+    const variantId = req.body.variantId;
+    const amountPaid = req.body.amountPaid;
 
     const existing = paymentLinksService.getBySlug(slug);
     if (!existing) {
@@ -238,11 +315,15 @@ paymentLinksRouter.post(
 
     enforcePassword(slug, existing, req.body.password);
 
-    const completed = paymentLinksService.complete(slug, source);
+    const completed = paymentLinksService.complete(slug, source, variantId, amountPaid, {
+      referrer: req.get('referrer'),
+      userAgent: req.get('user-agent'),
+    });
+
     if (!completed) {
       throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
     }
 
     res.json({ data: completed.analytics });
   })
-);
+);

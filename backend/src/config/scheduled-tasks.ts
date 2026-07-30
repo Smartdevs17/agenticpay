@@ -22,6 +22,8 @@ import { SubscriptionProcessor } from '../jobs/subscription-processor.js';
 import { aggregateUsage, checkUsageAlerts, processDunning } from '../jobs/usageAggregation.js';
 import { getArchivalService } from '../services/archival/index.js';
 import { getBridgeMonitorService } from '../services/bridge-monitor/bridge-monitor.js';
+import { runScheduledReconciliation } from '../services/payment-reconciliation/index.js';
+import { runEscalationEvaluation } from '../jobs/escalation.job.js';
 import { ethers } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -29,21 +31,16 @@ import { ethers } from 'ethers';
 // ---------------------------------------------------------------------------
 
 export interface ScheduledTaskMeta {
-  /** Unique identifier — must be kebab-case, globally unique */
   id: string;
-  /** Human-readable name shown in dashboards */
   name: string;
-  /** What the job does */
   description: string;
-  /** node-cron / BullMQ cron expression */
   schedule: string;
-  /** IANA timezone for schedule evaluation */
   timezone?: string;
-  /** Abort after this many milliseconds; undefined = no timeout */
   timeoutMs?: number;
-  /** Max consecutive failures before the job is paused */
   maxFailures?: number;
-  /** Actual work to perform */
+  priority?: 'critical' | 'high' | 'normal' | 'low';
+  rateLimitPerSecond?: number;
+  rateLimitBurst?: number;
   handler: () => Promise<void> | void;
 }
 
@@ -83,12 +80,13 @@ export function getNextRunTimes(expression: string, count = 5, timezone?: string
 // Raw task definitions
 // ---------------------------------------------------------------------------
 
-const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string }[] = [
+const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string })[] = [
   {
     id: 'system-heartbeat',
     name: 'System heartbeat log',
     description: 'Emits a periodic heartbeat log entry for uptime monitoring.',
     defaultSchedule: '*/5 * * * *',
+    priority: 'low',
     handler: () => {
       console.log('[jobs] heartbeat', new Date().toISOString());
     },
@@ -99,6 +97,9 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     description: 'Finds subscriptions due for renewal and executes on-chain payments via the EVM subscription contract.',
     defaultSchedule: '0 * * * *',
     timeoutMs: 5 * 60 * 1000,
+    priority: 'high',
+    rateLimitPerSecond: 1,
+    rateLimitBurst: 2,
     handler: async () => {
       const contractAddress = process.env.SUBSCRIPTION_CONTRACT_ADDRESS;
       const rpcUrl = process.env.EVM_RPC_URL;
@@ -145,6 +146,7 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     name: 'Cleanup Expired Sandbox Accounts',
     description: 'Deactivates sandbox accounts whose trial period has elapsed.',
     defaultSchedule: '0 */6 * * *',
+    priority: 'low',
     handler: sandboxCleanupJobs.find((j) => j.id === 'sandbox-cleanup-expired-accounts')!.handler,
   },
   {
@@ -167,6 +169,7 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     description: 'Aggregates metered usage records and syncs to Stripe for subscription billing.',
     defaultSchedule: '0 * * * *', // Hourly
     timeoutMs: 10 * 60 * 1000, // 10 minutes
+    priority: 'high',
     handler: aggregateUsage,
   },
   {
@@ -184,6 +187,8 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     defaultSchedule: '0 0 * * *', // Daily
     timeoutMs: 15 * 60 * 1000, // 15 minutes
     handler: processDunning,
+  },
+  {
     id: 'daily-onchain-archival',
     name: 'Daily On-Chain Data Archival',
     description: 'Backs up transaction data, event logs, and contract state to IPFS with integrity verification.',
@@ -205,8 +210,22 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
     description: 'Polls bridge providers, detects stuck/delayed messages, and emits alerts.',
     defaultSchedule: '*/5 * * * *',
     timeoutMs: 5 * 60 * 1000,
+    priority: 'critical',
+    rateLimitPerSecond: 2,
+    rateLimitBurst: 5,
     handler: async () => {
       await getBridgeMonitorService().pollAndReconcile();
+    },
+  },
+  {
+    id: 'daily-payment-reconciliation',
+    name: 'Daily Payment Reconciliation',
+    description: 'Matches internal payments against external statement records for the previous day and files exceptions for mismatches.',
+    defaultSchedule: '0 5 * * *',
+    timezone: 'UTC',
+    timeoutMs: 30 * 60 * 1000,
+    handler: async () => {
+      await runScheduledReconciliation();
     },
   },
   {
@@ -226,6 +245,15 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
         console.log(`[archival] Purged ${deleted.count} expired batch(es)`);
       }
     },
+  },
+  {
+    id: 'escalation-evaluation',
+    name: 'Escalation SLA Evaluation',
+    description: 'Evaluates all open issues for SLA breaches, triggers escalations, and aggregates analytics — Issue #646.',
+    defaultSchedule: '*/5 * * * *',
+    timeoutMs: 10 * 60 * 1000,
+    priority: 'high',
+    handler: runEscalationEvaluation,
   },
 ];
 
@@ -270,6 +298,9 @@ export function getScheduledTaskDashboard() {
     schedule: task.schedule,
     timezone: task.timezone ?? 'UTC',
     timeoutMs: task.timeoutMs ?? null,
+    priority: task.priority ?? 'normal',
+    rateLimitPerSecond: task.rateLimitPerSecond ?? null,
+    rateLimitBurst: task.rateLimitBurst ?? null,
     nextRuns: getNextRunTimes(task.schedule, 3, task.timezone),
   }));
 }

@@ -67,7 +67,21 @@ const CACHE_CONTROL = {
   public: 'public, max-age=60, s-maxage=60',
   private: 'private, max-age=0',
   static: 'public, max-age=86400',
+  staticImmutable: 'public, max-age=31536000, immutable',
+  cdn: 'public, max-age=604800, s-maxage=604800',
+  api: 'public, max-age=300, s-maxage=300',
 } as const;
+
+const STATIC_ASSET_PATTERNS = [
+  { pattern: /\/_next\/static\/.*/, ttl: 31536000, immutable: true },
+  { pattern: /\/fonts\/.*\.(woff2?|ttf|otf|eot)$/, ttl: 31536000, immutable: true },
+  { pattern: /\/images\/.*\.(webp|avif|png|jpg|jpeg|svg|gif|ico)$/, ttl: 604800, immutable: false },
+  { pattern: /\/favicon.*/, ttl: 86400, immutable: false },
+  { pattern: /\/manifest\.webmanifest$/, ttl: 86400, immutable: false },
+  { pattern: /\/sitemap.*\.xml$/, ttl: 3600, immutable: false },
+  { pattern: /\/robots\.txt$/, ttl: 86400, immutable: false },
+  { pattern: /\/api\/v1\/(catalog|currencies|config).*/, ttl: 300, immutable: false },
+];
 
 // ── Cold start tracking (per-isolate) ─────────────────────────────────────────
 
@@ -186,6 +200,25 @@ async function handleScheduled(env: Env): Promise<void> {
   }
 }
 
+// ── Content type helper for static assets ───────────────────────────────────
+
+function getContentType(path: string): string {
+  if (path.endsWith('.js')) return 'application/javascript';
+  if (path.endsWith('.css')) return 'text/css';
+  if (path.endsWith('.woff2')) return 'font/woff2';
+  if (path.endsWith('.woff')) return 'font/woff';
+  if (path.endsWith('.ttf')) return 'font/ttf';
+  if (path.endsWith('.otf')) return 'font/otf';
+  if (path.endsWith('.svg')) return 'image/svg+xml';
+  if (path.endsWith('.webp')) return 'image/webp';
+  if (path.endsWith('.avif')) return 'image/avif';
+  if (path.endsWith('.png')) return 'image/png';
+  if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg';
+  if (path.endsWith('.ico')) return 'image/x-icon';
+  if (path.endsWith('.json')) return 'application/json';
+  return 'application/octet-stream';
+}
+
 // ── Main request handler ──────────────────────────────────────────────────────
 
 async function handleRequest(request: Request, env: Env): Promise<Response> {
@@ -213,6 +246,32 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     console.log(`[cold-start] New isolate — init: ${initDurationMs}ms, first request: ${method} ${path}`);
   }
 
+  // ── Static asset caching ───────────────────────────────────────────────
+  // Serve immutable assets (Next.js build output, fonts, images) with long
+  // cache lifetimes at the edge. Bypasses backend entirely for cached assets.
+  if (method === 'GET') {
+    for (const rule of STATIC_ASSET_PATTERNS) {
+      if (rule.pattern.test(path)) {
+        const cacheKey = `static:${path}`;
+        const cached = await cacheGet(cacheKey, env);
+        if (cached) {
+          const cc = rule.immutable ? CACHE_CONTROL.staticImmutable : `public, max-age=${rule.ttl}, s-maxage=${rule.ttl}`;
+          return new Response(cached, {
+            status: 200,
+            headers: {
+              'Content-Type': getContentType(path),
+              'Cache-Control': cc,
+              'X-Cache': 'HIT',
+              'X-CDN': 'cloudflare',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
+        break;
+      }
+    }
+  }
+
   // ── CORS preflight ──────────────────────────────────────────────────────────
   if (method === 'OPTIONS') {
     return new Response(null, {
@@ -223,6 +282,43 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key',
       },
     });
+  }
+
+  // ── Cache invalidation — CDN-purged assets ──────────────────────────────
+  // POST to /api/v1/cache/invalidate with { path: "/_next/static/chunk.js" }
+  // to evict a specific asset from the edge cache.
+  if (path.startsWith('/api/v1/cache/invalidate') && method === 'POST') {
+    try {
+      const body: { path?: string; pattern?: string } = await request.json() as any;
+      const pathsToInvalidate: string[] = [];
+      if (body.path) pathsToInvalidate.push(body.path);
+      if (body.pattern) {
+        const regex = new RegExp(body.pattern);
+        for (const rule of STATIC_ASSET_PATTERNS) {
+          const listResult = await env.EDGE_CACHE.list({ prefix: 'static:' });
+          for (const key of listResult.keys) {
+            const decodedPath = key.name.replace('static:', '');
+            if (regex.test(decodedPath)) pathsToInvalidate.push(decodedPath);
+          }
+        }
+      }
+      if (pathsToInvalidate.length === 0) {
+        return new Response(JSON.stringify({ ok: true, invalidated: 0, message: 'No matching cache entries' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+      }
+      await Promise.all(pathsToInvalidate.map((p) => env.EDGE_CACHE.delete(`static:${p}`)));
+      return new Response(JSON.stringify({ ok: true, invalidated: pathsToInvalidate.length }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      });
+    } catch {
+      return new Response(JSON.stringify({ ok: false, error: 'Invalid request body' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      });
+    }
   }
 
   // ── Warm-up shortcut — skip auth/rate-limit, proxy directly to backend ───────

@@ -197,6 +197,32 @@ resource "aws_secretsmanager_secret" "db_credentials" {
   name = "agenticpay-${var.environment}-db-credentials"
 }
 
+# Secrets Manager for application-level secrets (Stripe, OpenAI, VAPID keys, etc).
+# Loaded at runtime by backend/src/config/environments/secrets-manager.ts when
+# AWS_SECRETS_MANAGER_ENABLED=true. Not managed for dev — dev uses local env vars.
+resource "aws_secretsmanager_secret" "app_secrets" {
+  count = var.environment == "dev" ? 0 : 1
+
+  name = "agenticpay-${var.environment}-app-secrets"
+}
+
+resource "aws_iam_policy" "app_secrets_read" {
+  count = var.environment == "dev" ? 0 : 1
+
+  name = "agenticpay-${var.environment}-app-secrets-read-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action   = "secretsmanager:GetSecretValue"
+        Effect   = "Allow"
+        Resource = aws_secretsmanager_secret.app_secrets[0].arn
+      }
+    ]
+  })
+}
+
 resource "aws_secretsmanager_secret_version" "db_credentials" {
   secret_id = aws_secretsmanager_secret.db_credentials.id
   secret_string = jsonencode({
@@ -567,6 +593,44 @@ resource "aws_cloudwatch_dashboard" "gas_metrics" {
           stat   = "Sum"
           region = var.aws_region
           title  = "CloudFront Backend Metrics"
+          view   = "timeSeries"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 18
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/CloudFront", "Requests", "DistributionId", aws_cloudfront_distribution.frontend.id, { stat: "Sum" }],
+            [".", "TotalErrorRate", ".", ".", { stat: "Average" }],
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Frontend CDN — Request Volume & Error Rate"
+          view   = "timeSeries"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 18
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/CloudFront", "CacheHitRate", "DistributionId", aws_cloudfront_distribution.frontend.id, { stat: "Average" }],
+            [".", "OriginLatency", ".", ".", { stat: "p95" }],
+          ]
+          period = 300
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Frontend CDN — Cache Hit Rate & Origin Latency (p95)"
           view   = "timeSeries"
         }
       },

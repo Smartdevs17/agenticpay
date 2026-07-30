@@ -64,6 +64,37 @@ export class QuotaManagerService {
     };
   }
 
+  /**
+   * Issue #631 (minimal slice): request counts for a given key, bucketed by
+   * calendar day, for the last `days` days. Deferred: dashboard UI,
+   * forecasting/trending, alerts, and cross-key comparison tools — those
+   * remain follow-up work on top of this counting primitive.
+   */
+  async getDailyUsage(keyId: string, days = 7) {
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    since.setUTCDate(since.getUTCDate() - (days - 1));
+
+    const usage = await prisma.apiKeyUsage.findMany({
+      where: { keyId, recordedAt: { gte: since } },
+      select: { recordedAt: true },
+    });
+
+    const counts = new Map<string, number>();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(since);
+      d.setUTCDate(d.getUTCDate() + i);
+      counts.set(d.toISOString().slice(0, 10), 0);
+    }
+
+    for (const row of usage) {
+      const day = row.recordedAt.toISOString().slice(0, 10);
+      counts.set(day, (counts.get(day) ?? 0) + 1);
+    }
+
+    return Array.from(counts.entries()).map(([date, count]) => ({ date, count }));
+  }
+
   async getTenantUsageSummary(tenantId: string) {
     const now = new Date();
     const hourAgo = new Date(now.getTime() - 3600_000);
