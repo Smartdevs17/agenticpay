@@ -255,6 +255,83 @@ const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: strin
     priority: 'high',
     handler: runEscalationEvaluation,
   },
+  // ── Compliance Automation (Issue #590 enhancements) ─────────────────────
+  {
+    id: 'compliance-threshold-evaluation',
+    name: 'Compliance Threshold Evaluation',
+    description: 'Evaluates compliance metrics against thresholds hourly and raises alerts for breaches.',
+    defaultSchedule: '0 * * * *', // Hourly
+    timeoutMs: 5 * 60 * 1000,
+    priority: 'high',
+    handler: async () => {
+      const { ComplianceService } = await import('../services/complianceService.js');
+      const alerts = ComplianceService.evaluateThresholds();
+      if (alerts.length > 0) console.log(`[compliance] Threshold evaluation raised ${alerts.length} alert(s)`);
+    },
+  },
+  {
+    id: 'compliance-automated-checks',
+    name: 'Automated Compliance Checks',
+    description: 'Runs full suite of automated compliance checks (KYC, AML, sanctions, GDPR, security etc)',
+    defaultSchedule: '0 */6 * * *', // Every 6 hours
+    timezone: 'UTC',
+    timeoutMs: 10 * 60 * 1000,
+    priority: 'high',
+    handler: async () => {
+      const { ComplianceAutomationService } = await import('../services/compliance-automation.js');
+      const result = await ComplianceAutomationService.runAutomatedChecks('GLOBAL', undefined, 'scheduler');
+      console.log(
+        `[compliance] Automated checks: ${result.summary.totalChecks} checks, score ${result.summary.overallScore}, status ${result.summary.overallStatus}`,
+      );
+    },
+  },
+  {
+    id: 'compliance-regulatory-poll',
+    name: 'Regulatory Update Polling',
+    description: 'Polls regulatory sources (FinCEN, OFAC, EBA, FCA, MAS, AUSTRAC, FATF) for new updates',
+    defaultSchedule: '0 */6 * * *', // Every 6 hours, with OFAC polled more frequently in handler
+    timeoutMs: 10 * 60 * 1000,
+    priority: 'high',
+    handler: async () => {
+      const { ComplianceAutomationService } = await import('../services/compliance-automation.js');
+      const { result } = await ComplianceAutomationService.pollRegulatoryUpdates('scheduler');
+      if (result.newUpdates > 0) {
+        console.log(`[compliance] Regulatory poll found ${result.newUpdates} new update(s)`);
+      }
+    },
+  },
+  {
+    id: 'compliance-monthly-report',
+    name: 'Monthly Compliance Report Generation',
+    description: 'Generates monthly compliance reports for all jurisdictions on 1st of month',
+    defaultSchedule: '0 2 1 * *', // 02:00 UTC on 1st day
+    timezone: 'UTC',
+    timeoutMs: 30 * 60 * 1000,
+    priority: 'normal',
+    handler: async () => {
+      const { generateMonthlyComplianceReports } = await import('../jobs/compliance-report.job.js');
+      const res = await generateMonthlyComplianceReports();
+      console.log(
+        `[compliance] Monthly reports: ${res.reportsGenerated} generated, ${res.alertsRaised} alerts, errors ${res.errors.length}`,
+      );
+    },
+  },
+  {
+    id: 'compliance-daily-summary',
+    name: 'Daily Compliance Summary',
+    description: 'Runs full compliance automation cycle (checks + regulatory poll + reporting) daily',
+    defaultSchedule: '0 6 * * *', // 06:00 UTC daily
+    timezone: 'UTC',
+    timeoutMs: 15 * 60 * 1000,
+    priority: 'high',
+    handler: async () => {
+      const { ComplianceAutomationService } = await import('../services/compliance-automation.js');
+      const result = await ComplianceAutomationService.runFullCycle('GLOBAL', 'scheduler');
+      console.log(
+        `[compliance] Daily summary: checks score ${result.checks.overallScore}, ${result.regulatory.newUpdates} new regulatory updates, ${result.reports.count} reports`,
+      );
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------

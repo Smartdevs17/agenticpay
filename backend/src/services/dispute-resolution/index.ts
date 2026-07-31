@@ -48,7 +48,7 @@ import { disputeResolutionService } from './dispute-resolution-service.js';
 
 /**
  * Process SLA-based auto-escalations for open disputes. Intended to be
- * registered as a scheduled task (suggested cron `*/15 * * * *`).
+ * registered as a scheduled task (suggested cron every 15 minutes).
  */
 export async function runScheduledDisputeEscalations(): Promise<void> {
   const result = await disputeResolutionService.processEscalations();
