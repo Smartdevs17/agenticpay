@@ -1,3 +1,3 @@
-module github.com/Smartdevs17/subtrackr/sdks/go
+module github.com/Kappa16/agenticpay/sdks/go
 
 go 1.21

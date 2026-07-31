@@ -10,7 +10,7 @@ export class AgenticPayApiError extends AgenticPayError {
     this.name = `${code
       .replace(/^ERR_/, '')
       .toLowerCase()
-      .replace(/(^|_)([a-z])/g, (_match, _prefix, char) => char.toUpperCase())}Error`;
+      .replace(/(^|_)([a-z])/g, (_match: string, _prefix: string, char: string) => char.toUpperCase())}Error`;
     this.registryEntry = entry;
   }
 }

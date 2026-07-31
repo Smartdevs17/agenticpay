@@ -10,6 +10,7 @@ import {
   AuthenticationError,
   AuthorizationError,
   NetworkError,
+  NotFoundError,
   RateLimitError,
   ValidationError,
   createTypedApiError,
@@ -139,6 +140,7 @@ export class AgenticPayClient {
     if (status === 400) return new ValidationError(message, details);
     if (status === 401) return new AuthenticationError(message, details);
     if (status === 403) return new AuthorizationError(message, details);
+    if (status === 404) return new NotFoundError(message, details);
     if (status === 429) return new RateLimitError(message, details);
     return new AgenticPayError(message, { status, code, details });
   }
