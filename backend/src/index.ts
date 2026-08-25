@@ -35,6 +35,7 @@ import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
+import { taxReportingRouter } from './routes/tax-reporting.js';
 
 dotenv.config();
 
@@ -257,6 +258,8 @@ apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 apiV1Router.use('/push', pushRouter);
 // Stripe card payments
 apiV1Router.use('/stripe', stripeRouter);
+// Automated tax reporting, export, and calendar — Issues #690–#693
+apiV1Router.use('/tax-reporting', taxReportingRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);
