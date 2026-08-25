@@ -415,3 +415,109 @@ export async function payInvoice(invoiceId: string): Promise<Stripe.Invoice> {
     },
   );
 }
+
+// ── Tiered Usage Billing ─────────────────────────────────────────────────────
+
+export type TierName = 'free' | 'starter' | 'growth' | 'enterprise';
+
+export interface TierDefinition {
+  name: TierName;
+  /** Inclusive lower bound on monthly transaction count */
+  minTransactions: number;
+  /** Exclusive upper bound (undefined = unlimited) */
+  maxTransactions?: number;
+  /** Monthly flat price in cents */
+  baseAmountCents: number;
+  /** Per-transaction overage charge in cents above the included volume */
+  overageCentsPerUnit: number;
+  /** Stripe Price ID for this tier (configure per environment) */
+  stripePriceId: string;
+}
+
+export const TIER_DEFINITIONS: TierDefinition[] = [
+  {
+    name: 'free',
+    minTransactions: 0,
+    maxTransactions: 100,
+    baseAmountCents: 0,
+    overageCentsPerUnit: 0,
+    stripePriceId: process.env['STRIPE_PRICE_FREE'] ?? '',
+  },
+  {
+    name: 'starter',
+    minTransactions: 100,
+    maxTransactions: 1_000,
+    baseAmountCents: 2900,
+    overageCentsPerUnit: 3,
+    stripePriceId: process.env['STRIPE_PRICE_STARTER'] ?? '',
+  },
+  {
+    name: 'growth',
+    minTransactions: 1_000,
+    maxTransactions: 10_000,
+    baseAmountCents: 9900,
+    overageCentsPerUnit: 1,
+    stripePriceId: process.env['STRIPE_PRICE_GROWTH'] ?? '',
+  },
+  {
+    name: 'enterprise',
+    minTransactions: 10_000,
+    baseAmountCents: 29900,
+    overageCentsPerUnit: 0,
+    stripePriceId: process.env['STRIPE_PRICE_ENTERPRISE'] ?? '',
+  },
+];
+
+/** Return the tier that should apply for the given monthly transaction count. */
+export function getTierForUsage(monthlyTransactions: number): TierDefinition {
+  // Walk tiers in descending order so the first match wins.
+  const sorted = [...TIER_DEFINITIONS].sort((a, b) => b.minTransactions - a.minTransactions);
+  for (const tier of sorted) {
+    if (monthlyTransactions >= tier.minTransactions) return tier;
+  }
+  return TIER_DEFINITIONS[0]!;
+}
+
+/**
+ * Calculate the total amount owed for a billing period.
+ * Includes the flat base fee plus per-unit overage above the tier's included volume.
+ */
+export function calculateTieredCharge(
+  tier: TierDefinition,
+  actualTransactions: number
+): { totalCents: number; baseCents: number; overageCents: number; overageUnits: number } {
+  const includedUnits = tier.maxTransactions ?? Infinity;
+  const overageUnits = Math.max(0, actualTransactions - includedUnits);
+  const overageCents = overageUnits * tier.overageCentsPerUnit;
+  const totalCents = tier.baseAmountCents + overageCents;
+  return { totalCents, baseCents: tier.baseAmountCents, overageCents, overageUnits };
+}
+
+/**
+ * Upgrade or downgrade a subscription to the correct tier based on observed usage.
+ * No-ops when the customer is already on the right price.
+ */
+export async function ensureCorrectTier(
+  subscriptionId: string,
+  monthlyTransactions: number
+): Promise<{ changed: boolean; tier: TierName; subscription: Stripe.Subscription }> {
+  const subscription = await getSubscription(subscriptionId);
+  const targetTier = getTierForUsage(monthlyTransactions);
+  const currentPriceId = subscription.items.data[0]?.price.id;
+
+  if (currentPriceId === targetTier.stripePriceId) {
+    return { changed: false, tier: targetTier.name, subscription };
+  }
+
+  const updated = await updateSubscription(subscriptionId, {
+    items: [
+      {
+        id: subscription.items.data[0]?.id,
+        price: targetTier.stripePriceId,
+      },
+    ],
+    proration_behavior: 'create_prorations',
+  });
+
+  return { changed: true, tier: targetTier.name, subscription: updated };
+}

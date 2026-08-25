@@ -95,6 +95,9 @@ export interface DeliveryHealthSummary {
 const endpoints = new Map<string, WebhookEndpointConfig>();
 export const deliveryLogs = new Map<string, DeliveryLog>();
 
+/** Idempotency key → delivery log ID. Prevents duplicate dispatch on retried requests. */
+const idempotencyIndex = new Map<string, string>();
+
 // ---------------------------------------------------------------------------
 // Endpoint management
 // ---------------------------------------------------------------------------
@@ -142,10 +145,20 @@ export function scheduleDelivery(
   merchantId: string,
   eventId: string,
   eventType: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  idempotencyKey?: string
 ): DeliveryLog {
   const endpoint = endpoints.get(endpointId);
   if (!endpoint) throw new Error(`Endpoint ${endpointId} not found`);
+
+  // Return the existing log if this key was already scheduled (idempotent dispatch).
+  if (idempotencyKey) {
+    const existingId = idempotencyIndex.get(idempotencyKey);
+    if (existingId) {
+      const existing = deliveryLogs.get(existingId);
+      if (existing) return existing;
+    }
+  }
 
   const payloadJson = JSON.stringify(payload);
   const now = new Date().toISOString();
@@ -165,7 +178,40 @@ export function scheduleDelivery(
   };
 
   deliveryLogs.set(log.id, log);
+  if (idempotencyKey) idempotencyIndex.set(idempotencyKey, log.id);
   return log;
+}
+
+export interface BulkRetryResult {
+  retried: number;
+  skipped: number;
+  logs: DeliveryLog[];
+}
+
+/**
+ * Re-queue all dead-letter deliveries for a merchant (or all merchants if omitted).
+ * Each dead-letter log is reset to `pending` with a fresh `nextAttemptAt`.
+ */
+export function bulkRetryDeadLetters(merchantId?: string): BulkRetryResult {
+  const dead = listDeliveryLogs(merchantId ? { merchantId, status: 'dead_letter' } : { status: 'dead_letter' });
+  const now = new Date().toISOString();
+  const retried: DeliveryLog[] = [];
+
+  for (const log of dead) {
+    const endpoint = endpoints.get(log.endpointId);
+    if (!endpoint || !endpoint.enabled) continue;
+
+    log.status = 'pending';
+    log.attempt = 0;
+    log.lastError = undefined;
+    log.failureCategory = undefined;
+    log.nextAttemptAt = now;
+    log.updatedAt = now;
+    deliveryLogs.set(log.id, log);
+    retried.push(log);
+  }
+
+  return { retried: retried.length, skipped: dead.length - retried.length, logs: retried };
 }
 
 // ---------------------------------------------------------------------------
