@@ -116,12 +116,15 @@ export default function ApiKeysPage() {
     const rotateKey = async (keyId: string) => {
         if (!confirm("Rotate this API key? The old key will be revoked and a new one created.")) return;
         try {
-            const res = await fetch(`${API_BASE}/api-keys/${keyId}`, {
-                method: "DELETE",
+            const res = await fetch(`${API_BASE}/api-keys/${keyId}/rotate`, {
+                method: "POST",
                 headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
             });
             if (!res.ok) throw new Error("Failed to rotate key");
-            toast.success("Old key revoked. Create a new key to replace it.");
+            const data = await res.json();
+            toast.success("API key rotated", {
+                description: `New key: ${data.keyId}`,
+            });
             fetchKeys();
         } catch (err) {
             toast.error(err instanceof Error ? err.message : "Failed to rotate key");

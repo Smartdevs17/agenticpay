@@ -37,6 +37,8 @@ import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
 import { taxReportingRouter } from './routes/tax-reporting.js';
 import { auditMiddleware } from './middleware/audit.js';
+import { apiKeysRouter } from './routes/api-keys.js';
+import { milestonesRouter } from './routes/milestones.js';
 
 dotenv.config();
 
@@ -267,6 +269,12 @@ apiV1Router.use('/tax-reporting', taxReportingRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);
+
+// Milestone dependency management
+app.use('/api/v1/milestones', milestonesRouter);
+
+// API key management
+app.use('/api/v1/api-keys', apiKeysRouter);
 
 // Header-based or fallback mounting
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {

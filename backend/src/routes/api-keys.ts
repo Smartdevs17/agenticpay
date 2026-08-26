@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { quotaManagerService } from '../services/keys/quota-manager.js';
+import { randomBytes, createHash } from 'node:crypto';
 
 export const apiKeysRouter = Router();
 
@@ -86,4 +87,31 @@ apiKeysRouter.get('/analytics/summary', asyncHandler(async (req, res) => {
   const tenantId = resolveTenant(req);
   const summary = await quotaManagerService.getTenantUsageSummary(tenantId);
   res.json(summary);
+}));
+
+apiKeysRouter.post('/:keyId/rotate', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+
+  await prisma.apiKey.update({ where: { keyId: req.params.keyId }, data: { isActive: false, revokedAt: new Date() } });
+
+  const newKeyId = `ak_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const newKey = await prisma.apiKey.create({
+    data: {
+      tenantId,
+      keyId: newKeyId,
+      description: key.description ? `${key.description} (rotated)` : 'Rotated key',
+      expiresAt: key.expiresAt,
+    },
+  });
+  res.status(201).json({ keyId: newKey.keyId, description: newKey.description, rotatedFrom: key.keyId });
+}));
+
+apiKeysRouter.post('/:keyId/revoke', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  await prisma.apiKey.update({ where: { keyId: req.params.keyId }, data: { isActive: false, revokedAt: new Date() } });
+  res.json({ success: true, keyId: req.params.keyId, status: 'revoked' });
 }));
