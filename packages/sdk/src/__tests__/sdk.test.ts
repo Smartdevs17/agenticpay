@@ -38,6 +38,7 @@ describe('AgenticPaySDK', () => {
     expect(sdk.payments).toBeDefined();
     expect(sdk.refunds).toBeDefined();
     expect(sdk.verification).toBeDefined();
+    expect(sdk.featureFlags).toBeDefined();
     expect(sdk.subscriptions).toBeDefined();
     expect(sdk.invoices).toBeDefined();
     expect(sdk.escrow).toBeDefined();
@@ -306,6 +307,59 @@ describe('Error handling via mock server', () => {
     }
   });
 });
+
+// ─── Feature Flags API ────────────────────────────────────────────────────────
+
+describe('FeatureFlagsApi', () => {
+  it('evaluates a feature flag', async () => {
+    server.resetRoutes();
+    server.addRoute({
+      method: 'GET',
+      path: '/flags/evaluate',
+      body: { flag: 'test-flag', identifier: 'user_1', enabled: true, variant: 'v_promo' },
+    });
+
+    const sdk = createTestSDK({ baseUrl: server.url });
+    const result = await sdk.featureFlags.evaluate('test-flag', 'user_1');
+
+    expect(result).toEqual({ flag: 'test-flag', identifier: 'user_1', enabled: true, variant: 'v_promo' });
+    const lastReq = server.getLastRequest();
+    expect(lastReq?.path).toContain('/flags/evaluate');
+    expect(lastReq?.path).toContain('flag=test-flag');
+    expect(lastReq?.path).toContain('identifier=user_1');
+  });
+
+  it('fetches feature flags state', async () => {
+    server.resetRoutes();
+    server.addRoute({
+      method: 'GET',
+      path: '/flags/state',
+      body: { identifier: 'user_1', flags: { 'test-flag': true, 'another-flag': 'v_b' } },
+    });
+
+    const sdk = createTestSDK({ baseUrl: server.url });
+    const result = await sdk.featureFlags.state('user_1');
+
+    expect(result).toEqual({ identifier: 'user_1', flags: { 'test-flag': true, 'another-flag': 'v_b' } });
+  });
+
+  it('records client-side exposure', async () => {
+    server.resetRoutes();
+    server.addRoute({
+      method: 'POST',
+      path: '/flags/exposure',
+      body: { recorded: true },
+    });
+
+    const sdk = createTestSDK({ baseUrl: server.url });
+    const result = await sdk.featureFlags.recordExposure('test-flag', 'user_1', 'v_promo');
+
+    expect(result).toEqual({ recorded: true });
+    const lastReq = server.getLastRequest();
+    expect(lastReq?.body).toEqual({ flag: 'test-flag', identifier: 'user_1', value: 'v_promo' });
+  });
+});
+
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────────
 

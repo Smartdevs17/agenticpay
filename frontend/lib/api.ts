@@ -270,4 +270,31 @@ export const api = {
         method: 'GET',
       }),
     },
+
+    /**
+     * Payment Links API
+     */
+    paymentLinks: {
+      getLinkBySlug: async (slug: string, options?: { variant?: string; password?: string }) => {
+        const queryParams = new URLSearchParams();
+        if (options?.variant) queryParams.append('variant', options.variant);
+        if (options?.password) queryParams.append('password', options.password);
+        const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+        return apiCall<any>(`/payment-links/r/${slug}${queryString}`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+        });
+      },
+      completePayment: async (slug: string, payload: { source?: string; variant?: string; password?: string; amountPaid?: number }) => {
+        return apiCall<any>(`/payment-links/r/${slug}/complete`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+      },
+    },
 };

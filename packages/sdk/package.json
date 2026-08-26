@@ -24,6 +24,9 @@
   "publishConfig": {
     "access": "public"
   },
+  "dependencies": {
+    "@agenticpay/error-codes": "*"
+  },
   "devDependencies": {
     "@types/node": "^22.5.0",
     "typescript": "^5.9.3",

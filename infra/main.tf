@@ -110,6 +110,7 @@ resource "aws_db_instance" "postgres" {
   deletion_protection        = var.environment == "prod"
   skip_final_snapshot        = var.environment != "prod"
   copy_tags_to_snapshot      = true
+  multi_az                   = var.environment == "prod"
 
   performance_insights_enabled          = var.environment == "prod"
   performance_insights_retention_period = var.environment == "prod" ? 7 : 0
@@ -267,6 +268,67 @@ resource "aws_iam_role_policy" "rds_proxy_secrets" {
       }
     ]
   })
+}
+
+# ------------------------------------------------------------------------------
+# AUTOMATED BACKUP & DISASTER RECOVERY (AWS Backup for PITR)
+# ------------------------------------------------------------------------------
+
+resource "aws_backup_vault" "db_backup_vault" {
+  name        = "agenticpay-${var.environment}-db-backup-vault"
+}
+
+resource "aws_backup_plan" "db_backup_plan" {
+  name = "agenticpay-${var.environment}-db-backup-plan"
+
+  rule {
+    rule_name         = "agenticpay-continuous-backup-rule"
+    target_vault_name = aws_backup_vault.db_backup_vault.name
+    schedule          = "cron(0 12 * * ? *)" # Daily at 12:00 UTC
+
+    enable_continuous_backup = true
+
+    lifecycle {
+      delete_after = var.environment == "prod" ? 35 : 7
+    }
+  }
+}
+
+resource "aws_backup_selection" "db_backup_selection" {
+  iam_role_arn = aws_iam_role.backup_role.arn
+  name         = "agenticpay-${var.environment}-db-backup-selection"
+  plan_id      = aws_backup_plan.db_backup_plan.id
+
+  resources = [
+    aws_db_instance.postgres.arn
+  ]
+}
+
+resource "aws_iam_role" "backup_role" {
+  name = "agenticpay-${var.environment}-backup-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "backup.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "backup_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+  role       = aws_iam_role.backup_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "restore_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
+  role       = aws_iam_role.backup_role.name
 }
 
 # ------------------------------------------------------------------------------

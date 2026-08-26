@@ -86,3 +86,16 @@ export type RefundEvaluationInput = {
   hasChargeback?: boolean;
   hasDispute?: boolean;
 };
+
+export type FeatureFlagEvaluateResponse = {
+  flag: string;
+  identifier: string;
+  enabled: boolean;
+  variant?: string;
+};
+
+export type FeatureFlagStateResponse = {
+  identifier: string;
+  flags: Record<string, boolean | string>;
+};
+

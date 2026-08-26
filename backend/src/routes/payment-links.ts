@@ -8,7 +8,7 @@ import {
   paymentLinkCompletionSchema,
   updatePaymentLinkSchema,
 } from '../schemas/payment-links.js';
-import { paymentLinksService, type PaymentLinkRecord } from '../services/payment-links.js';
+import { paymentLinksService, type PaymentLinkRecord, type ABTestVariant } from '../services/payment-links.js';
 
 export const paymentLinksRouter = Router();
 
@@ -196,25 +196,30 @@ function money(amount: number, currency: string): string {
 
 export function renderHostedCheckoutPage(
   link: PaymentLinkRecord,
-  options: { source: string; password?: string; passwordError?: string } = { source: 'direct' }
+  options: { source: string; password?: string; passwordError?: string; variant?: ABTestVariant } = { source: 'direct' }
 ): string {
-  const accentColor = safeColor(link.brand?.accentColor);
+  const selectedVariant = options.variant;
+  const accentColor = safeColor(selectedVariant?.accentColor || link.brand?.accentColor);
   const brandName = escapeHtml(link.brand?.brandName || 'AgenticPay');
   const logoUrl = safeUrl(link.brand?.logoUrl);
   const redirectUrl = safeUrl(link.brand?.redirectUrl);
-  const description = escapeHtml(link.description || 'Secure checkout link');
-  const formattedAmount = escapeHtml(money(link.amount, link.currency));
+  const description = escapeHtml(selectedVariant?.description || link.description || 'Secure checkout link');
+  const amountToPay = selectedVariant ? selectedVariant.amount : link.amount;
+  const formattedAmount = escapeHtml(money(amountToPay, link.currency));
   const expiresAt = escapeHtml(new Date(link.expiresAt).toUTCString());
   const source = escapeHtml(options.source || 'direct');
   const password = escapeHtml(options.password || '');
   const passwordError = options.passwordError ? escapeHtml(options.passwordError) : '';
   const isUnlocked = !link.requiresPassword || Boolean(options.password && !options.passwordError);
+  const ctaText = escapeHtml(selectedVariant?.ctaText || 'Complete payment');
+  
   const completionPayload = JSON.stringify({
-    amountPaid: link.amount,
+    amountPaid: amountToPay,
     source: options.source || 'direct',
     password: options.password || undefined,
   }).replace(/</g, '\\u003c');
   const redirectTarget = redirectUrl ? JSON.stringify(redirectUrl).replace(/</g, '\\u003c') : '';
+
 
   return `<!doctype html>
 <html lang="en">
@@ -262,6 +267,7 @@ export function renderHostedCheckoutPage(
         </header>
         <div class="content">
           <h1>Review payment</h1>
+          ${selectedVariant ? `<p id="variant-info" style="font-size:13px; color:var(--muted); margin:-4px 0 12px;">Variant: ${escapeHtml(selectedVariant.name)}</p>` : ''}
           <p class="description">${description}</p>
           <p class="amount">${formattedAmount}</p>
           <div class="meta">
@@ -286,7 +292,7 @@ export function renderHostedCheckoutPage(
           ${
             isUnlocked
               ? `<div class="actions">
-                  <button id="pay-button" type="button">Complete payment</button>
+                  <button id="pay-button" type="button">${ctaText}</button>
                   ${redirectUrl ? `<a class="secondary" href="${escapeHtml(redirectUrl)}">Return to merchant</a>` : ''}
                 </div>
                 <p id="result" class="result" role="status"></p>`
@@ -321,6 +327,49 @@ export function renderHostedCheckoutPage(
   </body>
 </html>`;
 }
+paymentLinksRouter.get(
+  '/merchant/:merchantId/summary',
+  asyncHandler(async (req, res) => {
+    const merchantId = Array.isArray(req.params.merchantId) ? req.params.merchantId[0] : req.params.merchantId;
+    const summary = paymentLinksService.getMerchantDashboardSummary(merchantId);
+    res.json({ data: summary });
+  })
+);
+
+paymentLinksRouter.post(
+  '/id/:id/variants',
+  asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const { variants } = req.body as { variants: ABTestVariant[] };
+    
+    if (!variants || !Array.isArray(variants)) {
+      throw new AppError(400, 'variants array is required', 'VALIDATION_ERROR');
+    }
+    
+    const updated = paymentLinksService.addOrUpdateVariants(id, variants);
+    if (!updated) {
+      throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
+    }
+    
+    res.json({ data: updated });
+  })
+);
+
+paymentLinksRouter.get(
+  '/id/:id/qr',
+  asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const link = paymentLinksService.getById(id);
+    if (!link) {
+      throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
+    }
+    const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    res.json({
+      dataUrl,
+      linkUrl: paymentLinksService.getShareLinks(link.slug).url,
+    });
+  })
+);
 
 paymentLinksRouter.get(
   '/r/:slug',
@@ -342,6 +391,10 @@ paymentLinksRouter.get(
     const password = typeof req.query.password === 'string' ? req.query.password : '';
     if (existing.requiresPassword) {
       if (!password) {
+        if (req.headers?.accept?.includes('application/json')) {
+          res.status(401).json({ error: 'A valid password is required', code: 'PAYMENT_LINK_PASSWORD_REQUIRED' });
+          return;
+        }
         res.status(401).setHeader('Content-Type', 'text/html; charset=utf-8');
         res.send(renderHostedCheckoutPage(existing, { source }));
         return;
@@ -357,6 +410,11 @@ paymentLinksRouter.get(
           );
         }
 
+        if (req.headers?.accept?.includes('application/json')) {
+          res.status(401).json({ error: 'Invalid password', code: 'PAYMENT_LINK_PASSWORD_REQUIRED' });
+          return;
+        }
+
         res.status(401).setHeader('Content-Type', 'text/html; charset=utf-8');
         res.send(
           renderHostedCheckoutPage(existing, {
@@ -369,13 +427,26 @@ paymentLinksRouter.get(
       }
     }
 
-    const link = paymentLinksService.trackView(slug, source);
+    const requestedVariantId = req.query.variant ? String(req.query.variant) : undefined;
+    const variant = paymentLinksService.selectVariant(existing, requestedVariantId);
+
+    const link = paymentLinksService.trackView(slug, source, variant?.id);
     if (!link) {
       throw new AppError(404, 'Payment link not found', 'NOT_FOUND');
     }
 
+    if (req.headers?.accept?.includes('application/json')) {
+      res.json({
+        data: link,
+        selectedVariant: variant,
+        qrCodeUrl: paymentLinksService.getQrCodeUrl(link.slug),
+        share: paymentLinksService.getShareLinks(link.slug, variant?.id, source),
+      });
+      return;
+    }
+
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderHostedCheckoutPage(link, { source, password }));
+    res.send(renderHostedCheckoutPage(link, { source, password, variant }));
   })
 );
 

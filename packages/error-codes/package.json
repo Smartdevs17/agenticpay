@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "echo 'No tests for error-codes'",
     "lint": "echo 'No lint yet'",
     "generate:docs": "node scripts/generate-error-docs.mjs"
   },

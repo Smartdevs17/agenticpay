@@ -36,6 +36,7 @@ import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
 import { taxReportingRouter } from './routes/tax-reporting.js';
+import { auditMiddleware } from './middleware/audit.js';
 
 dotenv.config();
 
@@ -183,6 +184,7 @@ app.use(
 );
 
 app.use(requestIdMiddleware);
+app.use(auditMiddleware());
 
 // Trace ID middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -252,6 +254,8 @@ apiV1Router.use('/emails', emailRouter);
 apiV1Router.use('/portfolio', portfolioRouter);
 // Backup system
 apiV1Router.use('/backup', backupRouter);
+// Audit system
+apiV1Router.use('/audit', auditRouter);
 // IP allowlist management
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
 // Push notifications

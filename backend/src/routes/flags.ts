@@ -13,6 +13,7 @@
 import { Router } from 'express';
 import { createHash } from 'node:crypto';
 import { featureFlags, FeatureFlagName } from '../config/featureFlags.js';
+import { featureFlagEngine } from '../services/featureFlags.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { paginateArray } from '../utils/pagination.js';
 
@@ -65,6 +66,19 @@ flagsRouter.get(
       throw new AppError(400, 'Missing flag name or identifier in query', 'VALIDATION_ERROR');
     }
 
+    const engineFlag = featureFlagEngine.getFlag(flag);
+    if (engineFlag) {
+      const isEnabled = featureFlagEngine.evaluate(flag, identifier);
+      const variant = featureFlagEngine.evaluateVariant(flag, identifier);
+      res.json({
+        flag,
+        identifier,
+        enabled: isEnabled,
+        variant,
+      });
+      return;
+    }
+
     const isEnabled = evaluateDeterministic(flag as FeatureFlagName, identifier);
 
     res.json({
@@ -86,15 +100,27 @@ flagsRouter.get(
     }
 
     const allFlags = featureFlags.getAll();
-    const clientState: Record<string, boolean> = {};
+    const clientState: Record<string, boolean | string> = {};
 
     allFlags.forEach(f => {
       clientState[f.definition.name] = evaluateDeterministic(f.definition.name as FeatureFlagName, identifier);
     });
 
+    const engineFlags = featureFlagEngine.getAllFlags();
+    engineFlags.forEach(f => {
+      const enabled = featureFlagEngine.evaluate(f.name, identifier);
+      if (enabled) {
+        const variant = featureFlagEngine.evaluateVariant(f.name, identifier);
+        clientState[f.name] = variant || true;
+      } else {
+        clientState[f.name] = false;
+      }
+    });
+
     res.json({ identifier, flags: clientState });
   })
 );
+
 
 
 // ─── ADMIN ENDPOINTS (Existing Code Preserved) ────────────────────────────────
@@ -182,6 +208,28 @@ flagsRouter.post(
     const reset = featureFlags.get(name)!;
     res.json(serializeFlag(reset));
   }),
+);
+
+// POST /api/v1/flags/exposure
+flagsRouter.post(
+  '/exposure',
+  asyncHandler(async (req, res) => {
+    const { flag, identifier, value } = req.body as {
+      flag?: string; identifier?: string; value?: unknown;
+    };
+    if (typeof flag !== 'string' || typeof identifier !== 'string') {
+      throw new AppError(400, 'flag and identifier are required', 'VALIDATION_ERROR');
+    }
+    const engineFlag = featureFlagEngine.getFlag(flag);
+    if (engineFlag) {
+      if (typeof value === 'boolean') {
+        value ? engineFlag.metrics.servedTrue++ : engineFlag.metrics.servedFalse++;
+      } else if (typeof value === 'string' && engineFlag.metrics.variantsServed) {
+        engineFlag.metrics.variantsServed[value] = (engineFlag.metrics.variantsServed[value] || 0) + 1;
+      }
+    }
+    res.json({ recorded: true });
+  })
 );
 
 // ─── Serialiser ───────────────────────────────────────────────────────────────

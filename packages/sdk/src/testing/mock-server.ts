@@ -120,7 +120,12 @@ export class MockAgenticPayServer {
   private findRoute(method: string, path: string): MockRoute | undefined {
     return this.routes.find((route) => {
       if (route.method !== method) return false;
-      if (typeof route.path === 'string') return route.path === path;
+      if (typeof route.path === 'string') {
+        // Exact match OR path-only match (ignoring query string)
+        if (route.path === path) return true;
+        const [pathOnly] = path.split('?');
+        return route.path === pathOnly;
+      }
       return route.path.test(path);
     });
   }

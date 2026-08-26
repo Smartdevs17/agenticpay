@@ -1,16 +1,8 @@
-export class AgenticPayError extends Error {
-  readonly status?: number;
-  readonly code?: string;
-  readonly details?: unknown;
+// Re-export the canonical base class so there is exactly ONE AgenticPayError
+// class in the module graph (avoids instanceof failures from dual-module issues).
+export { AgenticPayError } from './errors/base.js';
 
-  constructor(message: string, options?: { status?: number; code?: string; details?: unknown }) {
-    super(message);
-    this.name = 'AgenticPayError';
-    this.status = options?.status;
-    this.code = options?.code;
-    this.details = options?.details;
-  }
-}
+import { AgenticPayError } from './errors/base.js';
 
 export class AuthenticationError extends AgenticPayError {
   constructor(message = 'Authentication failed', details?: unknown) {
@@ -30,6 +22,13 @@ export class ValidationError extends AgenticPayError {
   constructor(message = 'Validation failed', details?: unknown) {
     super(message, { status: 400, code: 'VALIDATION_ERROR', details });
     this.name = 'ValidationError';
+  }
+}
+
+export class NotFoundError extends AgenticPayError {
+  constructor(message = 'Resource not found', details?: unknown) {
+    super(message, { status: 404, code: 'NOT_FOUND', details });
+    this.name = 'NotFoundError';
   }
 }
 
