@@ -387,11 +387,113 @@ Revokes (soft-deletes) an exemption.
 }
 ```
 
+## Automated Tax Reporting (Issues #690–#693)
+
+The automated tax reporting subsystem builds on the tax rule engine to
+provide jurisdiction-aware report generation, multi-format export, and
+filing deadline management.
+
+### Architecture
+
+```
+tax-engine.ts          — jurisdiction rules, rate calculation, compliance
+automated-tax-report.ts — report generation, lifecycle, batch processing
+tax-export.ts          — multi-format export (CSV, JSON, PDF, XLSX)
+tax-calendar.ts        — filing deadline tracking, alerts, templates
+tax-reporting.ts       — REST API routes for all the above
+```
+
+### Report Generation (`AutomatedTaxReportService`)
+
+`generateReport({ tenantId, merchantId, period, year, periodNumber?, jurisdictions?, reportingCurrency? })`
+
+1. Collects all `TaxableTransaction`s for the merchant within the period.
+2. Aggregates by jurisdiction (gross, refunds, net, count).
+3. For each jurisdiction with activity, looks up the applicable tax rule
+   via `TaxRuleEngine.listRules()` and computes tax on the net amount.
+4. Checks for active exemptions — if one exists, tax is zeroed.
+5. Computes a `complianceScore` (percentage of jurisdictions with active
+   rules) and emits `warnings` for uncovered jurisdictions.
+6. Persists the report (Prisma or in-memory) with status `draft`.
+
+**Period support:** `monthly` (1–12), `quarterly` (1–4), `annual` (1).
+
+**Report types** are inferred from jurisdiction rule types:
+`vat`, `gst`, `sales_tax`, `withholding`, or `consolidated` (mixed).
+
+### Filing Reports
+
+`generateFilingReport({ tenantId, merchantId, year })` produces a
+consolidated annual report with per-jurisdiction summaries including:
+- `filingFrequency` — jurisdiction-aware: monthly (DE, FR, IN),
+  quarterly (US, GB, CA, AU), annual (JP)
+- `nextDeadline` — computed from known filing deadline patterns for
+  each supported jurisdiction
+
+### Report Lifecycle
+
+```
+draft → finalized → archived
+```
+
+- `finalizeReport(id)` — locks the report, records `finalizedAt`
+- `archiveReport(id)` — moves to long-term retention
+
+### Batch Generation
+
+`generateScheduledReports({ tenantId, merchantIds, period, year })`
+generates reports for multiple merchants in one call, returning
+`{ generated, failed, reportIds }`.
+
+### Multi-Format Export (`TaxExportService`)
+
+Exports any report type to 4 formats:
+
+| Format | MIME Type | Notes |
+|--------|-----------|-------|
+| CSV | `text/csv` | Configurable delimiter |
+| JSON | `application/json` | Full structured data |
+| PDF | `application/pdf` | Text-based (no external deps) |
+| XLSX | `application/vnd.ms-excel` | XML Spreadsheet format |
+
+Exportable types: `TaxReport`, `FilingReport`, `TaxYearSummary`, `Form1099K`.
+
+### Tax Calendar (`TaxCalendarService`)
+
+Manages filing deadlines with:
+- **CRUD** for per-merchant, per-jurisdiction deadlines
+- **Status tracking:** `upcoming` → `due_soon` → `overdue` → `completed`
+- **Alerts** with severity levels (`info`, `warning`, `critical`, `overdue`)
+- **Default templates** for 8 jurisdictions: US, GB, DE, FR, CA, AU, JP, IN
+- **Template-based creation** for quick deadline setup
+
+### Supported Jurisdictions
+
+| Jurisdiction | Tax Type | Rate | Filing Frequency |
+|-------------|----------|------|-----------------|
+| US | sales_tax | configurable | Quarterly |
+| GB | vat | configurable | Quarterly |
+| DE | vat | configurable | Monthly |
+| FR | vat | configurable | Monthly |
+| CA | gst | configurable | Quarterly |
+| AU | gst | configurable | Quarterly |
+| JP | withholding | configurable | Annual |
+| IN | gst | configurable | Monthly |
+
 ## Tests
 
-`backend/src/services/__tests__/tax-engine.test.ts` — covers rule CRUD,
-rate resolution across effective windows, the `appliesAbove` threshold,
-exemption zeroing (active and expired), the no-rule-found path, all three
-compliance checks, and audit trail recording/filtering/pagination. Runs
-against the in-memory fallback (no `DATABASE_URL` needed), consistent with
-`tax-reports.test.ts` and `fx-service.test.ts`.
+- `backend/src/services/__tests__/tax-engine.test.ts` — rule CRUD, rate
+  resolution, compliance checks, audit trail (13 tests)
+- `backend/src/services/__tests__/automated-tax-report.test.ts` — report
+  generation, filing reports, lifecycle, batch processing, jurisdiction-aware
+  filing frequencies, report accuracy (30+ tests)
+- `backend/src/services/__tests__/tax-export.test.ts` — all 4 export formats
+  for all 4 report types (18 tests)
+- `backend/src/services/__tests__/tax-calendar.test.ts` — deadline CRUD,
+  alerts, templates, status refresh (17 tests)
+- `backend/src/routes/__tests__/tax-reporting.test.ts` — integration tests
+  for all REST endpoints (13 tests)
+- `backend/benchmarks/tax-calculation.bench.ts` — performance benchmarks
+  (4 benchmarks)
+
+All tests run against the in-memory fallback (no `DATABASE_URL` needed).

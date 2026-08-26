@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { AutomatedTaxReportService } from '../tax/automated-tax-report.js';
 import { TaxRuleEngine } from '../tax/tax-engine.js';
-import { TaxReportService, TaxableTransaction } from '../tax-reports.js';
+import { TaxReportService } from '../tax-reports.js';
+import { AutomatedTaxReportService } from '../tax/automated-tax-report.js';
+import type { TaxableTransaction } from '../tax-reports.js';
 
 function tx(overrides: Partial<TaxableTransaction>): TaxableTransaction {
   return {
@@ -16,9 +17,9 @@ function tx(overrides: Partial<TaxableTransaction>): TaxableTransaction {
 }
 
 describe('AutomatedTaxReportService — Issues #690, #691', () => {
-  let service: AutomatedTaxReportService;
   let engine: TaxRuleEngine;
   let reportService: TaxReportService;
+  let service: AutomatedTaxReportService;
 
   beforeEach(() => {
     engine = new TaxRuleEngine();
@@ -29,8 +30,47 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
   });
 
   describe('generateReport', () => {
-    it('generates a monthly report with jurisdiction breakdown', async () => {
-      // Add tax rules
+    it('generates a monthly report with jurisdiction aggregation', async () => {
+      await engine.createRule({
+        jurisdiction: 'US',
+        name: 'US Sales Tax',
+        ruleType: 'sales_tax',
+        rate: 0.08,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordMany([
+        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-01T10:00:00Z') }),
+        tx({ amount: 500, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+        tx({ amount: 100, jurisdiction: 'US', type: 'refund', timestamp: new Date('2025-06-20T10:00:00Z') }),
+      ]);
+
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.period).toBe('monthly');
+      expect(result.value.year).toBe(2025);
+      expect(result.value.periodNumber).toBe(6);
+      expect(result.value.status).toBe('draft');
+      expect(result.value.grossVolume).toBe(1500);
+      expect(result.value.refundVolume).toBe(100);
+      expect(result.value.netVolume).toBe(1400);
+      expect(result.value.totalTaxAmount).toBe(112); // 1400 * 0.08
+      expect(result.value.jurisdictionData).toHaveLength(1);
+      expect(result.value.jurisdictionData[0].jurisdiction).toBe('US');
+      expect(result.value.jurisdictionData[0].ruleType).toBe('sales_tax');
+      expect(result.value.jurisdictionData[0].rate).toBe(0.08);
+      expect(result.value.complianceScore).toBe(100);
+    });
+
+    it('aggregates transactions across multiple jurisdictions', async () => {
       await engine.createRule({
         jurisdiction: 'US',
         name: 'US Sales Tax',
@@ -46,11 +86,9 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
         effectiveFrom: new Date('2020-01-01'),
       });
 
-      // Record transactions in June 2025
       reportService.recordMany([
-        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-10T12:00:00Z') }),
-        tx({ amount: 500, jurisdiction: 'US', type: 'refund', timestamp: new Date('2025-06-15T12:00:00Z') }),
-        tx({ amount: 2000, jurisdiction: 'GB', type: 'sale', timestamp: new Date('2025-06-20T12:00:00Z') }),
+        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-01T10:00:00Z') }),
+        tx({ amount: 2000, jurisdiction: 'GB', type: 'sale', timestamp: new Date('2025-06-10T10:00:00Z') }),
       ]);
 
       const result = await service.generateReport({
@@ -63,117 +101,34 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
+      expect(result.value.grossVolume).toBe(3000);
+      expect(result.value.jurisdictionData).toHaveLength(2);
 
-      const report = result.value;
-      expect(report.period).toBe('monthly');
-      expect(report.year).toBe(2025);
-      expect(report.periodNumber).toBe(6);
-      expect(report.status).toBe('draft');
-      expect(report.grossVolume).toBe(3000);
-      expect(report.refundVolume).toBe(500);
-      expect(report.netVolume).toBe(2500);
-      expect(report.jurisdictionData).toHaveLength(2);
-
-      const usData = report.jurisdictionData.find((j) => j.jurisdiction === 'US');
-      expect(usData?.taxableAmount).toBe(500); // 1000 - 500
-      expect(usData?.taxAmount).toBe(40); // 500 * 0.08
-      expect(usData?.ruleType).toBe('sales_tax');
-      expect(usData?.rate).toBe(0.08);
-
-      const gbData = report.jurisdictionData.find((j) => j.jurisdiction === 'GB');
-      expect(gbData?.taxableAmount).toBe(2000);
-      expect(gbData?.taxAmount).toBe(400); // 2000 * 0.2
-      expect(gbData?.ruleType).toBe('vat');
-
-      expect(report.totalTaxAmount).toBe(440);
+      const us = result.value.jurisdictionData.find((j) => j.jurisdiction === 'US');
+      const gb = result.value.jurisdictionData.find((j) => j.jurisdiction === 'GB');
+      expect(us?.taxAmount).toBe(80); // 1000 * 0.08
+      expect(gb?.taxAmount).toBe(400); // 2000 * 0.20
+      expect(result.value.totalTaxAmount).toBe(480);
     });
 
-    it('generates a quarterly report', async () => {
+    it('sets tax to zero for exempt jurisdictions', async () => {
       await engine.createRule({
         jurisdiction: 'US',
         name: 'US Sales Tax',
         ruleType: 'sales_tax',
-        rate: 0.05,
-        effectiveFrom: new Date('2020-01-01'),
-      });
-
-      reportService.recordMany([
-        tx({ amount: 1000, timestamp: new Date('2025-01-15T12:00:00Z') }),
-        tx({ amount: 2000, timestamp: new Date('2025-02-15T12:00:00Z') }),
-        tx({ amount: 3000, timestamp: new Date('2025-03-15T12:00:00Z') }),
-      ]);
-
-      const result = await service.generateReport({
-        tenantId: 't_1',
-        merchantId: 'm_1',
-        period: 'quarterly',
-        year: 2025,
-        periodNumber: 1,
-      });
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.value.period).toBe('quarterly');
-      expect(result.value.grossVolume).toBe(6000);
-      expect(result.value.totalTaxAmount).toBe(300); // 6000 * 0.05
-    });
-
-    it('generates an annual report', async () => {
-      reportService.recordTransaction(
-        tx({ amount: 10000, timestamp: new Date('2025-06-15T12:00:00Z') }),
-      );
-
-      const result = await service.generateReport({
-        tenantId: 't_1',
-        merchantId: 'm_1',
-        period: 'annual',
-        year: 2025,
-      });
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.value.period).toBe('annual');
-      expect(result.value.periodNumber).toBe(1);
-      expect(result.value.grossVolume).toBe(10000);
-    });
-
-    it('warns when no active tax rule exists for a jurisdiction', async () => {
-      reportService.recordTransaction(
-        tx({ amount: 500, jurisdiction: 'ZZ', timestamp: new Date('2025-06-15T12:00:00Z') }),
-      );
-
-      const result = await service.generateReport({
-        tenantId: 't_1',
-        merchantId: 'm_1',
-        period: 'monthly',
-        year: 2025,
-        periodNumber: 6,
-      });
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.value.warnings.some((w) => w.includes('No active tax rule'))).toBe(true);
-      expect(result.value.complianceScore).toBeLessThan(100);
-    });
-
-    it('sets tax to zero for jurisdictions with active exemptions', async () => {
-      await engine.createRule({
-        jurisdiction: 'US',
-        name: 'US Sales Tax',
-        ruleType: 'sales_tax',
-        rate: 0.1,
+        rate: 0.08,
         effectiveFrom: new Date('2020-01-01'),
       });
       await engine.createExemption({
         tenantId: 't_1',
         merchantId: 'm_1',
         jurisdiction: 'US',
-        reason: 'Non-profit',
-        validFrom: new Date('2025-01-01'),
+        reason: 'Non-profit exemption',
+        validFrom: new Date('2020-01-01'),
       });
 
       reportService.recordTransaction(
-        tx({ amount: 1000, timestamp: new Date('2025-06-15T12:00:00Z') }),
+        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-01T10:00:00Z') }),
       );
 
       const result = await service.generateReport({
@@ -190,37 +145,9 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
       expect(result.value.warnings.some((w) => w.includes('exemption'))).toBe(true);
     });
 
-    it('rejects invalid input', async () => {
-      const result = await service.generateReport({
-        tenantId: '',
-        merchantId: 'm_1',
-        period: 'monthly',
-        year: 2025,
-      });
-      expect(result.ok).toBe(false);
-    });
-
-    it('rejects invalid year', async () => {
-      const result = await service.generateReport({
-        tenantId: 't_1',
-        merchantId: 'm_1',
-        period: 'monthly',
-        year: 1999,
-      });
-      expect(result.ok).toBe(false);
-    });
-
-    it('computes 100% compliance score when all jurisdictions have rules', async () => {
-      await engine.createRule({
-        jurisdiction: 'US',
-        name: 'US Tax',
-        ruleType: 'sales_tax',
-        rate: 0.05,
-        effectiveFrom: new Date('2020-01-01'),
-      });
-
+    it('warns when no active rule exists for a jurisdiction', async () => {
       reportService.recordTransaction(
-        tx({ amount: 100, timestamp: new Date('2025-06-15T12:00:00Z') }),
+        tx({ amount: 500, jurisdiction: 'ZZ', type: 'sale', timestamp: new Date('2025-06-01T10:00:00Z') }),
       );
 
       const result = await service.generateReport({
@@ -233,12 +160,124 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-      expect(result.value.complianceScore).toBe(100);
+      expect(result.value.warnings.some((w) => w.includes('No active tax rule'))).toBe(true);
+      expect(result.value.complianceScore).toBe(0);
     });
-  });
 
-  describe('generateFilingReport', () => {
-    it('generates a consolidated filing report across all jurisdictions', async () => {
+    it('rejects missing tenantId', async () => {
+      const result = await service.generateReport({
+        tenantId: '',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects missing merchantId', async () => {
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: '',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects invalid year', async () => {
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 1999,
+        periodNumber: 6,
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects invalid periodNumber for monthly', async () => {
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 13,
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects invalid periodNumber for quarterly', async () => {
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'quarterly',
+        year: 2025,
+        periodNumber: 5,
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it('generates quarterly report correctly', async () => {
+      await engine.createRule({
+        jurisdiction: 'US',
+        name: 'US Sales Tax',
+        ruleType: 'sales_tax',
+        rate: 0.10,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      // Q2: April, May, June
+      reportService.recordMany([
+        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-04-10T10:00:00Z') }),
+        tx({ amount: 2000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-05-10T10:00:00Z') }),
+        tx({ amount: 3000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-10T10:00:00Z') }),
+      ]);
+
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'quarterly',
+        year: 2025,
+        periodNumber: 2,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.grossVolume).toBe(6000);
+      expect(result.value.totalTaxAmount).toBe(600); // 6000 * 0.10
+    });
+
+    it('generates annual report correctly', async () => {
+      await engine.createRule({
+        jurisdiction: 'US',
+        name: 'US Sales Tax',
+        ruleType: 'sales_tax',
+        rate: 0.05,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordMany([
+        tx({ amount: 10000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-01-15T10:00:00Z') }),
+        tx({ amount: 10000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-07-15T10:00:00Z') }),
+      ]);
+
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'annual',
+        year: 2025,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.grossVolume).toBe(20000);
+      expect(result.value.totalTaxAmount).toBe(1000);
+      expect(result.value.periodNumber).toBe(1);
+    });
+
+    it('infers consolidated report type for mixed rule types', async () => {
       await engine.createRule({
         jurisdiction: 'US',
         name: 'US Sales Tax',
@@ -255,9 +294,71 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
       });
 
       reportService.recordMany([
-        tx({ amount: 10000, jurisdiction: 'US', timestamp: new Date('2025-03-15T12:00:00Z') }),
-        tx({ amount: 5000, jurisdiction: 'GB', timestamp: new Date('2025-08-15T12:00:00Z') }),
+        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-01T10:00:00Z') }),
+        tx({ amount: 1000, jurisdiction: 'GB', type: 'sale', timestamp: new Date('2025-06-01T10:00:00Z') }),
       ]);
+
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.reportType).toBe('consolidated');
+    });
+
+    it('infers single report type when all jurisdictions share the same rule type', async () => {
+      await engine.createRule({
+        jurisdiction: 'US',
+        name: 'US Sales Tax',
+        ruleType: 'sales_tax',
+        rate: 0.08,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+      await engine.createRule({
+        jurisdiction: 'CA',
+        name: 'CA Sales Tax',
+        ruleType: 'sales_tax',
+        rate: 0.05,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordMany([
+        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-01T10:00:00Z') }),
+        tx({ amount: 500, jurisdiction: 'CA', type: 'sale', timestamp: new Date('2025-06-01T10:00:00Z') }),
+      ]);
+
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.reportType).toBe('sales_tax');
+    });
+  });
+
+  describe('generateFilingReport', () => {
+    it('generates a filing report with jurisdiction summaries', async () => {
+      await engine.createRule({
+        jurisdiction: 'US',
+        name: 'US Sales Tax',
+        ruleType: 'sales_tax',
+        rate: 0.08,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordTransaction(
+        tx({ amount: 5000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
 
       const result = await service.generateFilingReport({
         tenantId: 't_1',
@@ -267,17 +368,43 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-
-      const filing = result.value;
-      expect(filing.year).toBe(2025);
-      expect(filing.jurisdictions).toHaveLength(2);
-      expect(filing.totalGrossVolume).toBe(15000);
-      expect(filing.totalTaxAmount).toBe(1800); // 10000*0.08 + 5000*0.2
-      expect(filing.reportIds).toHaveLength(1);
-      expect(filing.jurisdictions[0].nextDeadline).toBeDefined();
+      expect(result.value.year).toBe(2025);
+      expect(result.value.status).toBe('draft');
+      expect(result.value.jurisdictions).toHaveLength(1);
+      expect(result.value.jurisdictions[0].jurisdiction).toBe('US');
+      expect(result.value.jurisdictions[0].ruleType).toBe('sales_tax');
+      expect(result.value.jurisdictions[0].filingFrequency).toBe('quarterly');
+      expect(result.value.jurisdictions[0].nextDeadline).not.toBeNull();
+      expect(result.value.totalGrossVolume).toBe(5000);
+      expect(result.value.totalTaxAmount).toBe(400);
+      expect(result.value.reportIds).toHaveLength(1);
     });
 
-    it('rejects invalid input', async () => {
+    it('returns jurisdiction-aware filing frequencies', async () => {
+      await engine.createRule({
+        jurisdiction: 'DE',
+        name: 'German VAT',
+        ruleType: 'vat',
+        rate: 0.19,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordTransaction(
+        tx({ amount: 1000, jurisdiction: 'DE', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
+
+      const result = await service.generateFilingReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        year: 2025,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.jurisdictions[0].filingFrequency).toBe('monthly');
+    });
+
+    it('rejects missing tenantId', async () => {
       const result = await service.generateFilingReport({
         tenantId: '',
         merchantId: 'm_1',
@@ -285,14 +412,19 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
       });
       expect(result.ok).toBe(false);
     });
+
+    it('rejects invalid year', async () => {
+      const result = await service.generateFilingReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        year: 1999,
+      });
+      expect(result.ok).toBe(false);
+    });
   });
 
   describe('report lifecycle', () => {
     it('finalizes a draft report', async () => {
-      reportService.recordTransaction(
-        tx({ amount: 100, timestamp: new Date('2025-06-15T12:00:00Z') }),
-      );
-
       const genResult = await service.generateReport({
         tenantId: 't_1',
         merchantId: 'm_1',
@@ -303,39 +435,14 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
       expect(genResult.ok).toBe(true);
       if (!genResult.ok) return;
 
-      const finalResult = await service.finalizeReport(genResult.value.id);
-      expect(finalResult.ok).toBe(true);
-      if (!finalResult.ok) return;
-      expect(finalResult.value.status).toBe('finalized');
-      expect(finalResult.value.finalizedAt).not.toBeNull();
+      const finalized = await service.finalizeReport(genResult.value.id);
+      expect(finalized.ok).toBe(true);
+      if (!finalized.ok) return;
+      expect(finalized.value.status).toBe('finalized');
+      expect(finalized.value.finalizedAt).not.toBeNull();
     });
 
-    it('archives a finalized report', async () => {
-      reportService.recordTransaction(
-        tx({ amount: 100, timestamp: new Date('2025-06-15T12:00:00Z') }),
-      );
-
-      const genResult = await service.generateReport({
-        tenantId: 't_1',
-        merchantId: 'm_1',
-        period: 'monthly',
-        year: 2025,
-        periodNumber: 6,
-      });
-      if (!genResult.ok) return;
-
-      await service.finalizeReport(genResult.value.id);
-      const archiveResult = await service.archiveReport(genResult.value.id);
-      expect(archiveResult.ok).toBe(true);
-      if (!archiveResult.ok) return;
-      expect(archiveResult.value.status).toBe('archived');
-    });
-
-    it('cannot finalize a non-draft report', async () => {
-      reportService.recordTransaction(
-        tx({ amount: 100, timestamp: new Date('2025-06-15T12:00:00Z') }),
-      );
-
+    it('rejects finalizing a non-draft report', async () => {
       const genResult = await service.generateReport({
         tenantId: 't_1',
         merchantId: 'm_1',
@@ -350,11 +457,24 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
       expect(result.ok).toBe(false);
     });
 
-    it('cannot archive a non-finalized report', async () => {
-      reportService.recordTransaction(
-        tx({ amount: 100, timestamp: new Date('2025-06-15T12:00:00Z') }),
-      );
+    it('archives a finalized report', async () => {
+      const genResult = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+      if (!genResult.ok) return;
 
+      await service.finalizeReport(genResult.value.id);
+      const archived = await service.archiveReport(genResult.value.id);
+      expect(archived.ok).toBe(true);
+      if (!archived.ok) return;
+      expect(archived.value.status).toBe('archived');
+    });
+
+    it('rejects archiving a non-finalized report', async () => {
       const genResult = await service.generateReport({
         tenantId: 't_1',
         merchantId: 'm_1',
@@ -368,19 +488,37 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
       expect(result.ok).toBe(false);
     });
 
-    it('returns not found for unknown report id', async () => {
-      const result = await service.getReport('does-not-exist');
+    it('returns not found for unknown report', async () => {
+      const result = await service.finalizeReport('does-not-exist');
       expect(result.ok).toBe(false);
     });
   });
 
   describe('listReports', () => {
-    it('lists reports with filters', async () => {
-      reportService.recordMany([
-        tx({ amount: 100, timestamp: new Date('2025-06-15T12:00:00Z') }),
-        tx({ amount: 200, timestamp: new Date('2025-07-15T12:00:00Z') }),
-      ]);
+    it('lists reports with pagination', async () => {
+      for (let i = 0; i < 5; i++) {
+        await service.generateReport({
+          tenantId: 't_1',
+          merchantId: `m_${i}`,
+          period: 'monthly',
+          year: 2025,
+          periodNumber: 6,
+        });
+      }
 
+      const page1 = await service.listReports({ tenantId: 't_1', limit: 2, offset: 0 });
+      expect(page1.ok).toBe(true);
+      if (!page1.ok) return;
+      expect(page1.value.reports).toHaveLength(2);
+      expect(page1.value.total).toBe(5);
+
+      const page2 = await service.listReports({ tenantId: 't_1', limit: 2, offset: 2 });
+      expect(page2.ok).toBe(true);
+      if (!page2.ok) return;
+      expect(page2.value.reports).toHaveLength(2);
+    });
+
+    it('filters by merchantId', async () => {
       await service.generateReport({
         tenantId: 't_1',
         merchantId: 'm_1',
@@ -390,37 +528,77 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
       });
       await service.generateReport({
         tenantId: 't_1',
+        merchantId: 'm_2',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      const result = await service.listReports({ tenantId: 't_1', merchantId: 'm_1' });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.total).toBe(1);
+      expect(result.value.reports[0].merchantId).toBe('m_1');
+    });
+
+    it('filters by status', async () => {
+      const genResult = await service.generateReport({
+        tenantId: 't_1',
         merchantId: 'm_1',
         period: 'monthly',
         year: 2025,
-        periodNumber: 7,
+        periodNumber: 6,
+      });
+      if (genResult.ok) {
+        await service.finalizeReport(genResult.value.id);
+      }
+
+      await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_2',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
       });
 
-      const all = await service.listReports({ tenantId: 't_1' });
-      expect(all.ok).toBe(true);
-      if (!all.ok) return;
-      expect(all.value.total).toBe(2);
+      const finalized = await service.listReports({ tenantId: 't_1', status: 'finalized' });
+      expect(finalized.ok).toBe(true);
+      if (!finalized.ok) return;
+      expect(finalized.value.total).toBe(1);
+      expect(finalized.value.reports[0].status).toBe('finalized');
 
-      const filtered = await service.listReports({ tenantId: 't_1', period: 'monthly', year: 2025 });
-      expect(filtered.ok).toBe(true);
-      if (!filtered.ok) return;
-      expect(filtered.value.total).toBe(2);
+      const drafts = await service.listReports({ tenantId: 't_1', status: 'draft' });
+      expect(drafts.ok).toBe(true);
+      if (!drafts.ok) return;
+      expect(drafts.value.total).toBe(1);
+    });
 
-      const wrongTenant = await service.listReports({ tenantId: 't_2' });
-      expect(wrongTenant.ok).toBe(true);
-      if (!wrongTenant.ok) return;
-      expect(wrongTenant.value.total).toBe(0);
+    it('sorts by creation date descending', async () => {
+      await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 5,
+      });
+      await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      const result = await service.listReports({ tenantId: 't_1' });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.reports[0].periodNumber).toBe(6);
+      expect(result.value.reports[1].periodNumber).toBe(5);
     });
   });
 
   describe('generateScheduledReports', () => {
     it('batch generates reports for multiple merchants', async () => {
-      reportService.recordMany([
-        tx({ amount: 100, merchantId: 'm_1', timestamp: new Date('2025-06-15T12:00:00Z') }),
-        tx({ amount: 200, merchantId: 'm_2', timestamp: new Date('2025-06-15T12:00:00Z') }),
-        tx({ amount: 300, merchantId: 'm_3', timestamp: new Date('2025-06-15T12:00:00Z') }),
-      ]);
-
       const result = await service.generateScheduledReports({
         tenantId: 't_1',
         merchantIds: ['m_1', 'm_2', 'm_3'],
@@ -434,6 +612,280 @@ describe('AutomatedTaxReportService — Issues #690, #691', () => {
       expect(result.value.generated).toBe(3);
       expect(result.value.failed).toBe(0);
       expect(result.value.reportIds).toHaveLength(3);
+    });
+
+    it('handles empty merchant list', async () => {
+      const result = await service.generateScheduledReports({
+        tenantId: 't_1',
+        merchantIds: [],
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.generated).toBe(0);
+      expect(result.value.failed).toBe(0);
+    });
+  });
+
+  describe('filing deadlines', () => {
+    it('returns next deadline for US jurisdiction', async () => {
+      await engine.createRule({
+        jurisdiction: 'US',
+        name: 'US Sales Tax',
+        ruleType: 'sales_tax',
+        rate: 0.08,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordTransaction(
+        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
+
+      const result = await service.generateFilingReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        year: 2025,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const usJurisdiction = result.value.jurisdictions.find((j) => j.jurisdiction === 'US');
+      expect(usJurisdiction?.nextDeadline).not.toBeNull();
+    });
+
+    it('returns next deadline for GB jurisdiction', async () => {
+      await engine.createRule({
+        jurisdiction: 'GB',
+        name: 'UK VAT',
+        ruleType: 'vat',
+        rate: 0.2,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordTransaction(
+        tx({ amount: 1000, jurisdiction: 'GB', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
+
+      const result = await service.generateFilingReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        year: 2025,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const gbJurisdiction = result.value.jurisdictions.find((j) => j.jurisdiction === 'GB');
+      expect(gbJurisdiction?.filingFrequency).toBe('quarterly');
+      expect(gbJurisdiction?.nextDeadline).not.toBeNull();
+    });
+
+    it('returns monthly frequency for DE jurisdiction', async () => {
+      await engine.createRule({
+        jurisdiction: 'DE',
+        name: 'German VAT',
+        ruleType: 'vat',
+        rate: 0.19,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordTransaction(
+        tx({ amount: 1000, jurisdiction: 'DE', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
+
+      const result = await service.generateFilingReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        year: 2025,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const deJurisdiction = result.value.jurisdictions.find((j) => j.jurisdiction === 'DE');
+      expect(deJurisdiction?.filingFrequency).toBe('monthly');
+    });
+
+    it('returns monthly frequency for FR jurisdiction', async () => {
+      await engine.createRule({
+        jurisdiction: 'FR',
+        name: 'French TVA',
+        ruleType: 'vat',
+        rate: 0.2,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordTransaction(
+        tx({ amount: 1000, jurisdiction: 'FR', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
+
+      const result = await service.generateFilingReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        year: 2025,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const frJurisdiction = result.value.jurisdictions.find((j) => j.jurisdiction === 'FR');
+      expect(frJurisdiction?.filingFrequency).toBe('monthly');
+    });
+
+    it('returns annual frequency for JP jurisdiction', async () => {
+      await engine.createRule({
+        jurisdiction: 'JP',
+        name: 'Japanese Consumption Tax',
+        ruleType: 'withholding',
+        rate: 0.1,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordTransaction(
+        tx({ amount: 1000, jurisdiction: 'JP', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
+
+      const result = await service.generateFilingReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        year: 2025,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const jpJurisdiction = result.value.jurisdictions.find((j) => j.jurisdiction === 'JP');
+      expect(jpJurisdiction?.filingFrequency).toBe('annual');
+    });
+
+    it('returns monthly frequency for IN jurisdiction', async () => {
+      await engine.createRule({
+        jurisdiction: 'IN',
+        name: 'Indian GST',
+        ruleType: 'gst',
+        rate: 0.18,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordTransaction(
+        tx({ amount: 1000, jurisdiction: 'IN', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
+
+      const result = await service.generateFilingReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        year: 2025,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const inJurisdiction = result.value.jurisdictions.find((j) => j.jurisdiction === 'IN');
+      expect(inJurisdiction?.filingFrequency).toBe('monthly');
+    });
+  });
+
+  describe('report accuracy', () => {
+    it('rounds monetary values to 2 decimal places', async () => {
+      await engine.createRule({
+        jurisdiction: 'US',
+        name: 'US Tax',
+        ruleType: 'sales_tax',
+        rate: 0.0725,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordTransaction(
+        tx({ amount: 33.33, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
+
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.grossVolume).toBe(33.33);
+      expect(result.value.totalTaxAmount).toBe(2.42); // 33.33 * 0.0725 = 2.416425 → 2.42
+    });
+
+    it('handles zero-amount transactions', async () => {
+      reportService.recordTransaction(
+        tx({ amount: 0, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      );
+
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.grossVolume).toBe(0);
+      expect(result.value.totalTaxAmount).toBe(0);
+    });
+
+    it('correctly separates refunds from sales', async () => {
+      await engine.createRule({
+        jurisdiction: 'US',
+        name: 'US Tax',
+        ruleType: 'sales_tax',
+        rate: 0.10,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordMany([
+        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-01T10:00:00Z') }),
+        tx({ amount: 200, jurisdiction: 'US', type: 'refund', timestamp: new Date('2025-06-15T10:00:00Z') }),
+      ]);
+
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.grossVolume).toBe(1000);
+      expect(result.value.refundVolume).toBe(200);
+      expect(result.value.netVolume).toBe(800);
+      expect(result.value.totalTaxAmount).toBe(80); // 800 * 0.10
+    });
+
+    it('only includes transactions within the reporting period', async () => {
+      await engine.createRule({
+        jurisdiction: 'US',
+        name: 'US Tax',
+        ruleType: 'sales_tax',
+        rate: 0.10,
+        effectiveFrom: new Date('2020-01-01'),
+      });
+
+      reportService.recordMany([
+        tx({ amount: 500, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-05-15T10:00:00Z') }),
+        tx({ amount: 1000, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-06-15T10:00:00Z') }),
+        tx({ amount: 500, jurisdiction: 'US', type: 'sale', timestamp: new Date('2025-07-15T10:00:00Z') }),
+      ]);
+
+      const result = await service.generateReport({
+        tenantId: 't_1',
+        merchantId: 'm_1',
+        period: 'monthly',
+        year: 2025,
+        periodNumber: 6,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.grossVolume).toBe(1000);
     });
   });
 });

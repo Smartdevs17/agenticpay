@@ -539,28 +539,110 @@ export class AutomatedTaxReportService extends BaseService {
     return 'consolidated';
   }
 
-  private inferFilingFrequency(_jurisdiction: string): string {
-    // Default: quarterly for most jurisdictions
-    return 'quarterly';
+  private inferFilingFrequency(jurisdiction: string): string {
+    const j = jurisdiction.toUpperCase();
+    const frequencyMap: Record<string, string> = {
+      US: 'quarterly',
+      GB: 'quarterly',
+      DE: 'monthly',
+      FR: 'monthly',
+      CA: 'quarterly',
+      AU: 'quarterly',
+      JP: 'annual',
+      IN: 'monthly',
+    };
+    return frequencyMap[j] ?? 'quarterly';
   }
 
   private getNextFilingDeadline(jurisdiction: string, year: number): string | null {
     const now = new Date();
-    // Common deadlines: US quarterly (Apr 15, Jul 15, Oct 15, Jan 15), EU monthly (21st)
-    if (jurisdiction === 'US') {
-      const deadlines = [
-        new Date(Date.UTC(year, 3, 15)),
-        new Date(Date.UTC(year, 6, 15)),
-        new Date(Date.UTC(year, 9, 15)),
-        new Date(Date.UTC(year + 1, 0, 15)),
-      ];
-      const upcoming = deadlines.find((d) => d > now);
-      return upcoming?.toISOString() ?? null;
+    const j = jurisdiction.toUpperCase();
+
+    const deadlineRules: Record<string, Array<{ month: number; day: number }>> = {
+      US: [
+        { month: 3, day: 15 },
+        { month: 6, day: 15 },
+        { month: 9, day: 15 },
+        { month: 0, day: 15 }, // Jan 15 of next year
+      ],
+      GB: [
+        { month: 0, day: 7 },
+        { month: 3, day: 7 },
+        { month: 6, day: 7 },
+        { month: 9, day: 7 },
+      ],
+      DE: [
+        { month: 0, day: 10 },
+        { month: 1, day: 10 },
+        { month: 2, day: 10 },
+        { month: 3, day: 10 },
+        { month: 4, day: 10 },
+        { month: 5, day: 10 },
+        { month: 6, day: 10 },
+        { month: 7, day: 10 },
+        { month: 8, day: 10 },
+        { month: 9, day: 10 },
+        { month: 10, day: 10 },
+        { month: 11, day: 10 },
+      ],
+      FR: [
+        { month: 0, day: 24 },
+        { month: 1, day: 24 },
+        { month: 2, day: 24 },
+        { month: 3, day: 24 },
+        { month: 4, day: 24 },
+        { month: 5, day: 24 },
+        { month: 6, day: 24 },
+        { month: 7, day: 24 },
+        { month: 8, day: 24 },
+        { month: 9, day: 24 },
+        { month: 10, day: 24 },
+        { month: 11, day: 24 },
+      ],
+      CA: [
+        { month: 0, day: 15 },
+        { month: 3, day: 15 },
+        { month: 6, day: 15 },
+        { month: 9, day: 15 },
+      ],
+      AU: [
+        { month: 0, day: 28 },
+        { month: 3, day: 28 },
+        { month: 6, day: 28 },
+        { month: 9, day: 28 },
+      ],
+      JP: [{ month: 2, day: 31 }], // Annual: March 31
+      IN: [
+        { month: 0, day: 20 },
+        { month: 1, day: 20 },
+        { month: 2, day: 20 },
+        { month: 3, day: 20 },
+        { month: 4, day: 20 },
+        { month: 5, day: 20 },
+        { month: 6, day: 20 },
+        { month: 7, day: 20 },
+        { month: 8, day: 20 },
+        { month: 9, day: 20 },
+        { month: 10, day: 20 },
+        { month: 11, day: 20 },
+      ],
+    };
+
+    const rules = deadlineRules[j];
+    if (!rules) {
+      // Default: end of month following quarter end
+      const quarterEnd = new Date(Date.UTC(year, Math.ceil((now.getUTCMonth() + 1) / 3) * 3, 0));
+      const deadline = new Date(Date.UTC(quarterEnd.getUTCFullYear(), quarterEnd.getUTCMonth() + 1, 21));
+      return deadline > now ? deadline.toISOString() : null;
     }
-    // Default: end of month following quarter end
-    const quarterEnd = new Date(Date.UTC(year, Math.ceil((now.getUTCMonth() + 1) / 3) * 3, 0));
-    const deadline = new Date(Date.UTC(quarterEnd.getUTCFullYear(), quarterEnd.getUTCMonth() + 1, 21));
-    return deadline > now ? deadline.toISOString() : null;
+
+    for (const rule of rules) {
+      const deadlineYear = rule.month === 0 && j === 'US' ? year + 1 : year;
+      const deadline = new Date(Date.UTC(deadlineYear, rule.month, rule.day, 23, 59, 59));
+      if (deadline > now) return deadline.toISOString();
+    }
+
+    return null;
   }
 
   resetForTests(): void {
