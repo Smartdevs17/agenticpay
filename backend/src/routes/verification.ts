@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   verifyWork,
   getVerification,
+  listVerifications,
   updateVerification,
   deleteVerification,
 } from '../services/verification.js';
@@ -163,5 +164,16 @@ verificationRouter.get(
       throw new AppError(404, 'Verification not found', 'NOT_FOUND');
     }
     res.json(result);
+  })
+);
+
+// List all verification results with optional project filter
+verificationRouter.get(
+  '/',
+  cacheControl({ maxAge: CacheTTL.SHORT }),
+  asyncHandler(async (req, res) => {
+    const projectId = req.query.projectId ? String(req.query.projectId) : undefined;
+    const results = listVerifications(projectId);
+    res.json({ data: results, count: results.length });
   })
 );

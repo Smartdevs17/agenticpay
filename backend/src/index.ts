@@ -106,6 +106,8 @@ import SandboxManager from './services/sandbox.js';
 import MockPaymentProcessor from './services/mock-payments.js';
 import TestDataSeeder from './services/test-data-seeder.js';
 import { emailV2Router } from './routes/email-v2.js';
+import { apiKeysRouter } from './routes/api-keys.js';
+import { milestonesRouter } from './routes/milestones.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -313,6 +315,12 @@ app.use('/api/v1/tax', taxRouter);
 
 // Project + milestone delivery approval workflow
 app.use('/api/v1/projects', projectsRouter);
+
+// Milestone dependency management
+app.use('/api/v1/milestones', milestonesRouter);
+
+// API key management
+app.use('/api/v1/api-keys', apiKeysRouter);
 
 // Sandbox environment for testing (with relaxed rate limits)
 const sandboxRouter = createSandboxRouter(sandboxManager, mockPaymentProcessor, testDataSeeder);

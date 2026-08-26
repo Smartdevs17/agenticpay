@@ -1,5 +1,20 @@
 import { apiCall } from '@/lib/api/client';
 
+export interface CodeQualityMetrics {
+  linesOfCode: number;
+  testCoverage: number;
+  cyclomaticComplexity: number;
+  documentationCoverage: number;
+  duplicateCodeRatio: number;
+  maintainabilityIndex: number;
+}
+
+export interface PlagiarismResult {
+  overallSimilarity: number;
+  duplicateSegments: Array<{ source: string; similarity: number; lines: string }>;
+  externalMatches: Array<{ repository: string; similarity: number; description: string }>;
+}
+
 export interface VerificationRequest {
     repositoryUrl: string;
     milestoneDescription: string;
@@ -14,6 +29,8 @@ export interface VerificationResponse {
     summary: string;
     details: string[];
     verifiedAt: string;
+    codeQuality?: CodeQualityMetrics;
+    plagiarism?: PlagiarismResult;
 }
 
 export interface InvoiceRequest {
@@ -176,6 +193,48 @@ export const api = {
         return apiCall(`/verification/${id}`, {
             method: 'GET',
         });
+    },
+
+    /**
+     * List Verification Results
+     */
+    listVerifications: async (projectId?: string) => {
+        const query = projectId ? `?projectId=${projectId}` : '';
+        return apiCall<{ data: VerificationResponse[] }>(`/verification${query}`, {
+            method: 'GET',
+        });
+    },
+
+    /**
+     * API Key Management
+     */
+    apiKeys: {
+      list: async () => apiCall<{ data: any[] }>('/api-keys', { method: 'GET' }),
+      create: async (payload: { name: string; tier?: string; scopes?: string[]; expiresInDays?: number }) =>
+        apiCall<{ data: any; rawKey: string }>('/api-keys', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        }),
+      getUsage: async (windowMs?: number) =>
+        apiCall<{ data: any[] }>(`/api-keys/usage${windowMs ? `?window=${windowMs}` : ''}`, { method: 'GET' }),
+      revoke: async (id: string) => apiCall(`/api-keys/${id}/revoke`, { method: 'POST' }),
+      rotate: async (id: string) => apiCall<{ data: any; rawKey: string }>(`/api-keys/${id}/rotate`, { method: 'POST' }),
+      delete: async (id: string) => apiCall(`/api-keys/${id}`, { method: 'DELETE' }),
+    },
+
+    /**
+     * Milestone Dependencies
+     */
+    milestones: {
+      getGraph: async (projectId: string) => apiCall<{ data: any }>(`/milestones/${projectId}/graph`, { method: 'GET' }),
+      getDependencies: async (projectId: string) => apiCall<{ data: any[] }>(`/milestones/${projectId}/dependencies`, { method: 'GET' }),
+      addDependency: async (projectId: string, payload: { milestoneId: string; dependsOnMilestoneId: string }) =>
+        apiCall(`/milestones/${projectId}/dependencies`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        }),
+      removeDependency: async (dependencyId: string) => apiCall(`/milestones/dependencies/${dependencyId}`, { method: 'DELETE' }),
+      getBlocked: async (projectId: string) => apiCall<{ data: string[] }>(`/milestones/${projectId}/blocked`, { method: 'GET' }),
     },
 
     /**

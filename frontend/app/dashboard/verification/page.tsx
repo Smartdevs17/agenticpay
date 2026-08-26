@@ -1,152 +1,200 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { apiCall } from '@/lib/api/client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
-
-type KYBStatus = 'pending' | 'documents_submitted' | 'under_review' | 'approved' | 'rejected' | 'requires_more_info' | 'expired';
-
-interface KYBRecord {
-  id: string;
-  businessName: string;
-  status: KYBStatus;
-  riskScore: number;
-  riskLevel: 'low' | 'medium' | 'high';
-  submittedAt: string;
-  expiresAt?: string;
-  reviewerNotes?: string;
+interface CodeQualityMetrics {
+  linesOfCode: number;
+  testCoverage: number;
+  cyclomaticComplexity: number;
+  documentationCoverage: number;
+  duplicateCodeRatio: number;
+  maintainabilityIndex: number;
 }
 
-const statusColors: Record<KYBStatus, string> = {
-  pending: 'bg-gray-100 text-gray-700',
-  documents_submitted: 'bg-blue-100 text-blue-700',
-  under_review: 'bg-yellow-100 text-yellow-700',
-  approved: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-700',
-  requires_more_info: 'bg-orange-100 text-orange-700',
-  expired: 'bg-gray-100 text-gray-500',
+interface PlagiarismResult {
+  overallSimilarity: number;
+  duplicateSegments: Array<{ source: string; similarity: number; lines: string }>;
+  externalMatches: Array<{ repository: string; similarity: number; description: string }>;
+}
+
+interface VerificationResult {
+  id: string;
+  projectId: string;
+  status: 'passed' | 'failed' | 'pending';
+  score: number;
+  summary: string;
+  details: string[];
+  verifiedAt: string;
+  codeQuality?: CodeQualityMetrics;
+  plagiarism?: PlagiarismResult;
+}
+
+const statusColors: Record<string, string> = {
+  passed: 'bg-green-100 text-green-700',
+  failed: 'bg-red-100 text-red-700',
+  pending: 'bg-yellow-100 text-yellow-700',
 };
 
-const riskColors = { low: 'text-green-600', medium: 'text-yellow-600', high: 'text-red-600' };
-
-export default function KYBVerificationPage() {
-  const [step, setStep] = useState<'form' | 'result'>('form');
+export default function VerificationPage() {
+  const [step, setStep] = useState<'form' | 'result' | 'history'>('form');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [record, setRecord] = useState<KYBRecord | null>(null);
+  const [result, setResult] = useState<VerificationResult | null>(null);
+  const [history, setHistory] = useState<VerificationResult[]>([]);
 
   const [form, setForm] = useState({
-    businessId: '',
-    businessName: '',
-    registrationNumber: '',
-    registrationCountry: '',
-    businessType: 'llc',
-    incorporationDate: '',
-    contactEmail: '',
-    website: '',
-    uboName: '',
-    uboOwnership: '',
-    uboNationality: '',
-    uboDob: '',
-    uboDocType: 'passport',
-    uboDocNumber: '',
-    docType: 'registration_certificate',
-    docUrl: '',
-    docName: '',
+    repositoryUrl: '',
+    milestoneDescription: '',
+    projectId: '',
   });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
-  };
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const res = await apiCall<{ data: VerificationResult[] }>('/verification');
+        setHistory(res.data);
+      } catch (err) {
+        console.error('Failed to fetch history:', err);
+      }
+    };
+    fetchHistory();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
-    const payload = {
-      businessId: form.businessId,
-      businessName: form.businessName,
-      registrationNumber: form.registrationNumber,
-      registrationCountry: form.registrationCountry,
-      businessType: form.businessType,
-      incorporationDate: form.incorporationDate,
-      contactEmail: form.contactEmail,
-      ...(form.website ? { website: form.website } : {}),
-      ubos: [{
-        name: form.uboName,
-        ownershipPercentage: Number(form.uboOwnership),
-        nationality: form.uboNationality,
-        dateOfBirth: form.uboDob,
-        documentType: form.uboDocType,
-        documentNumber: form.uboDocNumber,
-      }],
-      documents: [{
-        type: form.docType,
-        url: form.docUrl,
-        name: form.docName,
-      }],
-    };
-
     try {
-      const res = await fetch(`${API_BASE}/kyb/submit`, {
+      const res = await apiCall<VerificationResult>('/verification/verify', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(form),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message || 'Submission failed');
-      setRecord(data);
+      setResult(res);
       setStep('result');
+      setHistory((prev) => [res, ...prev]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Submission failed');
+      setError(err instanceof Error ? err.message : 'Verification failed');
     } finally {
       setLoading(false);
     }
   };
 
-  if (step === 'result' && record) {
+  const renderMetrics = (label: string, value: number, max = 100, unit = '%') => (
+    <div className="flex items-center justify-between p-2 border rounded">
+      <span className="text-sm">{label}</span>
+      <span className="font-mono text-sm font-medium">
+        {unit === '%' ? `${Math.min(value, max)}${unit}` : value}
+      </span>
+    </div>
+  );
+
+  if (step === 'result' && result) {
     return (
-      <div className="max-w-2xl mx-auto p-6 space-y-4">
-        <h1 className="text-2xl font-bold">KYB Submitted</h1>
+      <div className="max-w-4xl mx-auto p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Verification Result</h1>
+          <Button variant="outline" onClick={() => setStep('form')}>New Verification</Button>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
-              {record.businessName}
-              <span className={`text-xs px-2 py-1 rounded-full font-medium ${statusColors[record.status]}`}>
-                {record.status.replace(/_/g, ' ')}
-              </span>
+              <span>Score: {result.score}/100</span>
+              <Badge className={statusColors[result.status]}>{result.status}</Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p><span className="font-medium">Record ID:</span> {record.id}</p>
-            <p>
-              <span className="font-medium">Risk Score:</span>{' '}
-              <span className={riskColors[record.riskLevel]}>{record.riskScore}/100 ({record.riskLevel})</span>
+          <CardContent className="space-y-4">
+            <p className="text-sm">{result.summary}</p>
+            <p className="text-xs text-muted-foreground">
+              Verified: {new Date(result.verifiedAt).toLocaleString()}
             </p>
-            <p><span className="font-medium">Submitted:</span> {new Date(record.submittedAt).toLocaleString()}</p>
-            {record.reviewerNotes && (
-              <p><span className="font-medium">Notes:</span> {record.reviewerNotes}</p>
-            )}
-            {record.expiresAt && (
-              <p><span className="font-medium">Expires:</span> {new Date(record.expiresAt).toLocaleDateString()}</p>
+
+            {result.details.length > 0 && (
+              <div>
+                <p className="text-sm font-medium mb-2">Details</p>
+                <ul className="space-y-1">
+                  {result.details.map((d, i) => (
+                    <li key={i} className="text-sm text-muted-foreground">- {d}</li>
+                  ))}
+                </ul>
+              </div>
             )}
           </CardContent>
         </Card>
-        <Button variant="outline" onClick={() => setStep('form')}>Submit Another</Button>
+
+        {result.codeQuality && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Code Quality Analysis</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {renderMetrics('Lines of Code', result.codeQuality.linesOfCode, Infinity, '')}
+              {renderMetrics('Test Coverage', result.codeQuality.testCoverage)}
+              {renderMetrics('Documentation Coverage', result.codeQuality.documentationCoverage)}
+              {renderMetrics('Maintainability Index', result.codeQuality.maintainabilityIndex)}
+              {renderMetrics('Duplicate Code', result.codeQuality.duplicateCodeRatio * 100)}
+              {renderMetrics('Cyclomatic Complexity', result.codeQuality.cyclomaticComplexity, Infinity, '')}
+            </CardContent>
+          </Card>
+        )}
+
+        {result.plagiarism && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Plagiarism Detection</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between p-3 border rounded">
+                <span className="text-sm font-medium">Overall Similarity</span>
+                <Badge className={result.plagiarism.overallSimilarity > 30 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}>
+                  {result.plagiarism.overallSimilarity}%
+                </Badge>
+              </div>
+
+              {result.plagiarism.externalMatches.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-2">External Matches</p>
+                  <div className="space-y-2">
+                    {result.plagiarism.externalMatches.map((match, i) => (
+                      <div key={i} className="p-2 border rounded text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono">{match.repository}</span>
+                          <span className="text-muted-foreground">{match.similarity}%</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">{match.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     );
   }
 
   return (
     <div className="max-w-2xl mx-auto p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Business Verification (KYB)</h1>
-        <p className="text-sm text-muted-foreground mt-1">Required for high-value payments and compliance.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">AI Work Verification</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Analyze code quality, detect plagiarism, and verify milestone completion.
+          </p>
+        </div>
+        {history.length > 0 && (
+          <Button variant="outline" onClick={() => setStep('history')}>
+            History ({history.length})
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -154,94 +202,81 @@ export default function KYBVerificationPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Business Info */}
         <Card>
-          <CardHeader><CardTitle className="text-base">Business Information</CardTitle></CardHeader>
-          <CardContent className="grid grid-cols-2 gap-4">
-            {[
-              { name: 'businessId', label: 'Business ID' },
-              { name: 'businessName', label: 'Business Name' },
-              { name: 'registrationNumber', label: 'Registration Number' },
-              { name: 'registrationCountry', label: 'Country Code (e.g. US)' },
-              { name: 'incorporationDate', label: 'Incorporation Date (YYYY-MM-DD)' },
-              { name: 'contactEmail', label: 'Contact Email' },
-              { name: 'website', label: 'Website (optional)' },
-            ].map(({ name, label }) => (
-              <div key={name} className="space-y-1">
-                <Label htmlFor={name}>{label}</Label>
-                <Input id={name} name={name} value={(form as any)[name]} onChange={handleChange}
-                  required={name !== 'website'} />
-              </div>
-            ))}
+          <CardHeader>
+            <CardTitle className="text-base">Verification Details</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
             <div className="space-y-1">
-              <Label htmlFor="businessType">Business Type</Label>
-              <select id="businessType" name="businessType" value={form.businessType} onChange={handleChange}
-                className="w-full border rounded px-3 py-2 text-sm bg-background">
-                {['llc', 'corporation', 'partnership', 'sole_proprietorship', 'other'].map((t) => (
-                  <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
-                ))}
-              </select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* UBO */}
-        <Card>
-          <CardHeader><CardTitle className="text-base">Ultimate Beneficial Owner (UBO)</CardTitle></CardHeader>
-          <CardContent className="grid grid-cols-2 gap-4">
-            {[
-              { name: 'uboName', label: 'Full Name' },
-              { name: 'uboOwnership', label: 'Ownership %' },
-              { name: 'uboNationality', label: 'Nationality (e.g. US)' },
-              { name: 'uboDob', label: 'Date of Birth (YYYY-MM-DD)' },
-              { name: 'uboDocNumber', label: 'Document Number' },
-            ].map(({ name, label }) => (
-              <div key={name} className="space-y-1">
-                <Label htmlFor={name}>{label}</Label>
-                <Input id={name} name={name} value={(form as any)[name]} onChange={handleChange} required />
-              </div>
-            ))}
-            <div className="space-y-1">
-              <Label htmlFor="uboDocType">Document Type</Label>
-              <select id="uboDocType" name="uboDocType" value={form.uboDocType} onChange={handleChange}
-                className="w-full border rounded px-3 py-2 text-sm bg-background">
-                {['passport', 'national_id', 'drivers_license'].map((t) => (
-                  <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
-                ))}
-              </select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Document */}
-        <Card>
-          <CardHeader><CardTitle className="text-base">Business Document</CardTitle></CardHeader>
-          <CardContent className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="docType">Document Type</Label>
-              <select id="docType" name="docType" value={form.docType} onChange={handleChange}
-                className="w-full border rounded px-3 py-2 text-sm bg-background">
-                {['registration_certificate', 'articles_of_incorporation', 'proof_of_address', 'tax_id', 'other'].map((t) => (
-                  <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
-                ))}
-              </select>
+              <Label>Repository URL</Label>
+              <Input
+                type="url"
+                value={form.repositoryUrl}
+                onChange={(e) => setForm({ ...form, repositoryUrl: e.target.value })}
+                placeholder="https://github.com/owner/repo"
+                required
+              />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="docName">Document Name</Label>
-              <Input id="docName" name="docName" value={form.docName} onChange={handleChange} required />
+              <Label>Project ID</Label>
+              <Input
+                value={form.projectId}
+                onChange={(e) => setForm({ ...form, projectId: e.target.value })}
+                placeholder="Enter project ID"
+                required
+              />
             </div>
-            <div className="col-span-2 space-y-1">
-              <Label htmlFor="docUrl">Document URL</Label>
-              <Input id="docUrl" name="docUrl" type="url" value={form.docUrl} onChange={handleChange} required
-                placeholder="https://..." />
+            <div className="space-y-1">
+              <Label>Milestone Description</Label>
+              <textarea
+                value={form.milestoneDescription}
+                onChange={(e) => setForm({ ...form, milestoneDescription: e.target.value })}
+                placeholder="Describe what the milestone requires..."
+                className="w-full border rounded px-3 py-2 text-sm bg-background min-h-[100px]"
+                required
+              />
             </div>
           </CardContent>
         </Card>
 
         <Button type="submit" disabled={loading} className="w-full">
-          {loading ? 'Submitting...' : 'Submit KYB Application'}
+          {loading ? 'Analyzing...' : 'Run AI Verification'}
         </Button>
       </form>
+
+      {step === 'history' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Verification History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {history.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No verifications yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {history.map((v) => (
+                  <div
+                    key={v.id}
+                    className="p-3 border rounded cursor-pointer hover:bg-gray-50"
+                    onClick={() => { setResult(v); setStep('result'); }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-sm">{v.projectId}</p>
+                        <p className="text-xs text-muted-foreground">{v.summary}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm">{v.score}/100</span>
+                        <Badge className={statusColors[v.status]}>{v.status}</Badge>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
