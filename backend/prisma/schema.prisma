@@ -5,6 +5,8 @@ generator client {
   provider = "prisma-client-js"
 }
 
+/// npm run db:seed
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -25,6 +27,21 @@ enum PaymentStatus {
   failed
   cancelled
   refunded
+  pending_review
+}
+
+enum ReorgEventStatus {
+  detected
+  investigating
+  resolved
+  false_positive
+}
+
+enum TransactionReorgStatus {
+  pending_review
+  re_verified
+  confirmed
+  rolled_back
 }
 
 enum PaymentType {
@@ -71,6 +88,36 @@ enum PaymentLinkStatus {
   disabled
 }
 
+enum OutboxEventStatus {
+  pending
+  publishing
+  published
+  dead_letter
+}
+
+enum PluginStatus {
+  installed
+  enabled
+  disabled
+  error
+}
+
+enum VaultStatus {
+  pending
+  active
+  disputed
+  completed
+  refunded
+}
+
+enum VaultMilestoneStatus {
+  pending
+  approved
+  released
+  expired
+  disputed
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -110,6 +157,7 @@ model Payment {
   fromAddress     String?       @map("from_address")
   toAddress       String?       @map("to_address")
   metadata        Json?
+  providerId      String?       @map("provider_id")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
   deletedAt       DateTime?     @map("deleted_at")
@@ -117,11 +165,13 @@ model Payment {
   user      User?      @relation(fields: [userId], references: [id])
   project   Project?   @relation(fields: [projectId], references: [id])
   milestone Milestone? @relation(fields: [milestoneId], references: [id])
+  transactionReorgs TransactionReorg[]
 
   @@index([tenantId, createdAt])
-  @@index([status], map: "payments_active_status_idx", where: "status IN ('pending', 'processing')")
+  @@index([status], map: "payments_active_status_idx")
   @@index([txHash])
   @@index([projectId])
+  @@index([providerId])
   @@map("payments")
 }
 
@@ -199,6 +249,10 @@ model Webhook {
   url       String
   events    String[]
   secret    String
+  signatureVersion String   @default("v1") @map("signature_version")
+  secretExpiresAt  DateTime? @map("secret_expires_at")
+  rotatedAt        DateTime? @map("rotated_at")
+  encryptionPublicKey String? @map("encryption_public_key")
   status    WebhookStatus @default(active)
   failCount Int           @default(0) @map("fail_count")
   lastFired DateTime?     @map("last_fired")
@@ -232,21 +286,200 @@ model PaymentLink {
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  entityId   String   @map("entity_id")
-  entityType String   @map("entity_type")
-  action     String
-  userId     String?  @map("user_id")
-  metadata   Json?
-  ipAddress  String?  @map("ip_address")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id           String   @id @default(uuid())
+  timestamp    DateTime @default(now())
+  actor        String
+  action       String
+  resource     String
+  details      Json?
+  previousHash String   @map("previous_hash")
+  hash         String   @unique
+  anchorId     String?  @map("anchor_id")
+  archivedAt   DateTime? @map("archived_at")
+  coldArchivedAt DateTime? @map("cold_archived_at")
+  entityId     String?  @map("entity_id")
+  entityType   String?  @map("entity_type")
+  userId       String?  @map("user_id")
+  metadata     Json?
+  ipAddress    String?  @map("ip_address")
+  createdAt    DateTime @default(now()) @map("created_at")
 
   user User? @relation(fields: [userId], references: [id])
 
+  @@index([timestamp])
+  @@index([actor])
+  @@index([action])
+  @@index([actor, action, timestamp])
   @@index([entityId, createdAt])
   @@index([userId])
   @@index([entityType, action])
   @@map("audit_logs")
+}
+
+model OutboxEvent {
+  id            String            @id @default(uuid())
+  aggregateType String            @map("aggregate_type")
+  aggregateId   String            @map("aggregate_id")
+  eventType     String            @map("event_type")
+  payload       Json
+  status        OutboxEventStatus @default(pending)
+  attempts      Int               @default(0)
+  lastError     String?           @map("last_error")
+  publishedAt   DateTime?         @map("published_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+  @@index([publishedAt])
+  @@map("outbox_events")
+}
+
+model Plugin {
+  id            String       @id @default(uuid())
+  name          String       @unique
+  version       String
+  source        String
+  status        PluginStatus @default(installed)
+  compatibility Json
+  health        Json
+  installedAt   DateTime     @default(now()) @map("installed_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  disabledAt    DateTime?    @map("disabled_at")
+
+  configs   PluginConfig[]
+  auditLogs PluginAuditLog[]
+
+  @@index([status])
+  @@index([name, version])
+  @@map("plugins")
+}
+
+model PluginConfig {
+  id          String   @id @default(uuid())
+  pluginId    String   @map("plugin_id")
+  environment String   @default("default")
+  config      Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  plugin Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  @@unique([pluginId, environment])
+  @@map("plugin_configs")
+}
+
+model PluginAuditLog {
+  id        String   @id @default(uuid())
+  pluginId  String   @map("plugin_id")
+  actorId   String?  @map("actor_id")
+  action    String
+  details   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  plugin Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  @@index([pluginId, createdAt])
+  @@map("plugin_audit_logs")
+}
+
+model AuditAnchor {
+  id              String   @id @default(uuid())
+  latestHash      String   @map("latest_hash")
+  chain           String
+  transactionHash String?  @map("transaction_hash")
+  blockNumber     String?  @map("block_number")
+  status          String   @default("pending")
+  error           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([latestHash])
+  @@index([createdAt])
+  @@map("audit_anchors")
+}
+
+model AccountLockout {
+  id             String   @id @default(uuid())
+  accountId      String   @map("account_id")
+  ipAddress      String?  @map("ip_address")
+  failedAttempts Int      @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until")
+  unlockTokenHash String? @map("unlock_token_hash")
+  lastFailedAt   DateTime? @map("last_failed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([accountId, ipAddress])
+  @@index([accountId])
+  @@index([ipAddress])
+  @@index([lockedUntil])
+  @@map("account_lockouts")
+}
+
+model LoginAttempt {
+  id          String   @id @default(uuid())
+  accountId   String   @map("account_id")
+  ipAddress   String   @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  success     Boolean
+  reason      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([accountId, createdAt])
+  @@index([ipAddress, createdAt])
+  @@index([success])
+  @@map("login_attempts")
+}
+
+model WebhookSecret {
+  id          String   @id @default(uuid())
+  merchantId  String   @map("merchant_id")
+  keyId       String   @map("key_id")
+  secretHash  String   @map("secret_hash")
+  version     String   @default("v1")
+  activeFrom  DateTime @default(now()) @map("active_from")
+  expiresAt   DateTime @map("expires_at")
+  rotatedAt   DateTime? @map("rotated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([merchantId, keyId])
+  @@index([merchantId, expiresAt])
+  @@map("webhook_secrets")
+}
+
+model VulnerabilityReport {
+  id          String   @id @default(uuid())
+  source      String
+  scannedAt   DateTime @default(now()) @map("scanned_at")
+  summary     Json
+  artifactUrl String?  @map("artifact_url")
+
+  vulnerabilities DependencyVulnerability[]
+
+  @@index([source, scannedAt])
+  @@map("vulnerability_reports")
+}
+
+model DependencyVulnerability {
+  id              String   @id @default(uuid())
+  reportId        String   @map("report_id")
+  ecosystem       String
+  packageName     String   @map("package_name")
+  installedVersion String? @map("installed_version")
+  fixedVersion    String?  @map("fixed_version")
+  severity        String
+  advisoryId      String?  @map("advisory_id")
+  title           String
+  remediation     String?
+  dueAt           DateTime? @map("due_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  report VulnerabilityReport @relation(fields: [reportId], references: [id])
+
+  @@index([ecosystem, severity])
+  @@index([packageName])
+  @@map("dependency_vulnerabilities")
 }
 
 model GasEstimate {
@@ -259,6 +492,99 @@ model GasEstimate {
 
   @@index([network, recordedAt])
   @@map("gas_estimates")
+}
+
+// ─── Payment Provider Models (#480) ──────────────────────────────────────────
+
+// ─── Gas Budget & Prediction Models (#479) ────────────────────────────────────
+
+model GasBudget {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  walletAddress String    @map("wallet_address")
+  chainId       Int       @map("chain_id")
+  limitGwei     Float     @map("limit_gwei")
+  usedGwei      Float     @default(0) @map("used_gwei")
+  resetAt       DateTime  @map("reset_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  @@unique([tenantId, walletAddress, chainId])
+  @@index([tenantId])
+  @@index([walletAddress, chainId])
+  @@map("gas_budgets")
+}
+
+model GasPredictionLog {
+  id            String   @id @default(uuid())
+  network       String
+  horizon       String
+  predictedGwei Float    @map("predicted_gwei")
+  actualGwei    Float?   @map("actual_gwei")
+  errorPct      Float?   @map("error_pct")
+  recordedAt    DateTime @default(now()) @map("recorded_at")
+
+  @@index([network, horizon, recordedAt])
+  @@map("gas_prediction_logs")
+}
+
+// ─── Payment Vault Models (#478) ─────────────────────────────────────────────
+
+model PaymentVault {
+  id               String      @id @default(uuid())
+  tenantId         String      @map("tenant_id")
+  depositorAddress String      @map("depositor_address")
+  recipientAddress String      @map("recipient_address")
+  totalAmount      Decimal     @db.Decimal(20, 8) @map("total_amount")
+  currency         String
+  network          String
+  status           VaultStatus @default(pending)
+  contractAddress  String?     @map("contract_address")
+  contractVaultId  String?     @map("contract_vault_id")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  deletedAt        DateTime?   @map("deleted_at")
+
+  milestones VaultMilestone[]
+
+  @@index([tenantId, status])
+  @@index([depositorAddress])
+  @@index([contractAddress])
+  @@map("payment_vaults")
+}
+
+model VaultMilestone {
+  id              String               @id @default(uuid())
+  vaultId         String               @map("vault_id")
+  name            String
+  amountPercent   Int                  @map("amount_percent")
+  deadline        DateTime
+  approverAddress String               @map("approver_address")
+  status          VaultMilestoneStatus @default(pending)
+  releasedAt      DateTime?            @map("released_at")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  deletedAt       DateTime?            @map("deleted_at")
+
+  vault    PaymentVault       @relation(fields: [vaultId], references: [id])
+  releases MilestoneRelease[]
+
+  @@index([vaultId, status])
+  @@map("vault_milestones")
+}
+
+model MilestoneRelease {
+  id          String   @id @default(uuid())
+  milestoneId String   @map("milestone_id")
+  txHash      String?  @map("tx_hash")
+  releasedAt  DateTime @default(now()) @map("released_at")
+  triggeredBy String   @map("triggered_by")
+
+  milestone VaultMilestone @relation(fields: [milestoneId], references: [id])
+
+  @@index([milestoneId])
+  @@map("milestone_releases")
 }
 
 // ─── Sandbox Models ───────────────────────────────────────────────────────────
@@ -351,6 +677,24 @@ enum EmailStatus {
   opened
   clicked
   bounced
+  failed
+}
+
+enum NotificationCategory {
+  payment_notification
+  dispute_alert
+  project_update
+  milestone_reminder
+  security_alert
+  subscription_update
+  system_notification
+}
+
+enum NotificationStatus {
+  pending
+  sent
+  delivered
+  clicked
   failed
 }
 
@@ -476,4 +820,1573 @@ model EmailAnalytics {
   @@index([category])
   @@index([date])
   @@map("email_analytics")
+}
+
+// ─── Push Notification Models ──────────────────────────────────────────────────
+
+model PushSubscription {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  userId       String   @map("user_id")
+  endpoint     String
+  auth         String   // VAPID auth secret
+  p256dh       String   // VAPID public key
+  userAgent    String?  @map("user_agent")
+  isActive     Boolean  @default(true) @map("is_active")
+  lastUsedAt   DateTime? @map("last_used_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  notifications NotificationLog[]
+
+  @@unique([tenantId, userId, endpoint])
+  @@index([tenantId, userId])
+  @@index([endpoint])
+  @@index([isActive])
+  @@index([createdAt])
+  @@map("push_subscriptions")
+}
+
+model PushPreference {
+  id                         String   @id @default(uuid())
+  tenantId                   String   @map("tenant_id")
+  userId                     String   @map("user_id")
+  paymentNotifications       Boolean  @default(true) @map("payment_notifications")
+  disputeAlerts              Boolean  @default(true) @map("dispute_alerts")
+  projectUpdates             Boolean  @default(true) @map("project_updates")
+  milestoneReminders         Boolean  @default(true) @map("milestone_reminders")
+  securityAlerts             Boolean  @default(true) @map("security_alerts")
+  subscriptionUpdates        Boolean  @default(true) @map("subscription_updates")
+  systemNotifications        Boolean  @default(true) @map("system_notifications")
+  groupNotifications         Boolean  @default(true) @map("group_notifications")
+  notifySound                Boolean  @default(true) @map("notify_sound")
+  notifyBadge                Boolean  @default(true) @map("notify_badge")
+  locale                     String   @default("en")
+  timezone                   String   @default("UTC")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("push_preferences")
+}
+
+model NotificationLog {
+  id                String              @id @default(uuid())
+  tenantId          String              @map("tenant_id")
+  userId            String              @map("user_id")
+  subscriptionId    String?             @map("subscription_id")
+  category          NotificationCategory
+  status            NotificationStatus  @default(pending)
+  title             String
+  body              String
+  icon              String?
+  badge            String?
+  tag               String?             // For grouping notifications
+  data              Json?               // Custom data for deep linking
+  deepLink          String?             @map("deep_link")
+  sentAt            DateTime?           @map("sent_at")
+  deliveredAt       DateTime?           @map("delivered_at")
+  clickedAt         DateTime?           @map("clicked_at")
+  error             String?
+  retryCount        Int                 @default(0) @map("retry_count")
+  metadata          Json?
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  subscription      PushSubscription?   @relation(fields: [subscriptionId], references: [id])
+
+  @@index([tenantId, userId])
+  @@index([status])
+  @@index([category])
+  @@index([subscriptionId])
+  @@index([sentAt])
+  @@index([tag])
+  @@map("notification_logs")
+}
+
+// ─── API Versioning Models ────────────────────────────────────────────────────
+
+enum ApiVersionStatus {
+  active
+  deprecated
+  sunset
+  removed
+}
+
+model ApiVersion {
+  id              String          @id @default(uuid())
+  version         String          @unique // e.g., "v1", "v2"
+  status          ApiVersionStatus @default(active)
+  releaseDate     DateTime        @default(now()) @map("release_date")
+  deprecationDate DateTime?       @map("deprecation_date")
+  sunsetDate      DateTime?       @map("sunset_date")
+  description     String?
+  changelogUrl    String?         @map("changelog_url")
+  migrationGuideUrl String?       @map("migration_guide_url")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  usage           ApiVersionUsage[]
+  endpoints       ApiVersionEndpoint[]
+
+  @@index([status])
+  @@index([releaseDate])
+  @@map("api_versions")
+}
+
+model ApiVersionUsage {
+  id              String    @id @default(uuid())
+  versionId       String    @map("version_id")
+  date            DateTime  @db.Date
+  requestCount    Int       @map("request_count") @default(0)
+  uniqueClients   Int       @map("unique_clients") @default(0)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  version         ApiVersion @relation(fields: [versionId], references: [id])
+
+  @@unique([versionId, date])
+  @@index([versionId])
+  @@index([date])
+  @@map("api_version_usage")
+}
+
+model ApiVersionEndpoint {
+  id              String    @id @default(uuid())
+  versionId       String    @map("version_id")
+  path            String    // e.g., "/payments", "/invoices"
+  method          String    // GET, POST, PUT, DELETE
+  status          ApiVersionStatus @default(active)
+  changes         String?   // Summary of changes from previous version
+  migrationNotes  String?   @map("migration_notes")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  version         ApiVersion @relation(fields: [versionId], references: [id])
+
+  @@unique([versionId, path, method])
+  @@index([versionId])
+  @@index([path])
+  @@map("api_version_endpoints")
+}
+
+// ─── Centralized Configuration — Issue #481 ──────────────────────────────────
+
+model AppConfiguration {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       Json
+  source      String   @default("database")
+  description String?
+  updatedBy   String?  @map("updated_by")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([source])
+  @@map("app_configurations")
+}
+
+model ConfigAuditLog {
+  id        String   @id @default(uuid())
+  key       String
+  oldValue  Json?    @map("old_value")
+  newValue  Json?    @map("new_value")
+  actor     String?
+  reason    String?
+  source    String   @default("admin")
+  requestId String?  @map("request_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([key, createdAt])
+  @@index([actor])
+  @@map("config_audit_logs")
+}
+
+// ─── Payment Categories — Issue #251 ─────────────────────────────────────────
+
+enum PaymentCategoryType {
+  subscription
+  invoice
+  donation
+  refund
+  escrow
+  milestone
+  other
+}
+
+model PaymentCategory {
+  id          String              @id @default(uuid())
+  tenantId    String              @map("tenant_id")
+  name        String
+  type        PaymentCategoryType @default(other)
+  description String?
+  color       String?             // hex color for UI display
+  isDefault   Boolean             @default(false) @map("is_default")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  payments    PaymentCategoryAssignment[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([type])
+  @@map("payment_categories")
+}
+
+model PaymentCategoryAssignment {
+  id          String          @id @default(uuid())
+  paymentId   String          @map("payment_id")
+  categoryId  String          @map("category_id")
+  assignedBy  String?         @map("assigned_by")  // userId; null = auto-assigned
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  category    PaymentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, categoryId])
+  @@index([paymentId])
+  @@index([categoryId])
+  @@map("payment_category_assignments")
+}
+
+// ─── On-Chain Data Archival — Issue #473 ─────────────────────────────────────
+
+enum ArchivalBatchStatus {
+  pending
+  collecting
+  compressing
+  uploading
+  completed
+  failed
+  restoring
+}
+
+enum ArchivalChain {
+  stellar
+  ethereum
+  polygon
+  base
+  arbitrum
+  soroban
+}
+
+model ArchivalBatch {
+  id                String              @id @default(uuid())
+  batchDate         DateTime            @db.Date @map("batch_date")
+  status            ArchivalBatchStatus @default(pending)
+  chain             ArchivalChain
+  recordCount       Int                 @default(0) @map("record_count")
+  uncompressedBytes BigInt              @default(0) @map("uncompressed_bytes")
+  compressedBytes   BigInt              @default(0) @map("compressed_bytes")
+  contentHash       String?             @map("content_hash")
+  ipfsCid           String?             @map("ipfs_cid")
+  ipfsUrl           String?             @map("ipfs_url")
+  verifiedHash      String?             @map("verified_hash")
+  errorMessage      String?             @map("error_message")
+  retentionUntil    DateTime            @map("retention_until")
+  startedAt         DateTime?           @map("started_at")
+  completedAt       DateTime?           @map("completed_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  records DataArchive[]
+
+  @@unique([batchDate, chain])
+  @@index([status])
+  @@index([batchDate])
+  @@index([ipfsCid])
+  @@map("archival_batches")
+}
+
+model DataArchive {
+  id               String        @id @default(uuid())
+  batchId          String        @map("batch_id")
+  chain            ArchivalChain
+  txHash           String        @map("tx_hash")
+  blockNumber      BigInt        @map("block_number")
+  blockHash        String?       @map("block_hash")
+  payload          Json
+  payloadHash      String        @map("payload_hash")
+  proofOfInclusion Json          @map("proof_of_inclusion")
+  indexedAt        DateTime?     @map("indexed_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  batch ArchivalBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([chain, txHash])
+  @@index([blockNumber])
+  @@map("data_archives")
+}
+
+// ─── Contract Upgrade Safety — Issue #474 ────────────────────────────────────
+
+enum UpgradeValidationStatus {
+  pending
+  running
+  passed
+  failed
+  rolled_back
+}
+
+enum ContractPlatform {
+  evm
+  soroban
+}
+
+model ContractUpgrade {
+  id                     String                  @id @default(uuid())
+  contractName           String                  @map("contract_name")
+  platform               ContractPlatform
+  network                String
+  proxyAddress           String                  @map("proxy_address")
+  previousImplementation String?                 @map("previous_implementation")
+  newImplementation      String                  @map("new_implementation")
+  deployerAddress        String?                 @map("deployer_address")
+  timelockAddress        String?                 @map("timelock_address")
+  status                 UpgradeValidationStatus @default(pending)
+  deployedAt             DateTime?               @map("deployed_at")
+  rolledBackAt           DateTime?               @map("rolled_back_at")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+
+  validationReports UpgradeValidationReport[]
+
+  @@index([network, contractName])
+  @@index([status])
+  @@map("contract_upgrades")
+}
+
+model UpgradeValidationReport {
+  id                     String                  @id @default(uuid())
+  upgradeId              String                  @map("upgrade_id")
+  status                 UpgradeValidationStatus
+  storageLayoutDiff      Json?                   @map("storage_layout_diff")
+  simulationPassed       Boolean                 @default(false) @map("simulation_passed")
+  smokeTestsPassed       Boolean                 @default(false) @map("smoke_tests_passed")
+  adminPreserved         Boolean                 @default(false) @map("admin_preserved")
+  proxyAdminValid        Boolean                 @default(false) @map("proxy_admin_valid")
+  implementationVerified Boolean                 @default(false) @map("implementation_verified")
+  failures               Json?
+  warnings               Json?
+  forkBlockNumber        BigInt?                 @map("fork_block_number")
+  durationMs             Int?                    @map("duration_ms")
+  createdAt              DateTime                @default(now()) @map("created_at")
+
+  upgrade ContractUpgrade @relation(fields: [upgradeId], references: [id], onDelete: Cascade)
+
+  @@index([upgradeId])
+  @@index([status])
+  @@map("upgrade_validation_reports")
+}
+
+// ─── Bridge Monitoring — Issue #475 ────────────────────────────────────────
+
+enum BridgeProvider {
+  wormhole
+  layerzero
+  axelar
+  custom
+}
+
+enum BridgeMessageStatus {
+  initiated
+  source_confirmed
+  relayed
+  destination_executed
+  failed
+  stuck
+  expired
+}
+
+enum BridgeAlertSeverity {
+  info
+  warning
+  critical
+}
+
+model BridgeMessage {
+  id                 String              @id @default(uuid())
+  provider           BridgeProvider
+  sourceChain        String              @map("source_chain")
+  destinationChain   String              @map("destination_chain")
+  messageId          String              @map("message_id")
+  txHashSource       String?             @map("tx_hash_source")
+  txHashDestination  String?             @map("tx_hash_destination")
+  status             BridgeMessageStatus @default(initiated)
+  amount             String?
+  tokenAddress       String?             @map("token_address")
+  sender             String?
+  recipient          String?
+  gasCostSource      String?             @map("gas_cost_source")
+  gasCostDestination String?             @map("gas_cost_destination")
+  initiatedAt        DateTime            @default(now()) @map("initiated_at")
+  sourceConfirmedAt  DateTime?           @map("source_confirmed_at")
+  relayedAt          DateTime?           @map("relayed_at")
+  executedAt         DateTime?           @map("executed_at")
+  expectedDeliveryMs Int                 @default(300000) @map("expected_delivery_ms")
+  metadata           Json?
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  alerts  BridgeAlert[]
+  retries BridgeRetry[]
+
+  @@unique([provider, messageId])
+  @@index([status])
+  @@index([provider])
+  @@index([sourceChain, destinationChain])
+  @@index([initiatedAt])
+  @@map("bridge_messages")
+}
+
+model BridgeAlert {
+  id           String              @id @default(uuid())
+  messageId    String              @map("message_id")
+  severity     BridgeAlertSeverity
+  alertType    String              @map("alert_type")
+  message      String
+  acknowledged Boolean             @default(false)
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  bridgeMessage BridgeMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([severity])
+  @@map("bridge_alerts")
+}
+
+model BridgeRetry {
+  id           String    @id @default(uuid())
+  messageId    String    @map("message_id")
+  attempt      Int       @default(1)
+  status       String    @default("pending")
+  txHash       String?   @map("tx_hash")
+  errorMessage String?   @map("error_message")
+  initiatedBy  String?   @map("initiated_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  completedAt  DateTime? @map("completed_at")
+
+  bridgeMessage BridgeMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("bridge_retries")
+}
+
+// ─── Issue #462: Webhook Subscription Manager ───────────────────────────────────
+
+model WebhookSubscription {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  eventTypes    String[] @map("event_types")
+  filterExpr    String?  @map("filter_expr")
+  targetUrl     String   @map("target_url")
+  description   String?
+  status        SubscriptionStatus @default(active)
+  version       Int      @default(1) @map("version")
+  lastDelivered DateTime? @map("last_delivered")
+  deliveryCount Int      @default(0) @map("delivery_count")
+  successCount  Int      @default(0) @map("success_count")
+  failCount     Int      @default(0) @map("fail_count")
+  avgLatency    Float?   @map("avg_latency")
+  pausedAt      DateTime? @map("paused_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  deliveries WebhookSubscriptionDelivery[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([tenantId, status])
+  @@map("webhook_subscriptions")
+}
+
+model WebhookSubscriptionDelivery {
+  id             String   @id @default(uuid())
+  subscriptionId String   @map("subscription_id")
+  eventType      String   @map("event_type")
+  payload        Json
+  status         DeliveryStatus @default(pending)
+  statusCode     Int?     @map("status_code")
+  latencyMs      Int?     @map("latency_ms")
+  errorMessage   String?  @map("error_message")
+  attemptCount   Int      @default(0) @map("attempt_count")
+  createdAt      DateTime @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
+
+  subscription WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("webhook_subscription_deliveries")
+}
+
+// ─── Issue #463: Revenue Sharing Pool ───────────────────────────────────────────
+
+model RevenuePool {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  chain     String   @default("soroban")
+  contractId String  @map("contract_id")
+  status    PoolStatus @default(active)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  recipients   RevenueRecipient[]
+  distributions RevenueDistribution[]
+
+  @@index([tenantId])
+  @@map("revenue_pools")
+}
+
+model RevenueRecipient {
+  id          String   @id @default(uuid())
+  poolId      String   @map("pool_id")
+  wallet      String
+  ratioBps    Int      @map("ratio_bps")
+  accumulated String   @default("0") @map("accumulated")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  pool RevenuePool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+
+  @@unique([poolId, wallet])
+  @@map("revenue_recipients")
+}
+
+model RevenueDistribution {
+  id        String   @id @default(uuid())
+  poolId    String   @map("pool_id")
+  txHash    String   @map("tx_hash")
+  amount    String   @map("amount")
+  status    DistributionStatus @default(pending)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pool RevenuePool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+
+  @@index([poolId])
+  @@map("revenue_distributions")
+}
+
+// ─── Issue #464: EVM Paymaster / ERC-4337 ───────────────────────────────────────
+
+model PaymasterBudget {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  chainId   Int      @map("chain_id")
+  token     String
+  balance   String   @default("0")
+  totalDeposited  String @default("0") @map("total_deposited")
+  totalUsed      String @default("0") @map("total_used")
+  maxGasPerTx    String? @map("max_gas_per_tx")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, chainId, token])
+  @@map("paymaster_budgets")
+}
+
+model UserOperation {
+  id          String   @id @default(uuid())
+  userOpHash  String   @unique @map("user_op_hash")
+  sender      String
+  nonce       String
+  paymaster   String
+  mode        String   @default("verifying")
+  actualGasCost String? @map("actual_gas_cost")
+  status      UserOpStatus @default(pending)
+  txHash      String?  @map("tx_hash")
+  errorMsg    String?  @map("error_msg")
+  createdAt   DateTime @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([sender])
+  @@index([status])
+  @@index([createdAt])
+  @@map("user_operations")
+}
+
+// ─── New Enums ──────────────────────────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  active
+  paused
+  disabled
+}
+
+enum DeliveryStatus {
+  pending
+  delivered
+  failed
+  retrying
+}
+
+enum PoolStatus {
+  active
+  paused
+  archived
+}
+
+enum DistributionStatus {
+  pending
+  completed
+  failed
+}
+
+enum UserOpStatus {
+  pending
+  completed
+  failed
+}
+
+// ─── Issue #470: Atomic Swap / HTLC Models ────────────────────────────────────
+
+enum AtomicSwapStatus {
+  pending
+  claimed
+  refunded
+  disputed
+}
+
+model AtomicSwap {
+  id                String            @id @default(uuid())
+  tenantId          String            @map("tenant_id")
+  swapId            BigInt            @unique @map("swap_id")
+  sender            String
+  receiver          String
+  tokenA            String            @map("token_a")
+  tokenB            String            @map("token_b")
+  amountA           Decimal           @map("amount_a") @db.Decimal(20, 8)
+  amountB           Decimal           @map("amount_b") @db.Decimal(20, 8)
+  hashlock          String
+  timelock          BigInt            @map("timelock")
+  disputeDeadline   BigInt?           @map("dispute_deadline")
+  status            AtomicSwapStatus  @default(pending)
+  feeBps            Int               @default(30) @map("fee_bps")
+  feeCollector      String?           @map("fee_collector")
+  contractAddress   String?           @map("contract_address")
+  network           String            @default("soroban")
+  expiresAt         DateTime?         @map("expires_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  deletedAt         DateTime?         @map("deleted_at")
+
+  secret AtomicSwapSecret?
+
+  @@index([tenantId])
+  @@index([sender])
+  @@index([receiver])
+  @@index([status])
+  @@map("atomic_swaps")
+}
+
+model AtomicSwapSecret {
+  id        String   @id @default(uuid())
+  swapId    String   @unique @map("swap_id")
+  preimage  String
+  revealedAt DateTime @default(now()) @map("revealed_at")
+
+  swap AtomicSwap @relation(fields: [swapId], references: [id], onDelete: Cascade)
+
+  @@map("atomic_swap_secrets")
+}
+
+// ─── Issue #469: Multi-Signature Treasury Models ─────────────────────────────
+
+enum TreasuryProposalStatus {
+  pending
+  approved
+  executed
+  rejected
+  cancelled
+  expired
+}
+
+model TreasuryProposal {
+  id              String                  @id @default(uuid())
+  tenantId        String                  @map("tenant_id")
+  proposalId      BigInt                  @map("proposal_id")
+  proposer        String
+  description     String
+  target          String
+  amount          Decimal                 @db.Decimal(20, 8)
+  token           String?
+  calldata        String?
+  status          TreasuryProposalStatus  @default(pending)
+  approvalCount   Int                     @default(0) @map("approval_count")
+  rejectionCount  Int                     @default(0) @map("rejection_count")
+  threshold       Int                     @default(1)
+  timelockDelay   BigInt                  @map("timelock_delay")
+  executeAfter    DateTime                @map("execute_after")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  executedAt      DateTime?               @map("executed_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+  deletedAt       DateTime?               @map("deleted_at")
+
+  approvals TreasuryApproval[]
+  execution TreasuryExecution?
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([tenantId, status])
+  @@map("treasury_proposals")
+}
+
+model TreasuryApproval {
+  id          String   @id @default(uuid())
+  proposalId  String   @map("proposal_id")
+  signer      String
+  approved    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  proposal TreasuryProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([proposalId, signer])
+  @@index([proposalId])
+  @@map("treasury_approvals")
+}
+
+model TreasuryExecution {
+  id            String   @id @default(uuid())
+  proposalId    String   @unique @map("proposal_id")
+  txHash        String?  @map("tx_hash")
+  executedBy    String   @map("executed_by")
+  executedAt    DateTime @default(now()) @map("executed_at")
+  error         String?
+  chain         String   @default("soroban")
+
+  proposal TreasuryProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@map("treasury_executions")
+}
+
+// ─── Issue #471: API Key Usage Analytics and Quota Models ─────────────────────
+
+model ApiKey {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  keyId         String    @unique @map("key_id")
+  description   String?
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  expiresAt     DateTime? @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+
+  usage ApiKeyUsage[]
+  quota ApiKeyQuota?
+
+  @@index([tenantId])
+  @@index([keyId])
+  @@map("api_keys")
+}
+
+model ApiKeyUsage {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  keyId       String   @map("key_id")
+  endpoint    String
+  method      String   @default("GET")
+  statusCode  Int      @map("status_code")
+  latencyMs   Int      @map("latency_ms")
+  payloadSize Int?     @map("payload_size")
+  ipAddress   String?  @map("ip_address")
+  recordedAt  DateTime @default(now()) @map("recorded_at")
+
+  key ApiKey @relation(fields: [keyId], references: [id], onDelete: Cascade)
+
+  @@index([keyId])
+  @@index([tenantId, recordedAt])
+  @@index([keyId, recordedAt])
+  @@index([recordedAt])
+  @@map("api_key_usage")
+}
+
+model ApiKeyQuota {
+  id              String   @id @default(uuid())
+  keyId           String   @unique @map("key_id")
+  requestsPerHour Int      @default(1000) @map("requests_per_hour")
+  requestsPerDay  Int      @default(10000) @map("requests_per_day")
+  alertAt50Pct    Boolean  @default(true) @map("alert_at_50_pct")
+  alertAt80Pct    Boolean  @default(true) @map("alert_at_80_pct")
+  alertAt100Pct   Boolean  @default(true) @map("alert_at_100_pct")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  key ApiKey @relation(fields: [keyId], references: [id], onDelete: Cascade)
+
+  @@map("api_key_quotas")
+}
+
+// ─── Issue #472: Custom Report Builder Models ────────────────────────────────
+
+enum ReportChartType {
+  line
+  bar
+  pie
+  table
+  heatmap
+  area
+}
+
+enum ReportScheduleFrequency {
+  daily
+  weekly
+  monthly
+}
+
+model SavedReport {
+  id          String            @id @default(uuid())
+  tenantId    String            @map("tenant_id")
+  userId      String?           @map("user_id")
+  name        String
+  description String?
+  metrics     String[]
+  dimensions  String[]
+  filters     Json?
+  chartType   ReportChartType   @default(line)
+  dateRange   Json?
+  isFavorite  Boolean           @default(false) @map("is_favorite")
+  isPinned    Boolean           @default(false) @map("is_pinned")
+  config      Json?
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  deletedAt   DateTime?         @map("deleted_at")
+
+  schedule ScheduledReport?
+  template ReportTemplate?
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([isFavorite])
+  @@index([tenantId, updatedAt])
+  @@map("saved_reports")
+}
+
+model ScheduledReport {
+  id             String                   @id @default(uuid())
+  reportId       String                   @unique @map("report_id")
+  frequency      ReportScheduleFrequency
+  dayOfWeek      Int?                     @default(1) @map("day_of_week")
+  dayOfMonth     Int?                     @default(1) @map("day_of_month")
+  time           String                   @default("09:00")
+  recipients     String[]
+  lastSentAt     DateTime?                @map("last_sent_at")
+  nextSendAt     DateTime?                @map("next_send_at")
+  isActive       Boolean                  @default(true) @map("is_active")
+  createdAt      DateTime                 @default(now()) @map("created_at")
+  updatedAt      DateTime                 @updatedAt @map("updated_at")
+
+  report SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([isActive])
+  @@index([nextSendAt])
+  @@map("scheduled_reports")
+}
+
+model ReportTemplate {
+  id          String          @id @default(uuid())
+  reportId    String          @unique @map("report_id")
+  name        String
+  description String?
+  metrics     String[]
+  dimensions  String[]
+  filters     Json?
+  chartType   ReportChartType @default(line)
+  dateRange   Json?
+  config      Json?
+  isPublic    Boolean         @default(false) @map("is_public")
+  usageCount  Int             @default(0) @map("usage_count")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  report SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([isPublic, usageCount])
+  @@map("report_templates")
+}
+
+// ─── Issue #465: Payment Reconciliation Report Generator ─────────────────────
+
+enum ReportJobStatus {
+  pending
+  generating
+  completed
+  failed
+  expired
+}
+
+model ReportJob {
+  id           String          @id @default(uuid())
+  tenantId     String          @map("tenant_id")
+  userId       String?         @map("user_id")
+  type         String          @default("reconciliation") // reconciliation, custom
+  status       ReportJobStatus @default(pending)
+  dateFrom     DateTime        @map("date_from")
+  dateTo       DateTime        @map("date_to")
+  format       String          @default("csv") // csv, pdf
+  filters      Json?
+  progress     Int             @default(0)
+  errorMessage String?         @map("error_message")
+  completedAt  DateTime?       @map("completed_at")
+  expiresAt    DateTime        @map("expires_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  deletedAt    DateTime?       @map("deleted_at")
+
+  archives ReportArchive[]
+
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@index([tenantId, status])
+  @@map("report_jobs")
+}
+
+model ReportArchive {
+  id         String      @id @default(uuid())
+  reportId   String      @map("report_id")
+  format     String      @default("csv")
+  fileUrl    String      @map("file_url")
+  fileSize   Int         @default(0) @map("file_size")
+  rowCount   Int         @default(0) @map("row_count")
+  checksum   String?     @map("checksum")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  report ReportJob @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("report_archives")
+}
+
+// ─── Issue #466: Flash Loan-Protected Liquidity Provider Integration ─────────
+
+enum AnomalySeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum CircuitBreakerStatus {
+  tripped
+  monitoring
+  recovered
+}
+
+model PriceAnomalyLog {
+  id              String          @id @default(uuid())
+  tenantId        String          @map("tenant_id")
+  poolId          String          @map("pool_id")
+  tokenPair       String          @map("token_pair")
+  executionPrice  Decimal         @map("execution_price") @db.Decimal(30, 18)
+  referencePrice  Decimal         @map("reference_price") @db.Decimal(30, 18)
+  deviationPct    Float           @map("deviation_pct")
+  txHash          String?         @map("tx_hash")
+  severity        AnomalySeverity @default(medium)
+  detectedAt      DateTime        @default(now()) @map("detected_at")
+  metadata        Json?
+
+  @@index([tenantId, detectedAt])
+  @@index([poolId, detectedAt])
+  @@index([severity])
+  @@index([detectedAt])
+  @@map("price_anomaly_logs")
+}
+
+model CircuitBreakerEvent {
+  id              String               @id @default(uuid())
+  tenantId        String               @map("tenant_id")
+  poolId          String               @map("pool_id")
+  eventType       String               @map("event_type") // price_deviation, repeated_attack, manual
+  status          CircuitBreakerStatus @default(monitoring)
+  triggeredAt     DateTime             @default(now()) @map("triggered_at")
+  recoveredAt     DateTime?            @map("recovered_at")
+  anomalyCount    Int                  @default(0) @map("anomaly_count")
+  thresholdConfig Json?                @map("threshold_config")
+  metadata        Json?
+
+  @@index([tenantId, poolId])
+  @@index([status])
+  @@index([tenantId, status])
+  @@index([triggeredAt])
+  @@map("circuit_breaker_events")
+}
+
+// ─── Issue #467: Bulk Payment CSV Upload ─────────────────────────────────────
+
+enum BulkUploadStatus {
+  pending
+  validating
+  processing
+  completed
+  partially_completed
+  failed
+}
+
+model BulkUpload {
+  id              String           @id @default(uuid())
+  tenantId        String           @map("tenant_id")
+  userId          String?          @map("user_id")
+  fileName        String           @map("file_name")
+  fileSize        Int              @map("file_size")
+  mimeType        String           @map("mime_type")
+  totalRows       Int              @default(0) @map("total_rows")
+  validRows       Int              @default(0) @map("valid_rows")
+  errorRows       Int              @default(0) @map("error_rows")
+  processedRows   Int              @default(0) @map("processed_rows")
+  failedRows      Int              @default(0) @map("failed_rows")
+  columnMapping   Json?            @map("column_mapping")
+  status          BulkUploadStatus @default(pending)
+  errorReportUrl  String?          @map("error_report_url")
+  completedAt     DateTime?        @map("completed_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  deletedAt       DateTime?        @map("deleted_at")
+
+  rows BulkUploadRow[]
+
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@index([tenantId, status])
+  @@map("bulk_uploads")
+}
+
+enum BulkUploadRowStatus {
+  pending
+  valid
+  invalid
+  processing
+  completed
+  failed
+}
+
+model BulkUploadRow {
+  id             String               @id @default(uuid())
+  bulkUploadId   String               @map("bulk_upload_id")
+  rowNumber      Int                  @map("row_number")
+  rawData        Json?
+  parsedData     Json?
+  status         BulkUploadRowStatus  @default(pending)
+  errors         Json?
+  warnings       Json?
+  paymentId      String?              @map("payment_id")
+  processedAt    DateTime?            @map("processed_at")
+  createdAt      DateTime             @default(now()) @map("created_at")
+
+  bulkUpload BulkUpload @relation(fields: [bulkUploadId], references: [id], onDelete: Cascade)
+
+  @@index([bulkUploadId])
+  @@index([status])
+  @@index([bulkUploadId, status])
+  @@map("bulk_upload_rows")
+}
+
+// ─── Issue #468: Dynamic Fee Calculation Engine with Tiered Pricing ──────────
+
+enum FeeScheduleStatus {
+  active
+  inactive
+  pending
+}
+
+enum FeeType {
+  flat
+  percentage
+  tiered
+}
+
+model FeeSchedule {
+  id              String            @id @default(uuid())
+  tenantId        String            @map("tenant_id")
+  name            String
+  description     String?
+  feeType         FeeType           @default(percentage) @map("fee_type")
+  flatFee         Decimal?          @map("flat_fee") @db.Decimal(20, 8)
+  percentageFee   Decimal?          @map("percentage_fee") @db.Decimal(8, 4)
+  minFee          Decimal?          @map("min_fee") @db.Decimal(20, 8)
+  maxFee          Decimal?          @map("max_fee") @db.Decimal(20, 8)
+  gasSurchargePct Decimal?          @map("gas_surcharge_pct") @db.Decimal(8, 4)
+  gasThresholdGwei Float?           @map("gas_threshold_gwei")
+  status          FeeScheduleStatus @default(active)
+  effectiveFrom   DateTime          @default(now()) @map("effective_from")
+  effectiveTo     DateTime?         @map("effective_to")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  deletedAt       DateTime?         @map("deleted_at")
+
+  volumeTiers     VolumeTier[]
+  merchantOverrides MerchantFeeOverride[]
+  changeLogs      FeeChangeLog[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, effectiveFrom, effectiveTo])
+  @@map("fee_schedules")
+}
+
+model VolumeTier {
+  id           String   @id @default(uuid())
+  feeScheduleId String  @map("fee_schedule_id")
+  minVolume    Decimal  @map("min_volume") @db.Decimal(20, 8)
+  maxVolume    Decimal? @map("max_volume") @db.Decimal(20, 8)
+  flatFee      Decimal? @map("flat_fee") @db.Decimal(20, 8)
+  percentageFee Decimal @map("percentage_fee") @db.Decimal(8, 4)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  feeSchedule FeeSchedule @relation(fields: [feeScheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([feeScheduleId, minVolume])
+  @@index([feeScheduleId])
+  @@map("volume_tiers")
+}
+
+enum OverrideStatus {
+  active
+  expired
+  pending
+}
+
+model MerchantFeeOverride {
+  id             String         @id @default(uuid())
+  feeScheduleId  String         @map("fee_schedule_id")
+  merchantId     String         @map("merchant_id")
+  flatFee        Decimal?       @map("flat_fee") @db.Decimal(20, 8)
+  percentageFee  Decimal?       @map("percentage_fee") @db.Decimal(8, 4)
+  minFee         Decimal?       @map("min_fee") @db.Decimal(20, 8)
+  maxFee         Decimal?       @map("max_fee") @db.Decimal(20, 8)
+  status         OverrideStatus @default(active)
+  effectiveFrom  DateTime       @default(now()) @map("effective_from")
+  effectiveTo    DateTime?      @map("effective_to")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  feeSchedule FeeSchedule @relation(fields: [feeScheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([feeScheduleId, merchantId])
+  @@index([merchantId])
+  @@index([feeScheduleId])
+  @@index([merchantId, status])
+  @@map("merchant_fee_overrides")
+}
+
+model FeeChangeLog {
+  id           String   @id @default(uuid())
+  feeScheduleId String  @map("fee_schedule_id")
+  field        String
+  oldValue     Json?
+  newValue     Json?
+  changedBy    String?  @map("changed_by")
+  reason       String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  feeSchedule FeeSchedule @relation(fields: [feeScheduleId], references: [id], onDelete: Cascade)
+
+  @@index([feeScheduleId])
+  @@index([createdAt])
+  @@map("fee_change_logs")
+}
+
+// ─── Issue #447: Smart Contract Event Indexer ─────────────────────────────────
+
+enum IndexedEventChain {
+  stellar
+  evm
+}
+
+model IndexedEvent {
+  id              String             @id @default(uuid())
+  dedupKey        String             @unique @map("dedup_key")   // chain:txHash[:logIndex]
+  chain           IndexedEventChain
+  contractAddress String             @map("contract_address")
+  eventType       String             @map("event_type")
+  blockNumber     BigInt             @map("block_number")
+  txHash          String             @map("tx_hash")
+  timestamp       DateTime
+  payload         Json
+  confirmations   Int                @default(0)
+  retentionUntil  DateTime           @map("retention_until")
+  createdAt       DateTime           @default(now()) @map("created_at")
+
+  @@index([chain, contractAddress, eventType])
+  @@index([chain, contractAddress, timestamp])
+  @@index([eventType])
+  @@index([timestamp])
+  @@index([retentionUntil])
+  @@map("indexed_events")
+}
+
+model WsEventSubscription {
+  id              String   @id @default(uuid())
+  sessionId       String   @map("session_id")
+  contractAddress String?  @map("contract_address")
+  eventType       String?  @map("event_type")
+  chain           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  expiresAt       DateTime @map("expires_at")
+
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@map("ws_event_subscriptions")
+}
+
+// ─── Issue #446: AI Payment Routing Metrics ────────────────────────────────────
+
+model RoutingDecision {
+  id              String   @id @default(uuid())
+  tenantId        String?  @map("tenant_id")
+  requestId       String   @unique @map("request_id")
+  selectedChain   String   @map("selected_chain")
+  fallbackChains  String[] @map("fallback_chains")
+  scoreStellar    Float?   @map("score_stellar")
+  scoreEvm        Float?   @map("score_evm")
+  featureSnapshot Json     @map("feature_snapshot")   // gas prices, latencies, success rates at decision time
+  rationale       String?
+  latencyMs       Int?     @map("latency_ms")
+  isManualOverride Boolean @default(false) @map("is_manual_override")
+  overrideBy      String?  @map("override_by")
+  abVariant       String?  @map("ab_variant")         // "static" | "ai"
+  outcome         String?                             // "success" | "failed" | null (pending)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([selectedChain, createdAt])
+  @@index([abVariant])
+  @@map("routing_decisions")
+}
+
+model ChainPerformanceMetric {
+  id               String   @id @default(uuid())
+  chain            String
+  sampleAt         DateTime @default(now()) @map("sample_at")
+  avgGasPrice      Float?   @map("avg_gas_price")
+  avgConfirmTimeMs Float?   @map("avg_confirm_time_ms")
+  successRate      Float?   @map("success_rate")          // 0–1
+  p50LatencyMs     Float?   @map("p50_latency_ms")
+  p99LatencyMs     Float?   @map("p99_latency_ms")
+  sampleSize       Int      @default(0) @map("sample_size")
+
+  @@index([chain, sampleAt])
+  @@index([sampleAt])
+  @@map("chain_performance_metrics")
+}
+
+// ─── Issue #668: PII Audit ────────────────────────────────────────────────────
+
+enum PiiClassificationLevel {
+  strict
+  standard
+  permissive
+}
+
+model PiiAuditLog {
+  id            String                  @id @default(uuid())
+  endpoint      String
+  method        String                  @default("GET")
+  fieldPath     String                  @map("field_path")   // JSON path of detected PII
+  piiType       String                  @map("pii_type")     // email | phone | ssn | crypto_address | api_key
+  action        String                  @default("redacted") // redacted | masked | allowed
+  level         PiiClassificationLevel  @default(standard)
+  tenantId      String?                 @map("tenant_id")
+  requestId     String?                 @map("request_id")
+  createdAt     DateTime                @default(now()) @map("created_at")
+
+  @@index([endpoint, createdAt])
+  @@index([piiType])
+  @@index([tenantId, createdAt])
+  @@map("pii_audit_logs")
+}
+
+// ─── Chain Reorganization Models ─────────────────────────────────────────────
+
+model ReorgEvent {
+  id                 String           @id @default(uuid())
+  network            String
+  detectedAt         DateTime         @default(now()) @map("detected_at")
+  reorgDepth         Int              @map("reorg_depth")
+  safetyThreshold    Int              @map("safety_threshold")
+  canonicalBlockHash String           @map("canonical_block_hash")
+  orphanedBlockHash  String           @map("orphaned_block_hash")
+  fromBlockNumber    Int              @map("from_block_number")
+  toBlockNumber      Int              @map("to_block_number")
+  status             ReorgEventStatus @default(detected)
+  resolvedAt         DateTime?        @map("resolved_at")
+  metadata           Json?
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  affectedTransactions TransactionReorg[]
+
+  @@index([network, detectedAt])
+  @@index([status])
+  @@index([reorgDepth])
+  @@map("reorg_events")
+}
+
+model TransactionReorg {
+  id            String                 @id @default(uuid())
+  reorgEventId  String                 @map("reorg_event_id")
+  txHash        String                 @map("tx_hash")
+  paymentId     String?                @map("payment_id")
+  network       String
+  status        TransactionReorgStatus @default(pending_review)
+  originalBlock Int?                   @map("original_block")
+  reorgDetails  Json?                  @map("reorg_details")
+  reVerifiedAt  DateTime?              @map("re_verified_at")
+  resolvedAt    DateTime?              @map("resolved_at")
+  createdAt     DateTime               @default(now()) @map("created_at")
+  updatedAt     DateTime               @updatedAt @map("updated_at")
+
+  reorgEvent ReorgEvent @relation(fields: [reorgEventId], references: [id])
+  payment    Payment?   @relation(fields: [paymentId], references: [id])
+
+  @@index([reorgEventId])
+  @@index([txHash])
+  @@index([paymentId])
+  @@index([status])
+  @@index([network, createdAt])
+  @@map("transaction_reorgs")
+}
+
+
+// ─── Feature Flag System (#476) ──────────────────────────────────────────────
+
+enum FeatureFlagType {
+  boolean
+  string
+  number
+  json
+}
+
+enum FeatureFlagStatus {
+  draft
+  active
+  paused
+  archived
+}
+
+enum TargetingRuleType {
+  percentage
+  user_segment
+  environment
+  user_attribute
+  allowlist
+}
+
+enum RolloutScheduleStatus {
+  pending
+  active
+  paused
+  completed
+  cancelled
+}
+
+enum ExperimentStatus {
+  draft
+  running
+  paused
+  completed
+  aborted
+}
+
+model FeatureFlag {
+  id           String            @id @default(uuid())
+  tenantId     String            @map("tenant_id")
+  key          String
+  name         String
+  description  String?
+  type         FeatureFlagType   @default(boolean)
+  defaultValue Json              @map("default_value")
+  status       FeatureFlagStatus @default(draft)
+  environment  String            @default("all")
+  ownerEmail   String?           @map("owner_email")
+  expiresAt    DateTime?         @map("expires_at")
+  metadata     Json?
+  version      Int               @default(1)
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+  archivedAt   DateTime?         @map("archived_at")
+
+  rules      FeatureFlagRule[]
+  schedules  RolloutSchedule[]
+  experiments Experiment[]
+  exposures  FlagExposure[]
+  stats      FlagUsageStat[]
+  auditLogs  FeatureFlagAuditLog[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId, status])
+  @@index([environment])
+  @@index([status, archivedAt])
+  @@map("feature_flags")
+}
+
+model FeatureFlagRule {
+  id         String            @id @default(uuid())
+  flagId     String            @map("flag_id")
+  type       TargetingRuleType
+  priority   Int               @default(0)
+  conditions Json
+  enabled    Boolean           @default(true)
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+
+  flag FeatureFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
+
+  @@index([flagId, priority])
+  @@index([type])
+  @@map("feature_flag_rules")
+}
+
+model UserSegment {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  name        String
+  description String?
+  conditions  Json
+  matchType   String    @default("all")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("user_segments")
+}
+
+model RolloutSchedule {
+  id                String                @id @default(uuid())
+  flagId            String                @map("flag_id")
+  startPercentage   Int                   @map("start_percentage")
+  endPercentage     Int                   @map("end_percentage")
+  currentPercentage Int                   @default(0) @map("current_percentage")
+  incrementPercent  Int                   @map("increment_percent")
+  incrementInterval String
+  status            RolloutScheduleStatus @default(pending)
+  startedAt         DateTime?             @map("started_at")
+  nextIncrementAt   DateTime?             @map("next_increment_at")
+  completedAt       DateTime?             @map("completed_at")
+  pausedReason      String?               @map("paused_reason")
+  createdBy         String                @map("created_by")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+
+  flag FeatureFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
+
+  @@index([flagId, status])
+  @@index([status, nextIncrementAt])
+  @@map("rollout_schedules")
+}
+
+model Experiment {
+  id            String           @id @default(uuid())
+  flagId        String           @map("flag_id")
+  name          String
+  hypothesis    String?
+  status        ExperimentStatus @default(draft)
+  startedAt     DateTime?        @map("started_at")
+  endedAt       DateTime?        @map("ended_at")
+  primaryMetric String?          @map("primary_metric")
+  createdBy     String           @map("created_by")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  flag        FeatureFlag             @relation(fields: [flagId], references: [id], onDelete: Cascade)
+  variants    ExperimentVariant[]
+  assignments ExperimentAssignment[]
+
+  @@index([flagId, status])
+  @@index([status, startedAt])
+  @@map("experiments")
+}
+
+model ExperimentVariant {
+  id           String   @id @default(uuid())
+  experimentId String   @map("experiment_id")
+  key          String
+  name         String
+  value        Json
+  bucketWeight Int      @default(50) @map("bucket_weight")
+  isControl    Boolean  @default(false) @map("is_control")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  experiment  Experiment              @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  assignments ExperimentAssignment[]
+
+  @@unique([experimentId, key])
+  @@map("experiment_variants")
+}
+
+model ExperimentAssignment {
+  id             String    @id @default(uuid())
+  experimentId   String    @map("experiment_id")
+  variantId      String    @map("variant_id")
+  identifier     String
+  assignedAt     DateTime  @default(now()) @map("assigned_at")
+  exposed        Boolean   @default(false)
+  firstExposedAt DateTime? @map("first_exposed_at")
+
+  experiment Experiment        @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  variant    ExperimentVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([experimentId, identifier])
+  @@index([variantId])
+  @@index([identifier])
+  @@map("experiment_assignments")
+}
+
+model FlagExposure {
+  id          String   @id @default(uuid())
+  flagId      String   @map("flag_id")
+  identifier  String
+  value       Json
+  environment String
+  source      String   @default("server")
+  userAgent   String?  @map("user_agent")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  flag FeatureFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
+
+  @@index([flagId, createdAt])
+  @@index([identifier, createdAt])
+  @@index([createdAt])
+  @@map("flag_exposures")
+}
+
+model FlagUsageStat {
+  id                String   @id @default(uuid())
+  flagId            String   @map("flag_id")
+  windowStart       DateTime @map("window_start")
+  windowDuration    String   @map("window_duration")
+  evaluations       Int      @default(0)
+  trueCount         Int      @default(0) @map("true_count")
+  falseCount        Int      @default(0) @map("false_count")
+  uniqueIdentifiers Int      @default(0) @map("unique_identifiers")
+
+  flag FeatureFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
+
+  @@unique([flagId, windowStart, windowDuration])
+  @@index([flagId, windowStart])
+  @@map("flag_usage_stats")
+}
+
+model FeatureFlagAuditLog {
+  id        String   @id @default(uuid())
+  flagId    String   @map("flag_id")
+  actor     String
+  action    String
+  before    Json?
+  after     Json?
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  flag FeatureFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
+
+  @@index([flagId, createdAt])
+  @@index([actor, createdAt])
+  @@map("feature_flag_audit_logs")
 }

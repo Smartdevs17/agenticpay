@@ -2,8 +2,11 @@ import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config/env.js';
 import { withQueryProfiling } from '../config/database.js';
+import { EmailDeliveryService } from './email-delivery.js';
+import { fxService } from './fx/index.js';
 
 let openaiClient: OpenAI | null = null;
+const emailService = new EmailDeliveryService();
 
 const TAX_RATES: Record<string, number> = {
   US: 0.10,
@@ -28,7 +31,13 @@ const getOpenAIClient = () => {
   return openaiClient;
 };
 
-export type InvoiceStatus = 'draft' | 'pending' | 'paid' | 'overdue';
+export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
+
+export interface InvoiceReminder {
+  sentAt: string;
+  type: '7_days' | '3_days' | 'overdue' | 'custom';
+  message: string;
+}
 
 export type InvoiceLineItem = {
   description: string;
@@ -52,11 +61,18 @@ export type InvoiceRecord = {
   invoiceNumber: string;
   merchantId: string;
   projectId: string;
+  recipientEmail?: string;
+  recipientName?: string;
   lineItems: InvoiceLineItem[];
   subtotal: number;
   taxTotal: number;
   total: number;
   currency: string;
+  dueDate?: string;
+  sentAt?: string;
+  paidAt?: string;
+  cancelledAt?: string;
+  reminders: InvoiceReminder[];
   generatedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -64,6 +80,22 @@ export type InvoiceRecord = {
   status: InvoiceStatus;
   countryCode: string;
   taxBreakdown: InvoiceTaxBreakdown[];
+  // Multi-currency FX (Issue #626) — `currency`/`total` above stay the
+  // merchant's settlement currency; these track the customer-facing
+  // presentment currency and the rate locked at generation/payment time.
+  // Mirrors the Invoice.presentmentCurrency/presentmentAmount/fxRate/
+  // fxRateLockedAt columns added to the Prisma schema for this feature.
+  presentmentCurrency: string | null;
+  presentmentAmount: number | null;
+  fxRate: number | null;
+  fxRateLockedAt: string | null;
+};
+
+export type FxLockInfo = {
+  presentmentCurrency: string;
+  presentmentAmount: number;
+  fxRate: number;
+  fxRateLockedAt: string;
 };
 
 const invoices = new Map<string, InvoiceRecord>();
@@ -143,6 +175,32 @@ interface InvoiceRequest {
   hoursWorked: number;
   hourlyRate: number;
   countryCode: string;
+  /**
+   * Customer-facing display currency, if different from the invoice's
+   * settlement currency ('USD'). When set, the FX rate is fetched/cached via
+   * `fxService` and locked onto the invoice at generation time (Issue #626).
+   */
+  presentmentCurrency?: string;
+}
+
+/**
+ * Computes and locks the FX conversion for a multi-currency invoice against
+ * its settlement `currency`/`total`, using the shared `fxService` rate
+ * cache. Used both at generation time and to re-lock the rate at payment
+ * time (the generation-time rate may have expired or moved by then).
+ */
+async function lockFxForInvoice(invoice: InvoiceRecord, presentmentCurrency: string): Promise<FxLockInfo> {
+  const conversion = await fxService.convert(invoice.total, invoice.currency, presentmentCurrency);
+  if (!conversion.ok) {
+    throw new Error(`FX conversion failed for ${invoice.currency}->${presentmentCurrency}: ${conversion.error.message}`);
+  }
+
+  return {
+    presentmentCurrency: conversion.value.quoteCurrency,
+    presentmentAmount: conversion.value.convertedAmount,
+    fxRate: conversion.value.rate,
+    fxRateLockedAt: new Date().toISOString(),
+  };
 }
 
 export async function generateInvoice(request: InvoiceRequest): Promise<InvoiceRecord> {
@@ -224,7 +282,8 @@ export async function generateInvoice(request: InvoiceRequest): Promise<InvoiceR
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     summary,
-    status: 'pending',
+    status: 'draft',
+    reminders: [],
     countryCode,
     taxBreakdown: [
       {
@@ -235,10 +294,264 @@ export async function generateInvoice(request: InvoiceRequest): Promise<InvoiceR
         description: `${countryCode} VAT/GST`,
       },
     ],
+    presentmentCurrency: null,
+    presentmentAmount: null,
+    fxRate: null,
+    fxRateLockedAt: null,
   };
+
+  const presentmentCurrency = request.presentmentCurrency?.trim().toUpperCase();
+  if (presentmentCurrency && presentmentCurrency !== invoice.currency) {
+    const lock = await lockFxForInvoice(invoice, presentmentCurrency);
+    invoice.presentmentCurrency = lock.presentmentCurrency;
+    invoice.presentmentAmount = lock.presentmentAmount;
+    invoice.fxRate = lock.fxRate;
+    invoice.fxRateLockedAt = lock.fxRateLockedAt;
+  }
 
   invoices.set(invoice.id, invoice);
   return invoice;
+}
+
+export async function sendInvoiceEmail(
+  invoiceId: string,
+  recipientEmail: string,
+  recipientName?: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const invoice = invoices.get(invoiceId);
+  if (!invoice) return { success: false, error: 'Invoice not found' };
+  if (invoice.status === 'cancelled') return { success: false, error: 'Invoice is cancelled' };
+
+  const pdf = buildSimplePdf(invoice);
+  const result = await emailService.send({
+    to: recipientEmail,
+    toName: recipientName,
+    subject: `Invoice ${invoice.invoiceNumber} from AgenticPay`,
+    html: `
+      <h2>Invoice ${invoice.invoiceNumber}</h2>
+      <p>Dear ${recipientName || 'Valued Customer'},</p>
+      <p>Please find attached the invoice for project <strong>${invoice.projectId}</strong>.</p>
+      <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse;margin:16px 0">
+        <tr><td><strong>Subtotal</strong></td><td>$${invoice.subtotal.toFixed(2)}</td></tr>
+        <tr><td><strong>Tax</strong></td><td>$${invoice.taxTotal.toFixed(2)}</td></tr>
+        <tr><td><strong>Total</strong></td><td>$${invoice.total.toFixed(2)}</td></tr>
+      </table>
+      ${invoice.dueDate ? `<p><strong>Due Date:</strong> ${new Date(invoice.dueDate).toLocaleDateString()}</p>` : ''}
+      <p>${invoice.summary}</p>
+      <hr/>
+      <p style="color:#666;font-size:12px">AgenticPay - Automated Invoice System</p>
+    `,
+    attachments: [
+      {
+        filename: `${invoice.invoiceNumber}.pdf`,
+        content: pdf,
+        contentType: 'application/pdf',
+      },
+    ],
+  });
+
+  if (result.success) {
+    invoice.recipientEmail = recipientEmail;
+    invoice.recipientName = recipientName || undefined;
+    invoice.sentAt = new Date().toISOString();
+    invoice.status = 'sent';
+    invoice.updatedAt = new Date().toISOString();
+    invoices.set(invoiceId, invoice);
+  }
+
+  return { success: result.success, messageId: result.messageId, error: result.error };
+}
+
+export function updateInvoiceStatus(
+  invoiceId: string,
+  status: InvoiceStatus
+): InvoiceRecord | undefined {
+  const invoice = invoices.get(invoiceId);
+  if (!invoice) return undefined;
+
+  invoice.status = status;
+  invoice.updatedAt = new Date().toISOString();
+  if (status === 'paid') invoice.paidAt = new Date().toISOString();
+  if (status === 'cancelled') invoice.cancelledAt = new Date().toISOString();
+
+  invoices.set(invoiceId, invoice);
+  return invoice;
+}
+
+export function sendPaymentReminder(invoiceId: string): InvoiceReminder | undefined {
+  const invoice = invoices.get(invoiceId);
+  if (!invoice) return undefined;
+  if (invoice.status === 'paid' || invoice.status === 'cancelled') return undefined;
+  if (!invoice.dueDate) return undefined;
+
+  const daysOverdue = Math.floor(
+    (Date.now() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  let reminderType: InvoiceReminder['type'];
+  let message: string;
+
+  if (daysOverdue <= 0) {
+    const daysUntilDue = Math.abs(daysOverdue);
+    if (daysUntilDue <= 7 && daysUntilDue > 3) {
+      reminderType = '7_days';
+      message = `Reminder: Invoice ${invoice.invoiceNumber} is due in ${daysUntilDue} days.`;
+    } else if (daysUntilDue <= 3 && daysUntilDue > 0) {
+      reminderType = '3_days';
+      message = `Reminder: Invoice ${invoice.invoiceNumber} is due in ${daysUntilDue} days. Please arrange payment.`;
+    } else {
+      return undefined;
+    }
+  } else {
+    reminderType = 'overdue';
+    invoice.status = 'overdue';
+    message = `Overdue Notice: Invoice ${invoice.invoiceNumber} is ${daysOverdue} day(s) overdue. Please pay immediately.`;
+  }
+
+  const reminder: InvoiceReminder = {
+    sentAt: new Date().toISOString(),
+    type: reminderType,
+    message,
+  };
+
+  invoice.reminders.push(reminder);
+  invoice.updatedAt = new Date().toISOString();
+  invoices.set(invoiceId, invoice);
+
+  if (invoice.recipientEmail) {
+    emailService.send({
+      to: invoice.recipientEmail,
+      toName: invoice.recipientName,
+      subject: `Payment Reminder: ${invoice.invoiceNumber}`,
+      html: `<p>${message}</p><p>Total Due: $${invoice.total.toFixed(2)}</p>`,
+    }).catch(() => {});
+  }
+
+  return reminder;
+}
+
+export function getOverdueInvoices(): InvoiceRecord[] {
+  return [...invoices.values()].filter(
+    (inv) => inv.status === 'sent' || inv.status === 'overdue'
+  );
+}
+
+export function processOverdueInvoices(): InvoiceReminder[] {
+  const sent = getOverdueInvoices();
+  const reminders: InvoiceReminder[] = [];
+  for (const inv of sent) {
+    const reminder = sendPaymentReminder(inv.id);
+    if (reminder) reminders.push(reminder);
+  }
+  return reminders;
+}
+
+export function getInvoiceReminders(invoiceId: string): InvoiceReminder[] {
+  const invoice = invoices.get(invoiceId);
+  return invoice?.reminders ?? [];
+}
+
+/**
+ * Re-locks the FX rate for an existing multi-currency invoice — call this
+ * when the invoice is actually paid, since the rate locked at generation
+ * time may have expired or moved. Only updates the invoice's stored FX
+ * fields; it does not touch payment processing/webhook handling.
+ */
+export async function reconvertInvoiceFxAtPayment(
+  invoiceId: string,
+  presentmentCurrency?: string,
+): Promise<InvoiceRecord> {
+  const invoice = invoices.get(invoiceId);
+  if (!invoice) {
+    throw new Error(`Invoice not found: ${invoiceId}`);
+  }
+
+  const targetCurrency = (presentmentCurrency ?? invoice.presentmentCurrency)?.trim().toUpperCase();
+  if (!targetCurrency) {
+    throw new Error(`Invoice ${invoiceId} has no presentment currency to reconvert`);
+  }
+  if (targetCurrency === invoice.currency) {
+    throw new Error(`presentmentCurrency must differ from settlement currency (${invoice.currency})`);
+  }
+
+  const lock = await lockFxForInvoice(invoice, targetCurrency);
+  invoice.presentmentCurrency = lock.presentmentCurrency;
+  invoice.presentmentAmount = lock.presentmentAmount;
+  invoice.fxRate = lock.fxRate;
+  invoice.fxRateLockedAt = lock.fxRateLockedAt;
+  invoice.updatedAt = new Date().toISOString();
+
+  invoices.set(invoice.id, invoice);
+  return invoice;
+}
+
+export type MultiCurrencyReportRow = {
+  currency: string;
+  presentmentCurrency: string;
+  invoiceCount: number;
+  totalSettlement: number;
+  totalPresentment: number;
+  averageFxRate: number | null;
+};
+
+/**
+ * Aggregates invoices by (currency, presentmentCurrency) pair — counts and
+ * totals per pair — for multi-currency reporting. Single-currency invoices
+ * (no presentmentCurrency set) are grouped under presentmentCurrency ===
+ * currency with a null-equivalent fxRate of 1.
+ */
+export function generateMultiCurrencyReport(input: { merchantId?: string } = {}): {
+  rows: MultiCurrencyReportRow[];
+  totalInvoices: number;
+  multiCurrencyInvoices: number;
+} {
+  const relevant = [...invoices.values()].filter(
+    (invoice) => !input.merchantId || invoice.merchantId === input.merchantId,
+  );
+
+  const groups = new Map<
+    string,
+    { currency: string; presentmentCurrency: string; count: number; settlement: number; presentment: number; rateSum: number; rateCount: number }
+  >();
+
+  for (const invoice of relevant) {
+    const presentmentCurrency = invoice.presentmentCurrency ?? invoice.currency;
+    const key = `${invoice.currency}:${presentmentCurrency}`;
+    const group = groups.get(key) ?? {
+      currency: invoice.currency,
+      presentmentCurrency,
+      count: 0,
+      settlement: 0,
+      presentment: 0,
+      rateSum: 0,
+      rateCount: 0,
+    };
+
+    group.count += 1;
+    group.settlement += invoice.total;
+    group.presentment += invoice.presentmentAmount ?? invoice.total;
+    if (invoice.fxRate !== null) {
+      group.rateSum += invoice.fxRate;
+      group.rateCount += 1;
+    }
+
+    groups.set(key, group);
+  }
+
+  const rows: MultiCurrencyReportRow[] = [...groups.values()].map((g) => ({
+    currency: g.currency,
+    presentmentCurrency: g.presentmentCurrency,
+    invoiceCount: g.count,
+    totalSettlement: Number(g.settlement.toFixed(2)),
+    totalPresentment: Number(g.presentment.toFixed(2)),
+    averageFxRate: g.rateCount > 0 ? Number((g.rateSum / g.rateCount).toFixed(10)) : null,
+  }));
+
+  return {
+    rows: rows.sort((a, b) => a.currency.localeCompare(b.currency) || a.presentmentCurrency.localeCompare(b.presentmentCurrency)),
+    totalInvoices: relevant.length,
+    multiCurrencyInvoices: relevant.filter((i) => i.presentmentCurrency !== null).length,
+  };
 }
 
 export function listInvoices(): InvoiceRecord[] {
@@ -293,4 +606,199 @@ export function generateTaxReport(input: { merchantId: string; from?: string; to
 
 export function buildInvoicePdf(invoice: InvoiceRecord): Buffer {
   return buildSimplePdf(invoice);
+}
+
+// ── Milestone-Triggered Invoicing (Issue #636) ───────────────────────────────
+
+export type MilestoneTriggerConfig = {
+  projectId: string;
+  merchantId: string;
+  countryCode?: string;
+  presentmentCurrency?: string;
+  autoSend?: boolean;
+  recipientEmail?: string;
+  recipientName?: string;
+};
+
+export type MilestoneInvoiceResult = {
+  invoice: InvoiceRecord;
+  milestoneId: string;
+  projectId: string;
+  triggeredAt: string;
+};
+
+const milestoneTriggers = new Map<string, MilestoneTriggerConfig[]>();
+
+export function registerMilestoneTrigger(config: MilestoneTriggerConfig): void {
+  const triggers = milestoneTriggers.get(config.projectId) ?? [];
+  triggers.push(config);
+  milestoneTriggers.set(config.projectId, triggers);
+}
+
+export function getMilestoneTriggers(projectId: string): MilestoneTriggerConfig[] {
+  return milestoneTriggers.get(projectId) ?? [];
+}
+
+export function removeMilestoneTrigger(projectId: string, merchantId: string): boolean {
+  const triggers = milestoneTriggers.get(projectId);
+  if (!triggers) return false;
+  const filtered = triggers.filter((t) => t.merchantId !== merchantId);
+  if (filtered.length === triggers.length) return false;
+  milestoneTriggers.set(projectId, filtered);
+  return true;
+}
+
+export async function generateInvoiceFromMilestone(
+  milestone: { id: string; title: string; deliverable: string; amount: number },
+  config: MilestoneTriggerConfig,
+): Promise<MilestoneInvoiceResult> {
+  const invoice = await generateInvoice({
+    projectId: config.projectId,
+    merchantId: config.merchantId,
+    workDescription: `Milestone: ${milestone.title} — ${milestone.deliverable}`,
+    hoursWorked: 1,
+    hourlyRate: milestone.amount,
+    countryCode: config.countryCode ?? 'US',
+    presentmentCurrency: config.presentmentCurrency,
+  });
+
+  if (config.autoSend && config.recipientEmail) {
+    await sendInvoiceEmail(invoice.id, config.recipientEmail, config.recipientName).catch(() => {});
+  }
+
+  return {
+    invoice,
+    milestoneId: milestone.id,
+    projectId: config.projectId,
+    triggeredAt: new Date().toISOString(),
+  };
+}
+
+// ── Invoice Analytics (Issue #636) ───────────────────────────────────────────
+
+export type InvoiceStatusTrend = {
+  date: string;
+  status: string;
+  count: number;
+};
+
+export type InvoiceAgingBreakdown = {
+  range: string;
+  count: number;
+  amount: number;
+};
+
+export type InvoiceAnalyticsData = {
+  totalInvoices: number;
+  totalAmount: number;
+  paidAmount: number;
+  overdueAmount: number;
+  draftAmount: number;
+  cancelledAmount: number;
+  sentAmount: number;
+  averageValue: number;
+  statusBreakdown: Record<string, number>;
+  monthlyTrend: Array<{ month: string; count: number; amount: number }>;
+  topMerchants: Array<{ merchantId: string; count: number; total: number }>;
+  statusTrend: InvoiceStatusTrend[];
+  agingBreakdown: InvoiceAgingBreakdown[];
+  generatedAt: string;
+};
+
+export function buildInvoiceAnalytics(merchantId?: string): InvoiceAnalyticsData {
+  const filtered = merchantId
+    ? Array.from(invoices.values()).filter((i) => i.merchantId === merchantId)
+    : Array.from(invoices.values());
+
+  const totalInvoices = filtered.length;
+  const totalAmount = filtered.reduce((s, i) => s + i.total, 0);
+  const paidAmount = filtered.filter((i) => i.status === 'paid').reduce((s, i) => s + i.total, 0);
+  const overdueAmount = filtered.filter((i) => i.status === 'overdue').reduce((s, i) => s + i.total, 0);
+  const draftAmount = filtered.filter((i) => i.status === 'draft').reduce((s, i) => s + i.total, 0);
+  const cancelledAmount = filtered.filter((i) => i.status === 'cancelled').reduce((s, i) => s + i.total, 0);
+  const sentAmount = filtered.filter((i) => i.status === 'sent').reduce((s, i) => s + i.total, 0);
+
+  const statusBreakdown: Record<string, number> = {};
+  for (const inv of filtered) {
+    statusBreakdown[inv.status] = (statusBreakdown[inv.status] || 0) + 1;
+  }
+
+  const monthBuckets = new Map<string, { count: number; amount: number }>();
+  for (const inv of filtered) {
+    const month = inv.createdAt.slice(0, 7);
+    const bucket = monthBuckets.get(month) ?? { count: 0, amount: 0 };
+    bucket.count += 1;
+    bucket.amount += inv.total;
+    monthBuckets.set(month, bucket);
+  }
+
+  const monthlyTrend = Array.from(monthBuckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, data]) => ({ month, ...data }));
+
+  const merchantTotals = new Map<string, { count: number; total: number }>();
+  for (const inv of filtered) {
+    const m = merchantTotals.get(inv.merchantId) ?? { count: 0, total: 0 };
+    m.count += 1;
+    m.total += inv.total;
+    merchantTotals.set(inv.merchantId, m);
+  }
+
+  const topMerchants = Array.from(merchantTotals.entries())
+    .map(([merchantId, data]) => ({ merchantId, ...data }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+
+  const dailyStatus = new Map<string, Map<string, number>>();
+  for (const inv of filtered) {
+    const date = inv.updatedAt.slice(0, 10);
+    if (!dailyStatus.has(date)) dailyStatus.set(date, new Map());
+    const statusMap = dailyStatus.get(date)!;
+    statusMap.set(inv.status, (statusMap.get(inv.status) || 0) + 1);
+  }
+
+  const statusTrend = Array.from(dailyStatus.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .flatMap(([date, statuses]) =>
+      Array.from(statuses.entries()).map(([status, count]) => ({ date, status, count }))
+    );
+
+  const now = Date.now();
+  const agingRanges = [
+    { label: '0-30 days', min: 0, max: 30 },
+    { label: '31-60 days', min: 31, max: 60 },
+    { label: '61-90 days', min: 61, max: 90 },
+    { label: '90+ days', min: 91, max: Infinity },
+  ];
+
+  const agingBreakdown = agingRanges.map((range) => {
+    const matching = filtered.filter((inv) => {
+      if (inv.status === 'paid' || inv.status === 'cancelled') return false;
+      const due = inv.dueDate ? new Date(inv.dueDate).getTime() : new Date(inv.createdAt).getTime();
+      const daysOverdue = Math.floor((now - due) / (1000 * 60 * 60 * 24));
+      return daysOverdue >= range.min && daysOverdue <= range.max;
+    });
+    return {
+      range: range.label,
+      count: matching.length,
+      amount: Math.round(matching.reduce((s, i) => s + i.total, 0) * 100) / 100,
+    };
+  });
+
+  return {
+    totalInvoices,
+    totalAmount: Math.round(totalAmount * 100) / 100,
+    paidAmount: Math.round(paidAmount * 100) / 100,
+    overdueAmount: Math.round(overdueAmount * 100) / 100,
+    draftAmount: Math.round(draftAmount * 100) / 100,
+    cancelledAmount: Math.round(cancelledAmount * 100) / 100,
+    sentAmount: Math.round(sentAmount * 100) / 100,
+    averageValue: totalInvoices > 0 ? Math.round((totalAmount / totalInvoices) * 100) / 100 : 0,
+    statusBreakdown,
+    monthlyTrend,
+    topMerchants,
+    statusTrend,
+    agingBreakdown,
+    generatedAt: new Date().toISOString(),
+  };
 }

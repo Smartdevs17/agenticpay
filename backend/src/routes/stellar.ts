@@ -8,6 +8,8 @@ import {
   UnitOfWork,
   createUnitOfWork,
 } from '../services/stellar.js';
+import { getTransactionMonitor } from '../services/transaction-monitor.js';
+import type { TxStatus } from '../services/transaction-monitor.js';
 import { cacheControl, CacheTTL } from '../middleware/cache.js';
 import { batchProcessor } from '../services/batch.js';
 import { featureFlags } from '../config/featureFlags.js';
@@ -139,4 +141,68 @@ stellarRouter.post('/nonce/release/:address', async (req, res) => {
     console.error('Nonce release error:', error);
     return res.status(500).json({ message: 'Failed to release nonce' });
   }
+});
+
+// ── Transaction monitoring endpoints (Issue #402) ─────────────────────────────
+
+stellarRouter.post('/monitor', async (req, res) => {
+  try {
+    const { txHash, sourceAddress, network, metadata, maxRetries } = req.body as {
+      txHash?: string;
+      sourceAddress?: string;
+      network?: string;
+      metadata?: Record<string, unknown>;
+      maxRetries?: number;
+    };
+
+    if (!txHash || typeof txHash !== 'string') {
+      return res.status(400).json({ message: 'txHash is required' });
+    }
+
+    const tracked = getTransactionMonitor().track(txHash, { sourceAddress, network, metadata, maxRetries });
+    return res.status(201).json(tracked);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid transaction hash')) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Monitor track error:', error);
+    return res.status(500).json({ message: 'Failed to register transaction for monitoring' });
+  }
+});
+
+stellarRouter.get('/monitor/health', cacheControl({ maxAge: CacheTTL.SHORT }), (_req, res) => {
+  return res.json(getTransactionMonitor().healthSummary());
+});
+
+stellarRouter.get('/monitor/transactions', (req, res) => {
+  const { status } = req.query as { status?: string };
+  const monitor = getTransactionMonitor();
+  const txs = status
+    ? monitor.getByStatus(status as TxStatus)
+    : monitor.getAll();
+  return res.json({ transactions: txs, count: txs.length });
+});
+
+stellarRouter.get('/monitor/transactions/:id', (req, res) => {
+  const tx = getTransactionMonitor().getById(req.params.id);
+  if (!tx) return res.status(404).json({ message: 'Transaction not found' });
+  return res.json(tx);
+});
+
+stellarRouter.post('/monitor/transactions/:hash/reorg', (req, res) => {
+  const tx = getTransactionMonitor().markReorged(req.params.hash);
+  if (!tx) return res.status(404).json({ message: 'Transaction not found' });
+  return res.json(tx);
+});
+
+stellarRouter.get('/monitor/alerts', (req, res) => {
+  const unacknowledgedOnly = req.query.unacknowledged === 'true';
+  const alerts = getTransactionMonitor().getAlerts(unacknowledgedOnly);
+  return res.json({ alerts, count: alerts.length });
+});
+
+stellarRouter.post('/monitor/alerts/:id/acknowledge', (req, res) => {
+  const ok = getTransactionMonitor().acknowledgeAlert(req.params.id);
+  if (!ok) return res.status(404).json({ message: 'Alert not found' });
+  return res.json({ acknowledged: true });
 });

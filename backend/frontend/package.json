@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "analyze": "ANALYZE=true next build",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest --passWithNoTests"
   },
@@ -44,6 +45,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@next/bundle-analyzer": "^16.2.6",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19.2.14",

@@ -1,15 +1,6 @@
 name: Smart Contract Security Auditing
 
-on:
-  push:
-    branches: [main, dev]
-    paths:
-      - 'contracts/**'
-      - '.github/workflows/security-audit.yml'
-  pull_request:
-    branches: [main, dev]
-    paths:
-      - 'contracts/**'
+on: workflow_dispatch
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

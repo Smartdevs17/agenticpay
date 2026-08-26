@@ -1,0 +1,15 @@
+{
+  "totalJsKb": 1500,
+  "chunks": {
+    "route-dashboard": 180,
+    "route-auth": 80,
+    "route-forms": 80,
+    "route-admin": 120,
+    "route-payments": 120,
+    "route-security": 80,
+    "route-onboarding": 80,
+    "route-logs": 80,
+    "route-accessibility": 60,
+    "framework": 200
+  }
+}

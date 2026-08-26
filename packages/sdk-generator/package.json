@@ -1,0 +1,34 @@
+{
+  "name": "@agenticpay/sdk-generator",
+  "version": "0.1.0",
+  "description": "OpenAPI-based SDK generator for AgenticPay APIs",
+  "type": "module",
+  "bin": {
+    "agenticpay-sdk-gen": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "generate:all": "node dist/cli.js --config openapi.config.json",
+    "generate:typescript": "node dist/cli.js --lang typescript --config openapi.config.json",
+    "generate:python": "node dist/cli.js --lang python --config openapi.config.json",
+    "generate:go": "node dist/cli.js --lang go --config openapi.config.json",
+    "generate:rust": "node dist/cli.js --lang rust --config openapi.config.json"
+  },
+  "keywords": [
+    "agenticpay",
+    "sdk",
+    "generator",
+    "openapi"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "typescript": "~5.7.2"
+  }
+}

@@ -14,6 +14,7 @@ import {
   markWebhookProcessed,
   WebhookProvider,
 } from '../services/webhooks/verification.js';
+import { getWebhookAuditLog } from '../services/webhooks/audit.js';
 // Webhook delivery services
 import {
   enqueueWebhookEvent,
@@ -35,6 +36,7 @@ const webhookConfigSchema = z.object({
   url: z.string().url(),
   secret: z.string().min(16),
   enabled: z.boolean().optional(),
+  encryptionPublicKey: z.string().optional(),
 });
 
 const webhookEventSchema = z.object({
@@ -48,6 +50,7 @@ const webhookEventSchema = z.object({
 const createSecretSchema = z.object({
   provider: z.enum(['stripe', 'paypal', 'github', 'custom']),
   secret: z.string().min(32, 'Secret must be at least 32 characters'),
+  keyId: z.string().optional(),
   expiresAt: z.string().optional(),
 });
 
@@ -104,7 +107,8 @@ webhooksRouter.post(
     const secret = createWebhookSecret(
       req.body.provider,
       req.body.secret,
-      req.body.expiresAt
+      req.body.expiresAt,
+      req.body.keyId,
     );
     res.status(201).json(secret);
   })
@@ -154,6 +158,15 @@ webhooksRouter.get(
     const events = getWebhookEvents(limit);
     res.json({ events, total: events.length });
   })
+);
+
+webhooksRouter.get(
+  '/audit',
+  asyncHandler(async (req, res) => {
+    const limit = parseInt(req.query.limit as string) || 100;
+    const records = getWebhookAuditLog(limit);
+    res.json({ records, total: records.length });
+  }),
 );
 
 webhooksRouter.get(

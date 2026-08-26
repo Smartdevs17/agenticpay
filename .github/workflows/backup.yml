@@ -1,0 +1,104 @@
+name: Database Backup
+
+on:
+  schedule:
+    # Daily full backup at 2:00 AM UTC
+    - cron: '0 2 * * *'
+    # Incremental backups every 6 hours
+    - cron: '0 8,14,20 * * *'
+  workflow_dispatch:
+    inputs:
+      type:
+        description: 'Backup type'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - incremental
+          - verify
+
+env:
+  BACKUP_DIR: /tmp/backups
+  S3_BUCKET: ${{ secrets.S3_BACKUP_BUCKET }}
+  S3_REGION: ${{ secrets.S3_REGION }}
+  RETENTION_DAYS: 30
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: agenticpay
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.S3_REGION }}
+
+      - name: Set up PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Create backup directory
+        run: mkdir -p $BACKUP_DIR/full $BACKUP_DIR/incremental
+
+      - name: Run full backup
+        if: ${{ github.event_name == 'schedule' && github.event.schedule == '0 2 * * *' || github.event.inputs.type == 'full' }}
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/agenticpay"
+          bash scripts/backup.sh full
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Run incremental backup
+        if: ${{ github.event_name == 'schedule' && github.event.schedule != '0 2 * * *' || github.event.inputs.type == 'incremental' }}
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/agenticpay"
+          bash scripts/backup.sh incremental
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Verify backups
+        if: ${{ github.event.inputs.type == 'verify' }}
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/agenticpay"
+          bash scripts/backup.sh verify
+
+      - name: Upload backup artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-backup-${{ github.run_id }}
+          path: ${{ env.BACKUP_DIR }}
+          retention-days: 7
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "attachments": [{
+                "color": "danger",
+                "text": "❌ Database backup workflow failed for ${{ github.repository }}"
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

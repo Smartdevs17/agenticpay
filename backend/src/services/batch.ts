@@ -136,6 +136,69 @@ export function executeBatch(payments: BatchPaymentItem[], label?: string): Batc
   return record;
 }
 
+export interface RollbackResult {
+  batchId: string;
+  rolledBackPayments: string[];
+  failedRollbacks: Array<{ recipient: string; error: string }>;
+  status: 'fully_rolled_back' | 'partially_rolled_back';
+}
+
+export function rollbackBatch(batchId: string): RollbackResult | undefined {
+  const record = batchStore.get(batchId);
+  if (!record) return undefined;
+  if (record.status === 'failed') {
+    return {
+      batchId,
+      rolledBackPayments: [],
+      failedRollbacks: record.payments.map((p) => ({ recipient: p.recipient, error: 'Batch had no successful payments' })),
+      status: 'fully_rolled_back',
+    };
+  }
+
+  const rolledBackPayments: string[] = [];
+  const failedRollbacks: Array<{ recipient: string; error: string }> = [];
+
+  for (const result of record.results) {
+    if (result.status === 'success') {
+      rolledBackPayments.push(result.recipient);
+    }
+  }
+
+  if (failedRollbacks.length === 0) {
+    record.status = 'completed';
+    for (const r of record.results) {
+      if (r.status === 'success') r.status = 'failed';
+      r.error = r.error ? `${r.error}; rolled back` : 'rolled back';
+    }
+  }
+
+  record.updatedAt = new Date().toISOString();
+  batchStore.set(batchId, record);
+
+  return {
+    batchId,
+    rolledBackPayments,
+    failedRollbacks,
+    status: failedRollbacks.length === 0 ? 'fully_rolled_back' : 'partially_rolled_back',
+  };
+}
+
+export function getBatchHistory(filters?: { status?: BatchStatus; from?: string; to?: string }): BatchRecord[] {
+  let entries = Array.from(batchStore.values());
+  if (filters?.status) {
+    entries = entries.filter((e) => e.status === filters.status);
+  }
+  if (filters?.from) {
+    const from = new Date(filters.from).getTime();
+    entries = entries.filter((e) => new Date(e.createdAt).getTime() >= from);
+  }
+  if (filters?.to) {
+    const to = new Date(filters.to).getTime();
+    entries = entries.filter((e) => new Date(e.createdAt).getTime() <= to);
+  }
+  return entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
 export function getBatch(id: string): BatchRecord | undefined {
   return batchStore.get(id);
 }
@@ -180,6 +243,137 @@ export function generateCSVTemplate(): string {
     'GABC...XYZ,100.00,XLM,payroll-jan',
     'GDEF...UVW,50.5,USDC,vendor-payment',
   ].join('\n');
+}
+
+// ── Dry-Run Estimation ───────────────────────────────────────────────────────
+
+export interface BatchEstimate {
+  totalPayments: number;
+  totalAmount: string;
+  byAsset: Record<string, string>;
+  estimatedGasUnits: number;
+  duplicateCount: number;
+  invalidAddressCount: number;
+  estimatedDurationMs: number;
+}
+
+export function estimateBatch(payments: BatchPaymentItem[]): BatchEstimate {
+  const byAsset: Record<string, number> = {};
+  let totalAmount = 0;
+  let invalidCount = 0;
+
+  for (const p of payments) {
+    if (!/^G[A-Z2-7]{55}$/.test(p.recipient)) {
+      invalidCount++;
+      continue;
+    }
+    const amount = parseFloat(p.amount) || 0;
+    totalAmount += amount;
+    byAsset[p.asset] = (byAsset[p.asset] ?? 0) + amount;
+  }
+
+  const duplicateIndices = detectDuplicates(payments);
+  const byAssetStrings: Record<string, string> = {};
+  for (const [k, v] of Object.entries(byAsset)) {
+    byAssetStrings[k] = v.toFixed(7);
+  }
+
+  return {
+    totalPayments: payments.length,
+    totalAmount: totalAmount.toFixed(7),
+    byAsset: byAssetStrings,
+    estimatedGasUnits: payments.length * 100 + 100, // rough Stellar estimate
+    duplicateCount: duplicateIndices.length,
+    invalidAddressCount: invalidCount,
+    estimatedDurationMs: payments.length * 50 + 500, // rough estimate
+  };
+}
+
+// ── Scheduled Batch Execution ────────────────────────────────────────────────
+
+export interface ScheduledBatch {
+  id: string;
+  label?: string;
+  payments: BatchPaymentItem[];
+  scheduledAt: string;
+  executeAt: string;
+  status: 'scheduled' | 'executed' | 'cancelled' | 'failed';
+  result?: BatchRecord;
+  createdAt: string;
+}
+
+const scheduledBatches = new Map<string, ScheduledBatch>();
+let scheduleTimer: ReturnType<typeof setInterval> | null = null;
+
+export function scheduleBatch(
+  payments: BatchPaymentItem[],
+  executeAt: string,
+  label?: string
+): ScheduledBatch {
+  const id = `sched_${randomUUID()}`;
+  const now = new Date().toISOString();
+  const scheduled: ScheduledBatch = {
+    id,
+    label,
+    payments,
+    scheduledAt: now,
+    executeAt,
+    status: 'scheduled',
+    createdAt: now,
+  };
+  scheduledBatches.set(id, scheduled);
+  startScheduleProcessor();
+  return scheduled;
+}
+
+export function listScheduledBatches(): ScheduledBatch[] {
+  return Array.from(scheduledBatches.values()).sort(
+    (a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()
+  );
+}
+
+export function cancelScheduledBatch(id: string): ScheduledBatch | undefined {
+  const batch = scheduledBatches.get(id);
+  if (!batch || batch.status !== 'scheduled') return undefined;
+  batch.status = 'cancelled';
+  scheduledBatches.set(id, batch);
+  return batch;
+}
+
+export function getScheduledBatch(id: string): ScheduledBatch | undefined {
+  return scheduledBatches.get(id);
+}
+
+function processScheduledBatches(): void {
+  const now = Date.now();
+  const due = Array.from(scheduledBatches.values()).filter(
+    (b) => b.status === 'scheduled' && new Date(b.executeAt).getTime() <= now
+  );
+
+  for (const batch of due) {
+    try {
+      const result = executeBatch(batch.payments, batch.label);
+      batch.result = result;
+      batch.status = 'executed';
+    } catch (error) {
+      batch.status = 'failed';
+    }
+    scheduledBatches.set(batch.id, batch);
+  }
+}
+
+function startScheduleProcessor(): void {
+  if (scheduleTimer) return;
+  scheduleTimer = setInterval(() => {
+    processScheduledBatches();
+  }, 5_000);
+}
+
+export function stopScheduleProcessor(): void {
+  if (scheduleTimer) {
+    clearInterval(scheduleTimer);
+    scheduleTimer = null;
+  }
 }
 
 // ── BatchProcessor (transaction batching with Stellar) ────────────────────────

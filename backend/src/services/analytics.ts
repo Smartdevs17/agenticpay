@@ -51,6 +51,21 @@ export interface AnalyticsSnapshot {
   generatedAt: string;
 }
 
+export interface MerchantPercentile {
+  volumePercentile: number;
+  successRatePercentile: number;
+  avgAmountPercentile: number;
+  note: string;
+}
+
+export interface ReportSchedule {
+  userId: string;
+  email: string;
+  frequencyHours: number;
+  createdAt: string;
+  lastSentAt?: string;
+}
+
 interface PaymentRecord {
   id: string;
   amount: number;
@@ -58,6 +73,221 @@ interface PaymentRecord {
   network: string;
   status: 'initiated' | 'confirmed' | 'completed' | 'failed';
   timestamp: Date;
+}
+
+// ── Revenue Forecasting ──────────────────────────────────────────────────────
+
+export interface ForecastPoint {
+  timestamp: string;
+  actual: number | null;
+  forecast: number;
+  lowerBound: number;
+  upperBound: number;
+}
+
+export interface RevenueForecast {
+  historical: ForecastPoint[];
+  forecast: ForecastPoint[];
+  summary: {
+    next7Days: number;
+    next30Days: number;
+    next90Days: number;
+    confidence: 'low' | 'medium' | 'high';
+    trend: 'up' | 'down' | 'stable';
+  };
+}
+
+// ── Forecast Accuracy Tracking (Issue #637) ──────────────────────────────────
+
+export interface AccuracyMetrics {
+  totalPredictions: number;
+  mae: number;
+  rmse: number;
+  mape: number;
+  bias: number;
+  byGranularity: Record<string, { count: number; mae: number; rmse: number }>;
+}
+
+export interface TrendResult {
+  direction: 'up' | 'down' | 'stable';
+  slope: number;
+  strength: number;
+}
+
+export class ForecastAccuracyTracker {
+  private predictions: Array<{ granularity: string; actual: number; predicted: number; timestamp: number }> = [];
+
+  resetForTests(): void {
+    this.predictions = [];
+  }
+
+  recordPrediction(granularity: string, actual: number, predicted: number): void {
+    this.predictions.push({ granularity, actual, predicted, timestamp: Date.now() });
+  }
+
+  getAccuracyMetrics(): AccuracyMetrics {
+    const byGranularity: Record<string, { count: number; mae: number; rmse: number }> = {};
+    const groups = new Map<string, Array<{ actual: number; predicted: number }>>();
+
+    for (const p of this.predictions) {
+      const g = groups.get(p.granularity) ?? [];
+      g.push({ actual: p.actual, predicted: p.predicted });
+      groups.set(p.granularity, g);
+    }
+
+    for (const [granularity, values] of groups) {
+      const mae = values.reduce((s, v) => s + Math.abs(v.actual - v.predicted), 0) / values.length;
+      const rmse = Math.sqrt(values.reduce((s, v) => s + (v.actual - v.predicted) ** 2, 0) / values.length);
+      byGranularity[granularity] = { count: values.length, mae, rmse };
+    }
+
+    const total = this.predictions.length;
+    if (total === 0) {
+      return { totalPredictions: 0, mae: 0, rmse: 0, mape: 0, bias: 0, byGranularity };
+    }
+
+    const mae = this.predictions.reduce((s, p) => s + Math.abs(p.actual - p.predicted), 0) / total;
+    const rmse = Math.sqrt(this.predictions.reduce((s, p) => s + (p.actual - p.predicted) ** 2, 0) / total);
+    const mape = this.predictions.reduce((s, p) => s + (p.actual > 0 ? Math.abs((p.actual - p.predicted) / p.actual) : 0), 0) / total * 100;
+    const bias = this.predictions.reduce((s, p) => s + (p.predicted - p.actual), 0) / total;
+
+    return { totalPredictions: total, mae, rmse, mape, bias, byGranularity };
+  }
+
+  analyzeTrend(data: number[]): TrendResult {
+    if (data.length < 2) return { direction: 'stable', slope: 0, strength: 0 };
+
+    const n = data.length;
+    const xMean = (n - 1) / 2;
+    const yMean = data.reduce((s, v) => s + v, 0) / n;
+
+    let num = 0;
+    let den = 0;
+    for (let i = 0; i < n; i++) {
+      num += (i - xMean) * (data[i] - yMean);
+      den += (i - xMean) ** 2;
+    }
+
+    const slope = den === 0 ? 0 : num / den;
+    const yVariance = data.reduce((s, v) => s + (v - yMean) ** 2, 0);
+    const strength = yVariance === 0 ? 0 : (den === 0 ? 0 : Math.abs(num) / Math.sqrt(den * yVariance));
+
+    let direction: 'up' | 'down' | 'stable';
+    if (slope > data.reduce((s, v) => s + Math.abs(v), 0) / n * 0.02) {
+      direction = 'up';
+    } else if (slope < -data.reduce((s, v) => s + Math.abs(v), 0) / n * 0.02) {
+      direction = 'down';
+    } else {
+      direction = 'stable';
+    }
+
+    return { direction, slope, strength };
+  }
+}
+
+export const forecastService = new ForecastAccuracyTracker();
+
+export function buildRevenueForecastWithAccuracy(since?: Date): { forecast: RevenueForecast; accuracy: AccuracyMetrics } {
+  const forecast = analyticsService.buildRevenueForecast(since);
+  const accuracy = forecastService.getAccuracyMetrics();
+  return { forecast, accuracy };
+}
+
+// ── Cohort Analysis ──────────────────────────────────────────────────────────
+
+export interface CohortDefinition {
+  cohortId: string;
+  cohortDate: string;
+  periodLabel: string;
+  users: number;
+  retention: Record<string, number>;
+  revenue: Record<string, number>;
+}
+
+export interface CohortAnalysisResult {
+  cohorts: CohortDefinition[];
+  overallRetention: Record<string, number>;
+  periodLabels: string[];
+  summary: {
+    totalCohorts: number;
+    firstWeekRetention: number;
+    firstMonthRetention: number;
+    bestCohort: string;
+    worstCohort: string;
+  };
+}
+
+// ── Forecasting helpers ──────────────────────────────────────────────────────
+
+function linearRegression(data: Array<{ x: number; y: number }>): { slope: number; intercept: number; r2: number } {
+  const n = data.length;
+  if (n < 2) return { slope: 0, intercept: 0, r2: 0 };
+  const sumX = data.reduce((s, d) => s + d.x, 0);
+  const sumY = data.reduce((s, d) => s + d.y, 0);
+  const sumXY = data.reduce((s, d) => s + d.x * d.y, 0);
+  const sumX2 = data.reduce((s, d) => s + d.x * d.x, 0);
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  const ssRes = data.reduce((s, d) => s + (d.y - (slope * d.x + intercept)) ** 2, 0);
+  const ssTot = data.reduce((s, d) => s + (d.y - sumY / n) ** 2, 0);
+  const r2 = ssTot === 0 ? 1 : 1 - ssRes / ssTot;
+  return { slope, intercept, r2 };
+}
+
+function movingAverage(data: number[], window: number): number[] {
+  const result: number[] = [];
+  for (let i = 0; i < data.length; i++) {
+    const start = Math.max(0, i - window + 1);
+    const slice = data.slice(start, i + 1);
+    result.push(slice.reduce((a, b) => a + b, 0) / slice.length);
+  }
+  return result;
+}
+
+function seasonalAdjustment(data: number[], period: number): number[] {
+  if (data.length < period * 2) return data.map(() => 1);
+  const factors: number[] = [];
+  for (let i = 0; i < period; i++) {
+    let sum = 0;
+    let count = 0;
+    for (let j = i; j < data.length; j += period) {
+      sum += data[j];
+      count++;
+    }
+    const avg = sum / count;
+    const overallAvg = data.reduce((a, b) => a + b, 0) / data.length;
+    factors.push(overallAvg > 0 ? avg / overallAvg : 1);
+  }
+  return factors;
+}
+
+// In-memory report schedule store
+const reportSchedules = new Map<string, ReportSchedule>();
+
+export function scheduleReport(userId: string, email: string, frequencyHours: number): ReportSchedule {
+  const schedule: ReportSchedule = {
+    userId,
+    email,
+    frequencyHours,
+    createdAt: new Date().toISOString(),
+  };
+  reportSchedules.set(userId, schedule);
+  return schedule;
+}
+
+export function getReportSchedule(userId: string): ReportSchedule | undefined {
+  return reportSchedules.get(userId);
+}
+
+export function getAllReportSchedules(): ReportSchedule[] {
+  return Array.from(reportSchedules.values());
+}
+
+export function markReportSent(userId: string): void {
+  const schedule = reportSchedules.get(userId);
+  if (schedule) {
+    schedule.lastSentAt = new Date().toISOString();
+  }
 }
 
 export class PaymentAnalyticsService {
@@ -217,6 +447,283 @@ export class PaymentAnalyticsService {
       summary: this.buildSummary(since),
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Returns simulated industry percentile rankings for the merchant.
+   * NOTE: Uses hardcoded benchmark curves — not real peer data.
+   */
+  buildMerchantPercentiles(since?: Date): MerchantPercentile {
+    const summary = this.buildSummary(since);
+
+    // Benchmark curves derived from simulated industry distributions
+    const volumePercentile = this.scorePercentile(summary.totalRevenue, [500, 2000, 5000, 15000, 50000]);
+    const successRatePercentile = this.scorePercentile(summary.successRate * 100, [60, 70, 78, 85, 95]);
+    const avgAmountPercentile = this.scorePercentile(summary.avgPaymentAmount, [50, 150, 400, 1000, 3000]);
+
+    return {
+      volumePercentile,
+      successRatePercentile,
+      avgAmountPercentile,
+      note: 'Estimated industry comparison — simulated benchmark data, not real peer metrics',
+    };
+  }
+
+  private scorePercentile(value: number, thresholds: number[]): number {
+    const brackets = [10, 25, 50, 75, 90, 99];
+    for (let i = 0; i < thresholds.length; i++) {
+      if (value < thresholds[i]) return brackets[i];
+    }
+    return brackets[thresholds.length];
+  }
+
+  exportToCsv(since?: Date): string {
+    const revenue = this.buildTimeSeries('hour', since);
+    const header = 'timestamp,revenue,count,network';
+    const rows = revenue.map(
+      (p) => `"${p.timestamp}",${p.revenue.toFixed(2)},${p.count},"${p.network}"`,
+    );
+    return [header, ...rows].join('\n');
+  }
+
+  // ── Revenue Forecasting ──────────────────────────────────────────────────
+
+  buildRevenueForecast(since?: Date): RevenueForecast {
+    const data = this.filterSince(since).filter((p) => p.status === 'completed');
+    if (data.length < 2) {
+      return {
+        historical: [],
+        forecast: [],
+        summary: { next7Days: 0, next30Days: 0, next90Days: 0, confidence: 'low', trend: 'stable' },
+      };
+    }
+
+    const dailyBuckets = new Map<string, number>();
+    const earliest = new Date(
+      data.reduce((min, p) => Math.min(min, p.timestamp.getTime()), Date.now())
+    );
+    const latest = new Date(Date.now());
+
+    for (const p of data) {
+      const key = this.bucketKey(p.timestamp, 'day');
+      dailyBuckets.set(key, (dailyBuckets.get(key) ?? 0) + p.amount);
+    }
+
+    const dayMs = 24 * 60 * 60 * 1000;
+    const daysCount = Math.ceil((latest.getTime() - earliest.getTime()) / dayMs) + 1;
+    const points: Array<{ x: number; y: number; timestamp: string }> = [];
+
+    for (let i = 0; i < daysCount; i++) {
+      const d = new Date(earliest.getTime() + i * dayMs);
+      const key = this.bucketKey(d, 'day');
+      const revenue = dailyBuckets.get(key) ?? 0;
+      if (revenue > 0 || i >= daysCount - 14) {
+        points.push({ x: i, y: revenue, timestamp: key });
+      }
+    }
+
+    if (points.length < 2) {
+      return {
+        historical: [],
+        forecast: [],
+        summary: { next7Days: 0, next30Days: 0, next90Days: 0, confidence: 'low', trend: 'stable' },
+      };
+    }
+
+    const recentPoints = points.slice(-30);
+    const regression = linearRegression(recentPoints.map((p) => ({ x: p.x, y: p.y })));
+    const ma7 = movingAverage(points.map((p) => p.y), 7);
+    const seasonal = seasonalAdjustment(points.map((p) => p.y), 7);
+
+    const historical: ForecastPoint[] = points.map((p, i) => ({
+      timestamp: p.timestamp,
+      actual: p.y,
+      forecast: ma7[i] ?? p.y,
+      lowerBound: Math.max(0, (ma7[i] ?? p.y) * 0.8),
+      upperBound: (ma7[i] ?? p.y) * 1.2,
+    }));
+
+    const lastX = points[points.length - 1].x;
+    const lastY = ma7[ma7.length - 1] ?? points[points.length - 1].y;
+    const lastSeasonal = seasonal[seasonal.length - 1] ?? 1;
+    const forecastDays = 90;
+
+    const forecast: ForecastPoint[] = [];
+    for (let i = 1; i <= forecastDays; i++) {
+      const x = lastX + i;
+      const trendVal = regression.slope * x + regression.intercept;
+      const seasonalFactor = seasonal[(points.length - 1 + i) % seasonal.length] ?? lastSeasonal;
+      const forecastVal = Math.max(0, trendVal * seasonalFactor * 0.7 + lastY * 0.3);
+      const residualStd = recentPoints.length > 2
+        ? Math.sqrt(recentPoints.reduce((s, p) => s + (p.y - (regression.slope * p.x + regression.intercept)) ** 2, 0) / (recentPoints.length - 2))
+        : forecastVal * 0.3;
+      const d = new Date(latest.getTime() + i * dayMs);
+      forecast.push({
+        timestamp: this.bucketKey(d, 'day'),
+        actual: null,
+        forecast: Math.round(forecastVal * 100) / 100,
+        lowerBound: Math.max(0, Math.round((forecastVal - 1.96 * residualStd) * 100) / 100),
+        upperBound: Math.round((forecastVal + 1.96 * residualStd) * 100) / 100,
+      });
+    }
+
+    const next7Days = forecast.slice(0, 7).reduce((s, f) => s + f.forecast, 0);
+    const next30Days = forecast.slice(0, 30).reduce((s, f) => s + f.forecast, 0);
+    const next90Days = forecast.reduce((s, f) => s + f.forecast, 0);
+
+    const trend = regression.slope > 0.5 ? 'up' : regression.slope < -0.5 ? 'down' : 'stable';
+    const confidence = regression.r2 > 0.7 ? 'high' : regression.r2 > 0.3 ? 'medium' : 'low';
+
+    return {
+      historical,
+      forecast,
+      summary: {
+        next7Days: Math.round(next7Days * 100) / 100,
+        next30Days: Math.round(next30Days * 100) / 100,
+        next90Days: Math.round(next90Days * 100) / 100,
+        confidence,
+        trend,
+      },
+    };
+  }
+
+  // ── Cohort Analysis ──────────────────────────────────────────────────────
+
+  buildCohortAnalysis(since?: Date): CohortAnalysisResult {
+    const data = this.filterSince(since);
+    if (data.length === 0) {
+      return {
+        cohorts: [],
+        overallRetention: {},
+        periodLabels: [],
+        summary: {
+          totalCohorts: 0,
+          firstWeekRetention: 0,
+          firstMonthRetention: 0,
+          bestCohort: '',
+          worstCohort: '',
+        },
+      };
+    }
+
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const earliest = new Date(
+      data.reduce((min, p) => Math.min(min, p.timestamp.getTime()), Date.now())
+    );
+    const latest = new Date(Date.now());
+    const cohortWeeks = Math.max(1, Math.ceil((latest.getTime() - earliest.getTime()) / weekMs));
+    const periodLabels = Array.from({ length: cohortWeeks }, (_, i) => `Week ${i + 1}`);
+
+    const cohorts = new Map<string, Map<string, { users: Set<string>; revenue: number }>>();
+
+    for (const p of data) {
+      const cohortKey = this.bucketByWeek(p.timestamp, earliest);
+      const periodKey = this.bucketByWeekOffset(p.timestamp, earliest);
+      if (!cohorts.has(cohortKey)) {
+        cohorts.set(cohortKey, new Map());
+      }
+      const cohort = cohorts.get(cohortKey)!;
+      if (!cohort.has(periodKey)) {
+        cohort.set(periodKey, { users: new Set(), revenue: 0 });
+      }
+      const entry = cohort.get(periodKey)!;
+      entry.users.add(p.id);
+      entry.revenue += p.amount;
+    }
+
+    const cohortDefs: CohortDefinition[] = [];
+    let totalFirstWeekRetention = 0;
+    let totalFirstMonthRetention = 0;
+    let retentionCount = 0;
+
+    for (const [cohortKey, periods] of cohorts) {
+      const sortedPeriods = Array.from(periods.entries()).sort(([a], [b]) => a.localeCompare(b));
+      const firstPeriod = sortedPeriods[0];
+      if (!firstPeriod) continue;
+      const totalUsers = firstPeriod[1].users.size;
+      if (totalUsers === 0) continue;
+
+      const retention: Record<string, number> = {};
+      const revenue: Record<string, number> = {};
+
+      for (const [periodKey, data] of sortedPeriods) {
+        const periodIdx = periodLabels.findIndex((_, i) => {
+          const start = new Date(earliest.getTime() + i * weekMs);
+          return this.bucketByWeek(start, earliest) === periodKey;
+        });
+        if (periodIdx >= 0) {
+          retention[periodLabels[periodIdx]] = totalUsers > 0 ? Math.round((data.users.size / totalUsers) * 10000) / 100 : 0;
+          revenue[periodLabels[periodIdx]] = Math.round(data.revenue * 100) / 100;
+        }
+      }
+
+      const allPeriodKeys = sortedPeriods.map(([k]) => k);
+      const week1Retention = allPeriodKeys.length > 1 && sortedPeriods[1]
+        ? (sortedPeriods[1][1].users.size / totalUsers) * 100
+        : 0;
+      const week4Retention = allPeriodKeys.length > 4 && sortedPeriods[4]
+        ? (sortedPeriods[4][1].users.size / totalUsers) * 100
+        : 0;
+
+      totalFirstWeekRetention += week1Retention;
+      totalFirstMonthRetention += week4Retention;
+      retentionCount++;
+
+      cohortDefs.push({
+        cohortId: cohortKey,
+        cohortDate: cohortKey,
+        periodLabel: `Cohort ${cohortKey}`,
+        users: totalUsers,
+        retention,
+        revenue,
+      });
+    }
+
+    cohortDefs.sort((a, b) => a.cohortDate.localeCompare(b.cohortDate));
+
+    const overallRetention: Record<string, number> = {};
+    const maxPeriods = Math.max(...cohortDefs.map((c) => Object.keys(c.retention).length));
+    for (let i = 0; i < Math.min(maxPeriods, periodLabels.length); i++) {
+      let sum = 0;
+      let count = 0;
+      for (const c of cohortDefs) {
+        if (c.retention[periodLabels[i]] !== undefined) {
+          sum += c.retention[periodLabels[i]];
+          count++;
+        }
+      }
+      overallRetention[periodLabels[i]] = count > 0 ? Math.round((sum / count) * 100) / 100 : 0;
+    }
+
+    const sortedByRetention = [...cohortDefs].sort(
+      (a, b) => (b.retention[periodLabels[0]] ?? 0) - (a.retention[periodLabels[0]] ?? 0)
+    );
+
+    return {
+      cohorts: cohortDefs,
+      overallRetention,
+      periodLabels,
+      summary: {
+        totalCohorts: cohortDefs.length,
+        firstWeekRetention: retentionCount > 0 ? Math.round((totalFirstWeekRetention / retentionCount) * 100) / 100 : 0,
+        firstMonthRetention: retentionCount > 0 ? Math.round((totalFirstMonthRetention / retentionCount) * 100) / 100 : 0,
+        bestCohort: sortedByRetention[0]?.cohortId ?? '',
+        worstCohort: sortedByRetention[sortedByRetention.length - 1]?.cohortId ?? '',
+      },
+    };
+  }
+
+  private bucketByWeek(date: Date, epoch: Date): string {
+    const diffMs = date.getTime() - epoch.getTime();
+    const week = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+    const d = new Date(epoch.getTime() + week * 7 * 24 * 60 * 60 * 1000);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  }
+
+  private bucketByWeekOffset(date: Date, epoch: Date): string {
+    const diffMs = date.getTime() - epoch.getTime();
+    const week = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+    return `w${week}`;
   }
 
   private filterSince(since?: Date): PaymentRecord[] {

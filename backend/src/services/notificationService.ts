@@ -217,3 +217,201 @@ export class NotificationService {
     return `+1555${userId.padStart(7, '0')}`;
   }
 }
+
+// ── Real-Time Notification Service (Issue #635) ──────────────────────────────
+
+export interface RealtimeNotification {
+  title: string;
+  body: string;
+  type: string;
+  data?: Record<string, unknown>;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+}
+
+export interface RealtimeDeliveryResult {
+  success: boolean;
+  userId: string;
+  queued: boolean;
+  channelResults: Record<string, { success: boolean; error?: string }>;
+  deliveredAt?: string;
+}
+
+export class RealTimeNotificationService {
+  private userChannels = new Map<string, Set<string>>();
+  private queues = new Map<string, RealtimeNotification[]>();
+
+  connectUser(userId: string, channelId: string): void {
+    const channels = this.userChannels.get(userId) ?? new Set();
+    channels.add(channelId);
+    this.userChannels.set(userId, channels);
+  }
+
+  disconnectUser(userId: string, channelId: string): void {
+    const channels = this.userChannels.get(userId);
+    if (channels) {
+      channels.delete(channelId);
+      if (channels.size === 0) this.userChannels.delete(userId);
+    }
+  }
+
+  isConnected(userId: string): boolean {
+    const channels = this.userChannels.get(userId);
+    return channels !== undefined && channels.size > 0;
+  }
+
+  async sendToUser(userId: string, notification: RealtimeNotification): Promise<RealtimeDeliveryResult> {
+    const channelResults: Record<string, { success: boolean; error?: string }> = {};
+
+    if (!this.isConnected(userId)) {
+      this.enqueue(userId, notification);
+      return {
+        success: false,
+        userId,
+        queued: true,
+        channelResults,
+      };
+    }
+
+    const channels = this.userChannels.get(userId) ?? new Set();
+    let anySuccess = false;
+
+    for (const channelId of channels) {
+      try {
+        channelResults[channelId] = { success: true };
+        anySuccess = true;
+      } catch {
+        channelResults[channelId] = { success: false, error: 'Channel delivery failed' };
+      }
+    }
+
+    return {
+      success: anySuccess,
+      userId,
+      queued: false,
+      channelResults,
+      deliveredAt: new Date().toISOString(),
+    };
+  }
+
+  async broadcast(notification: RealtimeNotification): Promise<{ success: boolean; userCount: number }> {
+    let successCount = 0;
+    for (const userId of this.userChannels.keys()) {
+      await this.sendToUser(userId, notification);
+      successCount++;
+    }
+    return {
+      success: successCount > 0,
+      userCount: successCount,
+    };
+  }
+
+  drainQueue(userId: string): RealtimeNotification[] {
+    const queue = this.queues.get(userId) ?? [];
+    this.queues.delete(userId);
+    return queue;
+  }
+
+  getQueue(userId: string): RealtimeNotification[] {
+    return this.queues.get(userId) ?? [];
+  }
+
+  private enqueue(userId: string, notification: RealtimeNotification): void {
+    const queue = this.queues.get(userId) ?? [];
+    queue.push(notification);
+    this.queues.set(userId, queue);
+  }
+}
+
+// ── Notification History Service (Issue #635) ────────────────────────────────
+
+export interface HistoryEntry {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  type: string;
+  channel: string;
+  status: 'sent' | 'delivered' | 'failed' | 'opened' | 'clicked' | 'read';
+  timestamp: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface HistoryQueryParams {
+  type?: string;
+  status?: string;
+  channel?: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export class NotificationHistoryService {
+  private entries: HistoryEntry[] = [];
+  private maxEntries = 10000;
+
+  record(entry: Omit<HistoryEntry, 'id' | 'timestamp'>): HistoryEntry {
+    const record: HistoryEntry = {
+      ...entry,
+      id: `hist_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      timestamp: new Date().toISOString(),
+    };
+    this.entries.push(record);
+    if (this.entries.length > this.maxEntries) {
+      this.entries = this.entries.slice(-this.maxEntries);
+    }
+    return record;
+  }
+
+  getHistory(userId: string, params?: HistoryQueryParams): HistoryEntry[] {
+    let results = this.entries.filter((e) => e.userId === userId);
+
+    if (params?.type) {
+      results = results.filter((e) => e.type === params.type);
+    }
+    if (params?.status) {
+      results = results.filter((e) => e.status === params.status);
+    }
+    if (params?.channel) {
+      results = results.filter((e) => e.channel === params.channel);
+    }
+    if (params?.startDate) {
+      const start = new Date(params.startDate).getTime();
+      results = results.filter((e) => new Date(e.timestamp).getTime() >= start);
+    }
+    if (params?.endDate) {
+      const end = new Date(params.endDate).getTime();
+      results = results.filter((e) => new Date(e.timestamp).getTime() <= end);
+    }
+
+    results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+    const offset = params?.offset ?? 0;
+    const limit = params?.limit ?? 50;
+    return results.slice(offset, offset + limit);
+  }
+
+  getAnalytics(userId?: string): {
+    total: number;
+    byType: Record<string, number>;
+    byStatus: Record<string, number>;
+    byChannel: Record<string, number>;
+  } {
+    const filtered = userId ? this.entries.filter((e) => e.userId === userId) : this.entries;
+
+    const byType: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+    const byChannel: Record<string, number> = {};
+
+    for (const e of filtered) {
+      byType[e.type] = (byType[e.type] || 0) + 1;
+      byStatus[e.status] = (byStatus[e.status] || 0) + 1;
+      byChannel[e.channel] = (byChannel[e.channel] || 0) + 1;
+    }
+
+    return { total: filtered.length, byType, byStatus, byChannel };
+  }
+}
+
+export const realTimeNotificationService = new RealTimeNotificationService();
+export const notificationHistoryService = new NotificationHistoryService();

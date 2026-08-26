@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { getBridgeMonitorService } from './bridge-monitor/bridge-monitor.js';
 
 export interface BridgeTransfer {
   id: string;
@@ -88,7 +89,44 @@ export function createBridgeTransfer(input: {
     updatedAt: ts,
   };
   transfers.set(transfer.id, transfer);
+  void syncBridgeMonitor(transfer, 'initiated');
   return transfer;
+}
+
+function mapBridgeStatus(
+  status: BridgeTransfer['status'],
+): 'initiated' | 'source_confirmed' | 'relayed' | 'destination_executed' | 'failed' | 'stuck' {
+  switch (status) {
+    case 'created':
+      return 'initiated';
+    case 'locked':
+      return 'source_confirmed';
+    case 'relayed':
+      return 'relayed';
+    case 'redeemed':
+      return 'destination_executed';
+    case 'refunded':
+    case 'disputed':
+      return 'failed';
+    default:
+      return 'stuck';
+  }
+}
+
+function syncBridgeMonitor(transfer: BridgeTransfer, status?: BridgeTransfer['status']): void {
+  void getBridgeMonitorService()
+    .trackMessage({
+      provider: 'custom',
+      messageId: transfer.id,
+      sourceChain: transfer.fromChain,
+      destinationChain: transfer.toChain,
+      status: mapBridgeStatus(status ?? transfer.status),
+      amount: String(transfer.amount),
+      sender: transfer.sender,
+      recipient: transfer.recipient,
+      metadata: { hashlock: transfer.hashlock, route: transfer.route },
+    })
+    .catch(() => undefined);
 }
 
 export function transitionBridgeTransfer(
@@ -104,6 +142,7 @@ export function transitionBridgeTransfer(
   }
   transfer.updatedAt = nowIso();
   transfers.set(id, transfer);
+  syncBridgeMonitor(transfer, next);
   return transfer;
 }
 

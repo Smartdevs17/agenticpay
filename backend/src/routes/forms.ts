@@ -1,12 +1,13 @@
 import { Router } from 'express';
-import { 
-  createForm, 
-  getForm, 
-  listForms, 
+import {
+  createForm,
+  getForm,
+  listForms,
   submitForm,
   updateForm,
   deleteForm,
   getFormSubmissions,
+  exportFormSubmissions,
   saveDraft,
   getDrafts,
   deleteDraft,
@@ -69,6 +70,26 @@ formsRouter.delete(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     deleteForm(id);
     res.status(204).send();
+  }),
+);
+
+// Export form submissions as CSV or JSON — requires an authenticated session
+formsRouter.get(
+  '/:id/export',
+  asyncHandler(async (req, res) => {
+    const sessionUser = (req as typeof req & { user?: { id: string } }).user;
+    if (!sessionUser) {
+      throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
+    }
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const format = req.query.format === 'csv' ? 'csv' : 'json';
+    const data = exportFormSubmissions(id, format);
+    res.setHeader(
+      'Content-Type',
+      format === 'csv' ? 'text/csv; charset=utf-8' : 'application/json; charset=utf-8',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="submissions.${format}"`);
+    res.send(data);
   }),
 );
 

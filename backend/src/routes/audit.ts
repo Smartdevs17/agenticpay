@@ -47,7 +47,7 @@ auditRouter.get('/entries', asyncHandler(async (req: Request, res: Response) => 
 }));
 
 auditRouter.get('/entries/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = String(req.params.id);
   const entry = await auditService.getEntry(id);
 
   if (!entry) {
@@ -63,8 +63,17 @@ auditRouter.get('/verify', asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json(result);
 }));
 
+auditRouter.post('/anchor', asyncHandler(async (_req: Request, res: Response) => {
+  const anchor = await auditService.anchorLatestHash();
+  res.status(anchor.status === 'failed' ? 502 : 201).json(anchor);
+}));
+
+auditRouter.get('/anchors', asyncHandler(async (_req: Request, res: Response) => {
+  res.status(200).json({ anchors: auditService.listAnchors() });
+}));
+
 auditRouter.post('/flag/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = String(req.params.id);
   const { reasons } = req.body;
 
   if (!reasons || !Array.isArray(reasons)) {

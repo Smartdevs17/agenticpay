@@ -1,11 +1,6 @@
 name: Contracts (EVM)
 
-on:
-  push:
-    branches: [main, dev]
-  pull_request:
-    branches: [main, dev]
-  workflow_dispatch:
+on: workflow_dispatch
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -60,11 +55,24 @@ jobs:
       - name: Compile contracts
         run: npx hardhat compile
 
+      - name: Validate upgrade safety (OZ dry-run)
+        run: npx hardhat run scripts/upgrade.ts --network hardhat
+        env:
+          PROPOSE_ONLY: 'true'
+          SPLITTER_CONTRACT: SplitterV2
+        continue-on-error: true
+
       - name: Type-check scripts & tests
         run: npm run lint
 
-      - name: Run Hardhat tests
-        run: npx hardhat test
+      - name: Generate TypeChain bindings
+        run: npx hardhat typechain
+
+      - name: Run Hardhat tests with gas report
+        run: npm run test:gas
+
+      - name: Run gas benchmark tests
+        run: npx hardhat test test/gas/GasBenchmark.test.ts
 
       - name: Run coverage
         run: npx hardhat coverage

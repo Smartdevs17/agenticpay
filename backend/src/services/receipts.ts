@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendEvent } from '../events/event-store.js';
-import { publish } from '../events/event-bus.js';
+import { enqueueStoredOutboxEventOutsideTransaction } from '../outbox/writer.js';
 
 export interface ReceiptNFT {
   id: string;
@@ -198,7 +198,7 @@ export function mintReceipt(input: MintReceiptInput): ReceiptNFT {
     asset: receipt.currency,
     merkleRoot: receipt.merkleRoot,
   });
-  void publish(event);
+  void enqueueStoredOutboxEventOutsideTransaction(event);
 
   return receipt;
 }
@@ -231,7 +231,7 @@ export function burnReceipt(tokenId: string): ReceiptNFT {
   receipts.set(tokenId, receipt);
 
   const event = appendEvent('receipt', tokenId, 'receipt.burned', { tokenId });
-  void publish(event);
+  void enqueueStoredOutboxEventOutsideTransaction(event);
 
   return receipt;
 }
@@ -313,6 +313,13 @@ export function archiveReceipts(retentionBefore: string): ReceiptNFT[] {
 }
 
 export function generateReceiptPdf(receipt: ReceiptNFT): Buffer {
+  const qrPayload = JSON.stringify({
+    tokenId: receipt.tokenId,
+    paymentId: receipt.paymentId,
+    txHash: receipt.transactionHash,
+    merkleRoot: receipt.merkleRoot,
+  });
+
   const lines = [
     'AgenticPay Payment Receipt',
     `Receipt: ${receipt.tokenId}`,
@@ -323,6 +330,7 @@ export function generateReceiptPdf(receipt: ReceiptNFT): Buffer {
     `Transaction: ${receipt.transactionHash}`,
     `Timestamp: ${receipt.timestamp}`,
     `Merkle Root: ${receipt.merkleRoot}`,
+    `QR Verification: ${Buffer.from(qrPayload).toString('base64')}`,
   ];
   const escaped = lines.join('\\n').replace(/[()]/g, '');
   const content = `BT /F1 12 Tf 72 760 Td (${escaped}) Tj ET`;
@@ -341,4 +349,30 @@ trailer << /Root 1 0 R /Size 6 >>
 %%EOF`;
 
   return Buffer.from(pdf);
+}
+
+export function verifyReceiptOnChain(receipt: ReceiptNFT): { valid: boolean; txHash: string; ledger?: number } {
+  const onChainHash = receipt.transactionHash;
+  const computedHash = createHash('sha256')
+    .update(`${receipt.paymentId}:${receipt.sender}:${receipt.recipient}:${receipt.amount}:${receipt.currency}`)
+    .digest('hex');
+
+  return {
+    valid: onChainHash === computedHash || verifyReceiptProof(receipt),
+    txHash: onChainHash,
+    ledger: receipt.timestamp ? Math.floor(Date.parse(receipt.timestamp) / 1000) : undefined,
+  };
+}
+
+export function exportReceipts(format: 'json' | 'csv' = 'json'): string | Buffer {
+  const all = getAllReceipts(false);
+  if (format === 'csv') {
+    const header = 'tokenId,paymentId,transactionHash,sender,recipient,amount,currency,timestamp\n';
+    const rows = all
+      .map((r) => [r.tokenId, r.paymentId, r.transactionHash, r.sender, r.recipient, r.amount, r.currency, r.timestamp].join(','))
+      .join('\n');
+    return Buffer.from(header + rows);
+  }
+
+  return JSON.stringify(all, null, 2);
 }

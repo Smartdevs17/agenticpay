@@ -30,6 +30,83 @@ notificationsRouter.post('/send', asyncHandler(async (req: Request, res: Respons
   res.status(200).json(result);
 }));
 
+// Real-time notification endpoints (Issue #635)
+notificationsRouter.post('/realtime/send', asyncHandler(async (req: Request, res: Response) => {
+  const { RealTimeNotificationService } = require('../services/notificationService.js');
+  const service = new RealTimeNotificationService();
+  const { userId, notification } = req.body;
+  const result = await service.sendToUser(userId, notification);
+  res.status(200).json(result);
+}));
+
+notificationsRouter.post('/realtime/broadcast', asyncHandler(async (req: Request, res: Response) => {
+  const { RealTimeNotificationService } = require('../services/notificationService.js');
+  const service = new RealTimeNotificationService();
+  const { notification } = req.body;
+  const result = await service.broadcast(notification);
+  res.status(200).json(result);
+}));
+
+notificationsRouter.post('/realtime/connect/:userId', asyncHandler(async (req: Request, res: Response) => {
+  const { RealTimeNotificationService } = require('../services/notificationService.js');
+  const service = new RealTimeNotificationService();
+  const { userId } = req.params;
+  const { channelId } = req.body;
+  service.connectUser(userId, channelId);
+  res.status(200).json({ ok: true, userId, channelId });
+}));
+
+notificationsRouter.post('/realtime/disconnect/:userId', asyncHandler(async (req: Request, res: Response) => {
+  const { RealTimeNotificationService } = require('../services/notificationService.js');
+  const service = new RealTimeNotificationService();
+  const { userId } = req.params;
+  const { channelId } = req.body;
+  service.disconnectUser(userId, channelId);
+  res.status(200).json({ ok: true });
+}));
+
+notificationsRouter.get('/realtime/queue/:userId', asyncHandler(async (req: Request, res: Response) => {
+  const { RealTimeNotificationService } = require('../services/notificationService.js');
+  const service = new RealTimeNotificationService();
+  const { userId } = req.params;
+  const queue = service.getQueue(userId);
+  res.status(200).json({ queue });
+}));
+
+notificationsRouter.post('/realtime/drain/:userId', asyncHandler(async (req: Request, res: Response) => {
+  const { RealTimeNotificationService } = require('../services/notificationService.js');
+  const service = new RealTimeNotificationService();
+  const { userId } = req.params;
+  const delivered = service.drainQueue(userId);
+  res.status(200).json({ delivered });
+}));
+
+// Notification history endpoints (Issue #635)
+notificationsRouter.get('/history/:userId', asyncHandler(async (req: Request, res: Response) => {
+  const { NotificationHistoryService } = require('../services/notificationService.js');
+  const service = new NotificationHistoryService();
+  const { userId } = req.params;
+  const { type, status, channel, startDate, endDate, limit, offset } = req.query;
+  const history = service.getHistory(userId, {
+    type: type as string,
+    status: status as string,
+    channel: channel as string,
+    startDate: startDate as string,
+    endDate: endDate as string,
+    limit: limit ? parseInt(limit as string) : undefined,
+    offset: offset ? parseInt(offset as string) : undefined,
+  });
+  res.status(200).json({ history });
+}));
+
+notificationsRouter.get('/analytics', asyncHandler(async (req: Request, res: Response) => {
+  const { NotificationHistoryService } = require('../services/notificationService.js');
+  const service = new NotificationHistoryService();
+  const { userId } = req.query;
+  const analytics = service.getAnalytics(userId as string);
+  res.status(200).json(analytics);
+}));
+
 // Get notification preferences
 notificationsRouter.get('/preferences/:userId', asyncHandler(async (req: Request, res: Response) => {
   const { userId } = req.params;

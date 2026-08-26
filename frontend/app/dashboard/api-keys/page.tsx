@@ -1,249 +1,271 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { apiCall } from '@/lib/api/client';
+import { useState, useEffect } from "react";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
-interface ApiKeyRecord {
-  id: string;
-  userId: string;
-  name: string;
-  keyPrefix: string;
-  tier: 'free' | 'pro' | 'enterprise';
-  status: 'active' | 'revoked' | 'expired';
-  scopes: string[];
-  expiresAt: string | null;
-  lastUsedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
+interface ApiKey {
+    keyId: string;
+    description: string | null;
+    isActive: boolean;
+    createdAt: string;
+    expiresAt: string | null;
+    revokedAt: string | null;
+    _count: { usage: number };
+    quota: {
+        hourlyLimit: number;
+        currentUsage: number;
+        resetAt: string;
+    } | null;
 }
 
-interface ApiKeyUsage {
-  keyId: string;
-  keyName: string;
-  tier: string;
-  totalRequests: number;
-  blockedRequests: number;
-  allowRate: number;
-  lastUsedAt: string | null;
-}
-
-const tierColors: Record<string, string> = {
-  free: 'bg-gray-100 text-gray-700',
-  pro: 'bg-blue-100 text-blue-700',
-  enterprise: 'bg-purple-100 text-purple-700',
-};
-
-const statusColors: Record<string, string> = {
-  active: 'bg-green-100 text-green-700',
-  revoked: 'bg-red-100 text-red-700',
-  expired: 'bg-yellow-100 text-yellow-700',
-};
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api/v1";
 
 export default function ApiKeysPage() {
-  const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
-  const [usage, setUsage] = useState<ApiKeyUsage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [newKey, setNewKey] = useState<{ record: ApiKeyRecord; rawKey: string } | null>(null);
-  const [form, setForm] = useState({ name: '', tier: 'free', expiresInDays: '' });
+    const [keys, setKeys] = useState<ApiKey[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [showCreateForm, setShowCreateForm] = useState(false);
+    const [newKeyDescription, setNewKeyDescription] = useState("");
+    const [newKeyExpiry, setNewKeyExpiry] = useState("");
+    const [usageSummary, setUsageSummary] = useState<{
+        totalRequests: number;
+        blockedRequests: number;
+        quotaUsagePercent: number;
+    } | null>(null);
 
-  const fetchData = async () => {
-    try {
-      const [keysRes, usageRes] = await Promise.all([
-        apiCall<{ data: ApiKeyRecord[] }>('/api-keys'),
-        apiCall<{ data: ApiKeyUsage[] }>('/api-keys/usage'),
-      ]);
-      setKeys(keysRes.data);
-      setUsage(usageRes.data);
-    } catch (err) {
-      console.error('Failed to fetch API keys:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    useEffect(() => {
+        fetchKeys();
+        fetchUsageSummary();
+    }, []);
 
-  useEffect(() => { fetchData(); }, []);
+    const fetchKeys = async () => {
+        try {
+            setLoading(true);
+            const res = await fetch(`${API_BASE}/api-keys`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+            });
+            if (!res.ok) throw new Error("Failed to fetch API keys");
+            const data = await res.json();
+            setKeys(data.keys);
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to load API keys");
+        } finally {
+            setLoading(false);
+        }
+    };
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const res = await apiCall<{ data: ApiKeyRecord; rawKey: string }>('/api-keys', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: form.name,
-          tier: form.tier,
-          expiresInDays: form.expiresInDays ? Number(form.expiresInDays) : undefined,
-        }),
-      });
-      setNewKey(res);
-      setShowCreate(false);
-      setForm({ name: '', tier: 'free', expiresInDays: '' });
-      fetchData();
-    } catch (err) {
-      console.error('Failed to create API key:', err);
-    }
-  };
+    const fetchUsageSummary = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api-keys/analytics/summary`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setUsageSummary(data);
+            }
+        } catch {
+            // Analytics may not be available
+        }
+    };
 
-  const handleRevoke = async (id: string) => {
-    if (!confirm('Revoke this API key? This action cannot be undone.')) return;
-    try {
-      await apiCall(`/api-keys/${id}/revoke`, { method: 'POST' });
-      fetchData();
-    } catch (err) {
-      console.error('Failed to revoke:', err);
-    }
-  };
+    const createKey = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api-keys`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+                },
+                body: JSON.stringify({
+                    description: newKeyDescription,
+                    expiresAt: newKeyExpiry || undefined,
+                }),
+            });
+            if (!res.ok) throw new Error("Failed to create API key");
+            const data = await res.json();
+            toast.success("API key created", {
+                description: `Key ID: ${data.keyId}`,
+            });
+            setShowCreateForm(false);
+            setNewKeyDescription("");
+            setNewKeyExpiry("");
+            fetchKeys();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to create API key");
+        }
+    };
 
-  const handleRotate = async (id: string) => {
-    try {
-      const res = await apiCall<{ data: ApiKeyRecord; rawKey: string }>(`/api-keys/${id}/rotate`, {
-        method: 'POST',
-      });
-      setNewKey(res);
-      fetchData();
-    } catch (err) {
-      console.error('Failed to rotate:', err);
-    }
-  };
+    const revokeKey = async (keyId: string) => {
+        if (!confirm("Revoke this API key? This action cannot be undone.")) return;
+        try {
+            const res = await fetch(`${API_BASE}/api-keys/${keyId}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+            });
+            if (!res.ok) throw new Error("Failed to revoke key");
+            toast.success("API key revoked");
+            fetchKeys();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to revoke key");
+        }
+    };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Permanently delete this API key?')) return;
-    try {
-      await apiCall(`/api-keys/${id}`, { method: 'DELETE' });
-      fetchData();
-    } catch (err) {
-      console.error('Failed to delete:', err);
-    }
-  };
+    const rotateKey = async (keyId: string) => {
+        if (!confirm("Rotate this API key? The old key will be revoked and a new one created.")) return;
+        try {
+            const res = await fetch(`${API_BASE}/api-keys/${keyId}/rotate`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+            });
+            if (!res.ok) throw new Error("Failed to rotate key");
+            const data = await res.json();
+            toast.success("API key rotated", {
+                description: `New key: ${data.keyId}`,
+            });
+            fetchKeys();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to rotate key");
+        }
+    };
 
-  if (loading) {
-    return <div className="p-6 text-center text-muted-foreground">Loading API keys...</div>;
-  }
-
-  return (
-    <div className="max-w-5xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">API Keys</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage your API keys and monitor usage analytics.</p>
-        </div>
-        <Button onClick={() => setShowCreate(true)}>Create API Key</Button>
-      </div>
-
-      {newKey && (
-        <Card className="border-green-200 bg-green-50">
-          <CardHeader>
-            <CardTitle className="text-green-800 text-base">API Key Created</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-sm text-green-700">Store this key securely. It will not be shown again.</p>
-            <code className="block p-3 bg-white rounded border text-sm font-mono break-all">{newKey.rawKey}</code>
-            <Button variant="outline" size="sm" onClick={() => setNewKey(null)}>Dismiss</Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {showCreate && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Create New API Key</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <Label>Name</Label>
-                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="My API Key" />
-                </div>
-                <div className="space-y-1">
-                  <Label>Tier</Label>
-                  <select value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm bg-background">
-                    <option value="free">Free</option>
-                    <option value="pro">Pro</option>
-                    <option value="enterprise">Enterprise</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <Label>Expires In (days, optional)</Label>
-                  <Input type="number" value={form.expiresInDays} onChange={(e) => setForm({ ...form, expiresInDays: e.target.value })} placeholder="90" />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button type="submit">Create</Button>
-                <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Usage Analytics</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {usage.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No usage data yet.</p>
-          ) : (
-            <div className="grid grid-cols-3 gap-4">
-              {usage.map((u) => (
-                <div key={u.keyId} className="p-3 border rounded space-y-1">
-                  <p className="font-medium text-sm">{u.keyName}</p>
-                  <p className="text-xs text-muted-foreground">Tier: {u.tier}</p>
-                  <p className="text-sm">Total: <span className="font-mono">{u.totalRequests}</span></p>
-                  <p className="text-sm">Blocked: <span className="font-mono text-red-600">{u.blockedRequests}</span></p>
-                  <p className="text-sm">Allow Rate: <span className="font-mono">{(u.allowRate * 100).toFixed(1)}%</span></p>
-                </div>
-              ))}
+    if (loading) {
+        return (
+            <div className="flex h-64 items-center justify-center">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600" />
             </div>
-          )}
-        </CardContent>
-      </Card>
+        );
+    }
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">All API Keys</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {keys.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No API keys yet. Create one to get started.</p>
-          ) : (
-            <div className="space-y-3">
-              {keys.map((key) => (
-                <div key={key.id} className="flex items-center justify-between p-3 border rounded">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{key.name}</span>
-                      <Badge className={tierColors[key.tier]}>{key.tier}</Badge>
-                      <Badge className={statusColors[key.status]}>{key.status}</Badge>
+    return (
+        <div className="space-y-6 p-6">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900">API Keys</h1>
+                    <p className="text-sm text-gray-600">Manage your API keys and monitor usage</p>
+                </div>
+                <Button onClick={() => setShowCreateForm(!showCreateForm)}>
+                    {showCreateForm ? "Cancel" : "Create API Key"}
+                </Button>
+            </div>
+
+            {/* Usage Summary */}
+            {usageSummary && (
+                <Card className="p-4">
+                    <h3 className="mb-2 font-medium text-gray-900">Usage Summary</h3>
+                    <div className="grid grid-cols-3 gap-4">
+                        <div>
+                            <p className="text-2xl font-bold text-gray-900">{usageSummary.totalRequests.toLocaleString()}</p>
+                            <p className="text-sm text-gray-500">Total Requests</p>
+                        </div>
+                        <div>
+                            <p className="text-2xl font-bold text-red-600">{usageSummary.blockedRequests.toLocaleString()}</p>
+                            <p className="text-sm text-gray-500">Blocked (Rate Limited)</p>
+                        </div>
+                        <div>
+                            <p className="text-2xl font-bold text-blue-600">{usageSummary.quotaUsagePercent.toFixed(1)}%</p>
+                            <p className="text-sm text-gray-500">Quota Used</p>
+                        </div>
                     </div>
-                    <p className="text-xs text-muted-foreground font-mono">{key.keyPrefix}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Created: {new Date(key.createdAt).toLocaleDateString()}
-                      {key.lastUsedAt && ` | Last used: ${new Date(key.lastUsedAt).toLocaleDateString()}`}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    {key.status === 'active' && (
-                      <>
-                        <Button variant="outline" size="sm" onClick={() => handleRotate(key.id)}>Rotate</Button>
-                        <Button variant="outline" size="sm" onClick={() => handleRevoke(key.id)}>Revoke</Button>
-                      </>
-                    )}
-                    <Button variant="destructive" size="sm" onClick={() => handleDelete(key.id)}>Delete</Button>
-                  </div>
-                </div>
-              ))}
+                </Card>
+            )}
+
+            {/* Create Key Form */}
+            {showCreateForm && (
+                <Card className="p-4">
+                    <div className="space-y-3">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Description</label>
+                            <Input
+                                placeholder="e.g., Production API key"
+                                value={newKeyDescription}
+                                onChange={(e) => setNewKeyDescription(e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Expiry (optional)</label>
+                            <Input
+                                type="date"
+                                value={newKeyExpiry}
+                                onChange={(e) => setNewKeyExpiry(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex justify-end">
+                            <Button onClick={createKey} disabled={!newKeyDescription.trim()}>
+                                Create Key
+                            </Button>
+                        </div>
+                    </div>
+                </Card>
+            )}
+
+            {/* Keys List */}
+            <div className="space-y-3">
+                {keys.length === 0 && (
+                    <Card className="p-8 text-center">
+                        <p className="text-gray-500">No API keys created yet</p>
+                    </Card>
+                )}
+
+                {keys.map((key) => (
+                    <Card key={key.keyId} className="p-4">
+                        <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-3">
+                                <Badge variant={key.isActive ? "default" : "destructive"}>
+                                    {key.isActive ? "Active" : "Revoked"}
+                                </Badge>
+                                <div>
+                                    <p className="font-medium text-gray-900">
+                                        {key.description || "Unnamed Key"}
+                                    </p>
+                                    <p className="text-sm font-mono text-gray-500">
+                                        {key.keyId.slice(0, 12)}...
+                                    </p>
+                                    <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
+                                        <span>Created: {new Date(key.createdAt).toLocaleDateString()}</span>
+                                        {key.expiresAt && (
+                                            <span>Expires: {new Date(key.expiresAt).toLocaleDateString()}</span>
+                                        )}
+                                        <span>Usage: {key._count.usage} requests</span>
+                                    </div>
+                                    {key.quota && (
+                                        <div className="mt-1">
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <span className="text-gray-500">Hourly quota:</span>
+                                                <div className="h-2 w-32 rounded-full bg-gray-200">
+                                                    <div
+                                                        className="h-2 rounded-full bg-blue-600"
+                                                        style={{
+                                                            width: `${Math.min(100, (key.quota.currentUsage / key.quota.hourlyLimit) * 100)}%`,
+                                                        }}
+                                                    />
+                                                </div>
+                                                <span className="text-gray-700">
+                                                    {key.quota.currentUsage}/{key.quota.hourlyLimit}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {key.isActive && (
+                                    <>
+                                        <Button variant="outline" size="sm" onClick={() => rotateKey(key.keyId)}>
+                                            Rotate
+                                        </Button>
+                                        <Button variant="destructive" size="sm" onClick={() => revokeKey(key.keyId)}>
+                                            Revoke
+                                        </Button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </Card>
+                ))}
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
+        </div>
+    );
 }

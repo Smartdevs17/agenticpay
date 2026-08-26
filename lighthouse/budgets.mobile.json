@@ -1,0 +1,74 @@
+[
+  {
+    "budgetType": "resource-summary",
+    "targetUrl": "*",
+    "resourceType": "script",
+    "budget": 500
+  },
+  {
+    "budgetType": "resource-summary",
+    "targetUrl": "*",
+    "resourceType": "stylesheet",
+    "budget": 200
+  },
+  {
+    "budgetType": "resource-summary",
+    "targetUrl": "*",
+    "resourceType": "total",
+    "budget": 2500
+  },
+  {
+    "budgetType": "resource-summary",
+    "targetUrl": "*",
+    "resourceType": "font",
+    "budget": 150
+  },
+  {
+    "budgetType": "resource-summary",
+    "targetUrl": "*",
+    "resourceType": "image",
+    "budget": 1000
+  },
+  {
+    "budgetType": "resource-summary",
+    "targetUrl": "*",
+    "resourceType": "third-party",
+    "budget": 300
+  },
+  {
+    "budgetType": "timing",
+    "targetUrl": "*",
+    "metric": "largest-contentful-paint",
+    "budget": 3800
+  },
+  {
+    "budgetType": "timing",
+    "targetUrl": "*",
+    "metric": "total-blocking-time",
+    "budget": 350
+  },
+  {
+    "budgetType": "timing",
+    "targetUrl": "*",
+    "metric": "cumulative-layout-shift",
+    "budget": 0.15
+  },
+  {
+    "budgetType": "timing",
+    "targetUrl": "*",
+    "metric": "first-contentful-paint",
+    "budget": 2500
+  },
+  {
+    "budgetType": "timing",
+    "targetUrl": "*",
+    "metric": "interactive",
+    "budget": 5000
+  },
+  {
+    "budgetType": "timing",
+    "targetUrl": "*",
+    "metric": "speed-index",
+    "budget": 4500
+  }
+]

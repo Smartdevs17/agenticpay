@@ -44,7 +44,8 @@ import { getBrowserTimeZone, isValidTimeZone } from "@/lib/utils";
 import { CommandMenu } from "./CommandMenu";
 import { useCommandStore } from "@/store/useCommandStore";
 import { useOfflineStatus } from "@/components/offline/OfflineProvider";
-import { LanguageSwitcher } from "@/components/language/LanguageSwitcher";
+import { LocaleSwitcher } from "@/components/common/locale-switcher";
+import { CopyButton } from "@/components/ui/copy-button";
 
 /* ---------------- NETWORK INDICATOR ---------------- */
 
@@ -160,7 +161,16 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
 
             <NetworkIndicator />
 
-            <LanguageSwitcher />
+            {address && (
+              <div className="hidden md:flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 dark:border-gray-700 dark:bg-gray-800/80">
+                <span className="text-[10px] font-mono text-gray-600 dark:text-gray-400 max-w-[120px] truncate">
+                  {shortAddress}
+                </span>
+                <CopyButton value={address} label="Wallet address copied" className="h-7 w-7" />
+              </div>
+            )}
+
+            <LocaleSwitcher />
 
             <div className="hidden sm:block">
               <CommandMenu />
@@ -217,7 +227,12 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                   <div className="flex flex-col space-y-1">
                     <p className="text-sm font-semibold">{name || "User"}</p>
                     <p className="text-xs text-gray-500 truncate">{email || "No email"}</p>
-                    <p className="text-[10px] text-gray-400 font-mono mt-1">{address}</p>
+                    {address && (
+                      <div className="flex items-center gap-1 mt-1">
+                        <p className="text-[10px] text-gray-400 font-mono truncate flex-1">{address}</p>
+                        <CopyButton value={address} label="Wallet address copied" className="h-6 w-6" />
+                      </div>
+                    )}
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />

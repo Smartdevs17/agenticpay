@@ -7,6 +7,38 @@ const MAX_PASSWORD_ATTEMPTS = 5;
 /** How long a protected link stays locked after exhausting its attempts. */
 const PASSWORD_LOCKOUT_MS = 15 * 60 * 1000;
 
+export type ABTestVariant = {
+  id: string;
+  name: string;
+  amount: number;
+  description?: string;
+  accentColor?: string;
+  ctaText?: string;
+  weight: number;
+};
+
+export type VariantAnalytics = {
+  variantId: string;
+  name: string;
+  views: number;
+  completions: number;
+  totalRevenue: number;
+  conversionRate: number;
+};
+
+export type PaymentLinkConversion = {
+  id: string;
+  linkId: string;
+  slug: string;
+  variantId?: string;
+  amount: number;
+  currency: string;
+  source: string;
+  referrer?: string;
+  userAgent?: string;
+  timestamp: string;
+};
+
 export type PaymentLinkRecord = {
   id: string;
   merchantId: string;
@@ -25,6 +57,7 @@ export type PaymentLinkRecord = {
     logoUrl?: string;
     redirectUrl?: string;
   };
+  variants?: ABTestVariant[];
   /** True when the link is password protected. The password itself is never stored. */
   requiresPassword: boolean;
   /** Maximum number of completions allowed before the link auto-disables. `null` = unlimited. */
@@ -35,7 +68,10 @@ export type PaymentLinkRecord = {
   analytics: {
     views: number;
     completions: number;
+    totalRevenue: number;
+    conversionRate: number;
     bySource: Record<string, number>;
+    variantAnalytics: Record<string, VariantAnalytics>;
     lastViewedAt: string | null;
     lastCompletedAt: string | null;
   };
@@ -65,6 +101,7 @@ type CreatePaymentLinkInput = {
     logoUrl?: string;
     redirectUrl?: string;
   };
+  variants?: ABTestVariant[];
   /** Optional password; when set, payers must supply it to view/complete the link. */
   password?: string;
   /** Optional cap on completions; omit for unlimited. */
@@ -79,6 +116,7 @@ export class PaymentLinksService {
   private links = new Map<string, PaymentLinkRecord>();
   private bySlug = new Map<string, string>();
   private secrets = new Map<string, PaymentLinkSecret>();
+  private conversionsMap = new Map<string, PaymentLinkConversion[]>();
 
   private nowIso(): string {
     return new Date().toISOString();
@@ -100,10 +138,29 @@ export class PaymentLinksService {
     return `https://pay.agenticpay.com/r/${slug}`;
   }
 
+  private initVariantAnalytics(variants?: ABTestVariant[]): Record<string, VariantAnalytics> {
+    const map: Record<string, VariantAnalytics> = {};
+    if (variants && variants.length > 0) {
+      for (const v of variants) {
+        map[v.id] = {
+          variantId: v.id,
+          name: v.name,
+          views: 0,
+          completions: 0,
+          totalRevenue: 0,
+          conversionRate: 0,
+        };
+      }
+    }
+    return map;
+  }
+
   create(input: CreatePaymentLinkInput): PaymentLinkRecord {
     const id = randomUUID();
     const slug = this.generateSlug();
     const now = this.nowIso();
+
+    const variants = input.variants && input.variants.length > 0 ? input.variants : undefined;
 
     const link: PaymentLinkRecord = {
       id,
@@ -118,6 +175,7 @@ export class PaymentLinksService {
       category: input.category,
       metadata: input.metadata,
       brand: input.brand,
+      variants,
       requiresPassword: typeof input.password === 'string' && input.password.length > 0,
       maxUses: typeof input.maxUses === 'number' ? input.maxUses : null,
       isActive: true,
@@ -126,7 +184,10 @@ export class PaymentLinksService {
       analytics: {
         views: 0,
         completions: 0,
+        totalRevenue: 0,
+        conversionRate: 0,
         bySource: {},
+        variantAnalytics: this.initVariantAnalytics(variants),
         lastViewedAt: null,
         lastCompletedAt: null,
       },
@@ -134,6 +195,7 @@ export class PaymentLinksService {
 
     this.links.set(id, link);
     this.bySlug.set(slug, id);
+    this.conversionsMap.set(id, []);
 
     if (link.requiresPassword) {
       const salt = randomBytes(16);
@@ -247,8 +309,65 @@ export class PaymentLinksService {
       updatedAt: this.nowIso(),
     };
 
+    if (patch.variants && patch.variants.length > 0) {
+      updated.variants = patch.variants;
+      for (const v of patch.variants) {
+        if (!updated.analytics.variantAnalytics[v.id]) {
+          updated.analytics.variantAnalytics[v.id] = {
+            variantId: v.id,
+            name: v.name,
+            views: 0,
+            completions: 0,
+            totalRevenue: 0,
+            conversionRate: 0,
+          };
+        } else {
+          updated.analytics.variantAnalytics[v.id].name = v.name;
+        }
+      }
+    }
+
     this.links.set(id, updated);
     return updated;
+  }
+
+  addOrUpdateVariants(id: string, variants: ABTestVariant[]): PaymentLinkRecord | undefined {
+    const link = this.getById(id);
+    if (!link) {
+      return undefined;
+    }
+    return this.update(id, { variants });
+  }
+
+  /**
+   * Select a variant based on A/B test weights or explicit variant selection.
+   */
+  selectVariant(link: PaymentLinkRecord, requestedVariantId?: string): ABTestVariant | undefined {
+    if (!link.variants || link.variants.length === 0) {
+      return undefined;
+    }
+
+    if (requestedVariantId) {
+      const found = link.variants.find((v) => v.id === requestedVariantId);
+      if (found) {
+        return found;
+      }
+    }
+
+    const totalWeight = link.variants.reduce((sum, v) => sum + Math.max(0, v.weight), 0);
+    if (totalWeight <= 0) {
+      return link.variants[0];
+    }
+
+    let random = Math.random() * totalWeight;
+    for (const v of link.variants) {
+      if (random < v.weight) {
+        return v;
+      }
+      random -= v.weight;
+    }
+
+    return link.variants[0];
   }
 
   expire(id: string): PaymentLinkRecord | undefined {
@@ -264,7 +383,7 @@ export class PaymentLinksService {
     return link;
   }
 
-  trackView(slug: string, source = 'direct'): PaymentLinkRecord | undefined {
+  trackView(slug: string, source = 'direct', variantId?: string): PaymentLinkRecord | undefined {
     const link = this.getBySlug(slug);
     if (!link) {
       return undefined;
@@ -273,20 +392,81 @@ export class PaymentLinksService {
     link.analytics.views += 1;
     link.analytics.lastViewedAt = this.nowIso();
     link.analytics.bySource[source] = (link.analytics.bySource[source] || 0) + 1;
+
+    link.analytics.conversionRate = Number(
+      ((link.analytics.completions / link.analytics.views) * 100).toFixed(2)
+    );
+
+    if (variantId && link.analytics.variantAnalytics[variantId]) {
+      const vAnalytic = link.analytics.variantAnalytics[variantId];
+      vAnalytic.views += 1;
+      vAnalytic.conversionRate = Number(
+        ((vAnalytic.completions / vAnalytic.views) * 100).toFixed(2)
+      );
+    }
+
     link.updatedAt = this.nowIso();
     this.links.set(link.id, link);
     return link;
   }
 
-  complete(slug: string, source = 'direct'): PaymentLinkRecord | undefined {
+  complete(
+    slug: string,
+    source = 'direct',
+    variantId?: string,
+    amountPaid?: number,
+    metadata?: { referrer?: string; userAgent?: string }
+  ): PaymentLinkRecord | undefined {
     const link = this.getBySlug(slug);
     if (!link) {
       return undefined;
     }
 
+    let completionAmount = link.amount;
+    if (variantId && link.variants) {
+      const matchedVariant = link.variants.find((v) => v.id === variantId);
+      if (matchedVariant) {
+        completionAmount = matchedVariant.amount;
+      }
+    }
+    if (typeof amountPaid === 'number' && amountPaid > 0) {
+      completionAmount = amountPaid;
+    }
+
     link.analytics.completions += 1;
+    link.analytics.totalRevenue = Number((link.analytics.totalRevenue + completionAmount).toFixed(2));
     link.analytics.lastCompletedAt = this.nowIso();
     link.analytics.bySource[source] = (link.analytics.bySource[source] || 0) + 1;
+
+    link.analytics.conversionRate = Number(
+      ((link.analytics.completions / link.analytics.views) * 100).toFixed(2)
+    );
+
+    if (variantId && link.analytics.variantAnalytics[variantId]) {
+      const vAnalytic = link.analytics.variantAnalytics[variantId];
+      vAnalytic.completions += 1;
+      vAnalytic.totalRevenue = Number((vAnalytic.totalRevenue + completionAmount).toFixed(2));
+      vAnalytic.conversionRate = Number(
+        ((vAnalytic.completions / Math.max(1, vAnalytic.views)) * 100).toFixed(2)
+      );
+    }
+
+    const conversionRecord: PaymentLinkConversion = {
+      id: randomUUID(),
+      linkId: link.id,
+      slug: link.slug,
+      variantId,
+      amount: completionAmount,
+      currency: link.currency,
+      source,
+      referrer: metadata?.referrer,
+      userAgent: metadata?.userAgent,
+      timestamp: this.nowIso(),
+    };
+
+    const existingConversions = this.conversionsMap.get(link.id) || [];
+    existingConversions.push(conversionRecord);
+    this.conversionsMap.set(link.id, existingConversions);
 
     // Disable once it is a single-use link or has hit its usage cap.
     if (link.recurrence === 'one_time' || this.hasReachedUsageLimit(link)) {
@@ -296,6 +476,46 @@ export class PaymentLinksService {
     link.updatedAt = this.nowIso();
     this.links.set(link.id, link);
     return link;
+  }
+
+  getConversions(linkId: string): PaymentLinkConversion[] {
+    return this.conversionsMap.get(linkId) || [];
+  }
+
+  getMerchantDashboardSummary(merchantId: string) {
+    const merchantLinks = this.list({ merchantId, includeExpired: true });
+    const totalLinks = merchantLinks.length;
+    const activeLinks = merchantLinks.filter((l) => l.isActive).length;
+    const totalViews = merchantLinks.reduce((sum, l) => sum + l.analytics.views, 0);
+    const totalCompletions = merchantLinks.reduce((sum, l) => sum + l.analytics.completions, 0);
+    const totalRevenue = merchantLinks.reduce((sum, l) => sum + (l.analytics.totalRevenue || 0), 0);
+    const overallConversionRate = totalViews > 0 ? Number(((totalCompletions / totalViews) * 100).toFixed(2)) : 0;
+
+    const topLinks = [...merchantLinks]
+      .sort((a, b) => (b.analytics.totalRevenue || 0) - (a.analytics.totalRevenue || 0))
+      .slice(0, 5)
+      .map((l) => ({
+        id: l.id,
+        slug: l.slug,
+        description: l.description || l.slug,
+        amount: l.amount,
+        currency: l.currency,
+        views: l.analytics.views,
+        completions: l.analytics.completions,
+        conversionRate: l.analytics.conversionRate,
+        totalRevenue: l.analytics.totalRevenue,
+      }));
+
+    return {
+      merchantId,
+      totalLinks,
+      activeLinks,
+      totalViews,
+      totalCompletions,
+      totalRevenue: Number(totalRevenue.toFixed(2)),
+      overallConversionRate,
+      topLinks,
+    };
   }
 
   isUsable(link: PaymentLinkRecord): boolean {
@@ -312,14 +532,55 @@ export class PaymentLinksService {
     return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(this.buildLinkUrl(slug))}`;
   }
 
-  getShareLinks(slug: string): { url: string; twitter: string; whatsapp: string; email: string } {
+  async getQrCodeDataUrl(slug: string, type: 'data-url' | 'svg' = 'data-url'): Promise<string> {
     const url = this.buildLinkUrl(slug);
+    try {
+      const qrcodeModule = await import('qrcode');
+      const QRCode = qrcodeModule.default || qrcodeModule;
+      if (type === 'svg') {
+        return await QRCode.toString(url, { type: 'svg', margin: 2, width: 300 });
+      }
+      return await QRCode.toDataURL(url, { margin: 2, width: 300 });
+    } catch {
+      if (type === 'svg') {
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><rect width="300" height="300" fill="#ffffff"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#000000">QR Code: /r/${slug}</text></svg>`;
+      }
+      return this.getQrCodeUrl(slug);
+    }
+  }
+
+  getShareLinks(slug: string, variantId?: string, source?: string): {
+    url: string;
+    twitter: string;
+    whatsapp: string;
+    linkedin: string;
+    telegram: string;
+    email: string;
+    embedCode: string;
+  } {
+    let url = this.buildLinkUrl(slug);
+    const queryParams: string[] = [];
+    if (variantId) {
+      queryParams.push(`variant=${encodeURIComponent(variantId)}`);
+    }
+    if (source) {
+      queryParams.push(`source=${encodeURIComponent(source)}`);
+    }
+    if (queryParams.length > 0) {
+      url += `?${queryParams.join('&')}`;
+    }
+
     const encoded = encodeURIComponent(url);
+    const text = encodeURIComponent('Complete your payment securely with AgenticPay');
+
     return {
       url,
-      twitter: `https://twitter.com/intent/tweet?url=${encoded}`,
-      whatsapp: `https://wa.me/?text=${encoded}`,
-      email: `mailto:?subject=Payment%20Link&body=${encoded}`,
+      twitter: `https://twitter.com/intent/tweet?url=${encoded}&text=${text}`,
+      whatsapp: `https://wa.me/?text=${text}%20${encoded}`,
+      linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encoded}`,
+      telegram: `https://t.me/share/url?url=${encoded}&text=${text}`,
+      email: `mailto:?subject=Payment%20Link&body=${text}%0A%0A${encoded}`,
+      embedCode: `<iframe src="${url}" width="100%" height="600" frameborder="0" allow="payment"></iframe>`,
     };
   }
 
@@ -327,7 +588,8 @@ export class PaymentLinksService {
     this.links.clear();
     this.bySlug.clear();
     this.secrets.clear();
+    this.conversionsMap.clear();
   }
 }
 
-export const paymentLinksService = new PaymentLinksService();
+export const paymentLinksService = new PaymentLinksService();

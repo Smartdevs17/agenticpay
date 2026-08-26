@@ -95,6 +95,18 @@ const config: HardhatUserConfig = {
     },
   },
 
+  typechain: {
+    outDir: 'typechain-types',
+    target: 'ethers-v6',
+  },
+
+  gasReporter: {
+    enabled: process.env.REPORT_GAS === 'true',
+    currency: 'USD',
+    coinmarketcap: process.env.COINMARKETCAP_API_KEY,
+    excludeContracts: ['contracts/test/'],
+  },
+
   // Etherscan v2 exposes a unified endpoint, so a single ETHERSCAN_API_KEY
   // can verify across supported chains. Chain-specific keys override it.
   etherscan: {

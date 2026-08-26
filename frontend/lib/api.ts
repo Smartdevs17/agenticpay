@@ -301,4 +301,32 @@ export const api = {
         method: 'POST',
       }),
     },
+
+    /**
+     * Hosted Checkout API
+     */
+    checkout: {
+      createSession: async (payload: any) => apiCall<any>('/checkout/sessions', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      getSession: async (id: string) => apiCall<any>(`/checkout/sessions/${id}`, {
+        method: 'GET',
+      }),
+      selectPaymentMethod: async (id: string, method: string) => apiCall<any>(`/checkout/sessions/${id}/payment-method`, {
+        method: 'POST',
+        body: JSON.stringify({ method }),
+      }),
+      lockRate: async (id: string) => apiCall<any>(`/checkout/sessions/${id}/lock-rate`, {
+        method: 'POST',
+      }),
+      processPayment: async (id: string, details: any) => apiCall<any>(`/checkout/sessions/${id}/pay`, {
+        method: 'POST',
+        body: JSON.stringify(details),
+      }),
+      getReceiptUrl: (id: string) => `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1'}/checkout/sessions/${id}/receipt`,
+      getExchangeRates: async () => apiCall<any>('/checkout/exchange-rates', {
+        method: 'GET',
+      }),
+    },
 };

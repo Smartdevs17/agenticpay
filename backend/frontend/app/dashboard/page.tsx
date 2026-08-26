@@ -1,20 +1,69 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { FadeIn } from '@/components/ui/fade-in';
 import { DashboardStatsSkeleton } from '@/components/ui/loading-skeletons';
 
 export default function DashboardPage() {
-  const { stats, recentActivity, loading } = useDashboardData();
+  const { stats, recentActivity, loading, refetch } = useDashboardData();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refetch?.();
+      setLastUpdated(new Date());
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    handleRefresh();
+    const interval = setInterval(handleRefresh, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   if (loading) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-1">Welcome back! Here's your overview.</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+            <p className="text-gray-600 mt-1">Welcome back! Here's your overview.</p>
+          </div>
+          <div className="flex flex-col items-end">
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border border-gray-300 hover:bg-gray-100 disabled:opacity-50 transition"
+            >
+              <svg
+                className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`}
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              {isRefreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            {lastUpdated && (
+              <p className="text-xs text-gray-500 mt-1">
+                Last updated: {lastUpdated.toLocaleTimeString()}
+              </p>
+            )}
+          </div>
         </div>
         <DashboardStatsSkeleton />
         {/* Simplified Loading for Recent Activity */}
@@ -36,18 +85,44 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600 mt-1">Welcome back! Here's your overview.</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-gray-600 mt-1">Welcome back! Here's your overview.</p>
+        </div>
+        <div className="flex flex-col items-end">
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border border-gray-300 hover:bg-gray-100 disabled:opacity-50 transition"
+          >
+            <svg
+              className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`}
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          {lastUpdated && (
+            <p className="text-xs text-gray-500 mt-1">
+              Last updated: {lastUpdated.toLocaleTimeString()}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-        >
+        <FadeIn delay={0.1}>
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-600">
@@ -63,13 +138,9 @@ export default function DashboardPage() {
               </p>
             </CardContent>
           </Card>
-        </motion.div>
+        </FadeIn>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
+        <FadeIn delay={0.2}>
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-600">
@@ -82,13 +153,9 @@ export default function DashboardPage() {
               <p className="text-xs text-yellow-600 mt-1">Awaiting approval</p>
             </CardContent>
           </Card>
-        </motion.div>
+        </FadeIn>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-        >
+        <FadeIn delay={0.3}>
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-600">
@@ -101,13 +168,9 @@ export default function DashboardPage() {
               <p className="text-xs text-blue-600 mt-1">In progress</p>
             </CardContent>
           </Card>
-        </motion.div>
+        </FadeIn>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-        >
+        <FadeIn delay={0.4}>
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-600">
@@ -120,15 +183,11 @@ export default function DashboardPage() {
               <p className="text-xs text-gray-600 mt-1">Projects done</p>
             </CardContent>
           </Card>
-        </motion.div>
+        </FadeIn>
       </div>
 
       {/* Recent Activity */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5 }}
-      >
+      <FadeIn delay={0.5}>
         <Card>
           <CardHeader>
             <CardTitle>Recent Activity</CardTitle>
@@ -152,7 +211,7 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </FadeIn>
     </div>
   );
 }

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Complete Your Payment</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333333;
+      background-color: #f4f6f8;
+      margin: 0;
+      padding: 0;
+    }
+    .wrapper {
+      width: 100%;
+      background-color: #f4f6f8;
+      padding: 40px 0;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      overflow: hidden;
+    }
+    .header {
+      background-color: {{default brand.accentColor "#0052FF"}};
+      padding: 30px;
+      text-align: center;
+      color: #ffffff;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+    }
+    .content {
+      padding: 30px;
+    }
+    .merchant-info {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .merchant-logo {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid #e1e4e8;
+      margin-bottom: 8px;
+    }
+    .merchant-name {
+      font-size: 18px;
+      font-weight: 600;
+      color: #111827;
+      margin: 0;
+    }
+    .message {
+      font-size: 16px;
+      color: #4b5563;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .order-card {
+      background-color: #f9fafb;
+      border: 1px solid #f3f4f6;
+      border-radius: 6px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .order-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      font-size: 15px;
+    }
+    .order-row:last-child {
+      margin-bottom: 0;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 10px;
+      font-weight: bold;
+    }
+    .order-label {
+      color: #6b7280;
+    }
+    .order-value {
+      color: #111827;
+    }
+    .actions {
+      text-align: center;
+      margin-top: 30px;
+      margin-bottom: 30px;
+    }
+    .btn {
+      display: inline-block;
+      background-color: {{default brand.accentColor "#0052FF"}};
+      color: #ffffff !important;
+      font-weight: 600;
+      text-decoration: none;
+      padding: 14px 28px;
+      border-radius: 6px;
+      font-size: 16px;
+      box-shadow: 0 4px 6px rgba(0, 82, 255, 0.15);
+    }
+    .footer {
+      background-color: #f9fafb;
+      padding: 20px;
+      text-align: center;
+      font-size: 12px;
+      color: #9ca3af;
+      border-top: 1px solid #e5e7eb;
+    }
+    .footer a {
+      color: #6b7280;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      <div class="header">
+        <h1>Finish Your Purchase</h1>
+      </div>
+      <div class="content">
+        <div class="merchant-info">
+          {{#if brand.logoUrl}}
+            <img class="merchant-logo" src="{{brand.logoUrl}}" alt="{{brand.brandName}}">
+          {{/if}}
+          <p class="merchant-name">{{default brand.brandName "AgenticPay Merchant"}}</p>
+        </div>
+        
+        <p class="message">
+          We noticed you left items in your cart. No worries, we saved your checkout session so you can pick up right where you left off!
+        </p>
+        
+        <div class="order-card">
+          {{#if description}}
+            <div class="order-row">
+              <span class="order-label">Description</span>
+              <span class="order-value">{{description}}</span>
+            </div>
+          {{/if}}
+          <div class="order-row">
+            <span class="order-label">Session ID</span>
+            <span class="order-value" style="font-family: monospace; font-size: 12px;">{{sessionId}}</span>
+          </div>
+          <div class="order-row">
+            <span class="order-label">Total Amount</span>
+            <span class="order-value">{{formatCurrency amount currency}}</span>
+          </div>
+        </div>
+        
+        <div class="actions">
+          <a href="{{checkoutUrl}}" class="btn">Complete Your Payment</a>
+        </div>
+        
+        <p class="message" style="font-size: 14px;">
+          Note: This checkout session will expire soon. Please complete your payment to ensure the exchange rate is secured.
+        </p>
+      </div>
+      <div class="footer">
+        <p>Sent securely by AgenticPay on behalf of {{default brand.brandName "the merchant"}}.</p>
+        <p>If you did not initiate this payment, you can safely ignore this email.</p>
+        <p><a href="{{checkoutUrl}}/unsubscribe">Unsubscribe</a></p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,94 +1,117 @@
 import { Router } from 'express';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
-import { validate } from '../middleware/validate.js';
-import { apiKeyService } from '../services/api-keys.js';
-import { z } from 'zod';
+import { prisma } from '../lib/prisma.js';
+import { asyncHandler } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js';
+import { quotaManagerService } from '../services/keys/quota-manager.js';
+import { randomBytes, createHash } from 'node:crypto';
 
 export const apiKeysRouter = Router();
 
-const createApiKeySchema = z.object({
-  name: z.string().min(2).max(64),
-  tier: z.enum(['free', 'pro', 'enterprise']).optional(),
-  scopes: z.array(z.string()).optional(),
-  expiresInDays: z.number().int().positive().max(365).optional(),
-});
+function resolveTenant(req: any): string {
+  return (req.headers['x-tenant-id'] as string) ?? 'default';
+}
 
-apiKeysRouter.post(
-  '/',
-  validate(createApiKeySchema),
-  asyncHandler(async (req, res) => {
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
-    const { record, rawKey } = apiKeyService.createApiKey({ ...req.body, userId });
-    res.status(201).json({
-      data: record,
-      rawKey,
-      message: 'API key created. Store the raw key securely — it will not be shown again.',
-    });
-  })
-);
+apiKeysRouter.post('/', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const { description, expiresAt } = req.body as { description?: string; expiresAt?: string };
+  const keyId = `ak_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
-apiKeysRouter.get(
-  '/',
-  asyncHandler(async (req, res) => {
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
-    const keys = apiKeyService.listApiKeys(userId);
-    res.json({ data: keys, count: keys.length });
-  })
-);
+  const key = await prisma.apiKey.create({
+    data: {
+      tenantId,
+      keyId,
+      description,
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+    },
+  });
+  res.status(201).json({ keyId: key.keyId, description: key.description });
+}));
 
-apiKeysRouter.get(
-  '/usage',
-  asyncHandler(async (req, res) => {
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
-    const windowMs = req.query.window ? Number(req.query.window) : 60_000;
-    const usage = apiKeyService.getUsageSummary(userId, windowMs);
-    res.json({ data: usage });
-  })
-);
+apiKeysRouter.get('/', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const keys = await prisma.apiKey.findMany({
+    where: { tenantId },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      _count: { select: { usage: true } },
+      quota: true,
+    },
+  });
+  res.json({ keys });
+}));
 
-apiKeysRouter.get(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const key = apiKeyService.getApiKey(id);
-    if (!key) throw new AppError(404, 'API key not found', 'NOT_FOUND');
-    res.json({ data: key });
-  })
-);
+apiKeysRouter.get('/:keyId', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({
+    where: { keyId: req.params.keyId },
+    include: { quota: true },
+  });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  res.json(key);
+}));
 
-apiKeysRouter.post(
-  '/:id/revoke',
-  asyncHandler(async (req, res) => {
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const key = apiKeyService.revokeApiKey(id, userId);
-    if (!key) throw new AppError(404, 'API key not found', 'NOT_FOUND');
-    res.json({ data: key });
-  })
-);
+apiKeysRouter.delete('/:keyId', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  await prisma.apiKey.update({ where: { keyId: req.params.keyId }, data: { isActive: false, revokedAt: new Date() } });
+  res.json({ success: true });
+}));
 
-apiKeysRouter.post(
-  '/:id/rotate',
-  asyncHandler(async (req, res) => {
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const result = apiKeyService.rotateApiKey(id, userId);
-    if (!result) throw new AppError(404, 'API key not found', 'NOT_FOUND');
-    res.json({
-      data: result.record,
-      rawKey: result.rawKey,
-      message: 'API key rotated. Store the raw key securely.',
-    });
-  })
-);
+apiKeysRouter.get('/:keyId/usage', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  const summary = await quotaManagerService.getUsageSummary(req.params.keyId);
+  res.json(summary);
+}));
 
-apiKeysRouter.delete(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const deleted = apiKeyService.deleteApiKey(id, userId);
-    if (!deleted) throw new AppError(404, 'API key not found', 'NOT_FOUND');
-    res.status(204).send();
-  })
-);
+apiKeysRouter.get('/:keyId/usage/daily', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  const days = Math.min(Math.max(parseInt(req.query.days as string) || 7, 1), 90);
+  const daily = await quotaManagerService.getDailyUsage(req.params.keyId as string, days);
+  res.json({ keyId: req.params.keyId, days, daily });
+}));
+
+apiKeysRouter.put('/:keyId/quota', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  const quota = await quotaManagerService.updateQuota(req.params.keyId, req.body);
+  res.json(quota);
+}));
+
+apiKeysRouter.get('/analytics/summary', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const summary = await quotaManagerService.getTenantUsageSummary(tenantId);
+  res.json(summary);
+}));
+
+apiKeysRouter.post('/:keyId/rotate', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+
+  await prisma.apiKey.update({ where: { keyId: req.params.keyId }, data: { isActive: false, revokedAt: new Date() } });
+
+  const newKeyId = `ak_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const newKey = await prisma.apiKey.create({
+    data: {
+      tenantId,
+      keyId: newKeyId,
+      description: key.description ? `${key.description} (rotated)` : 'Rotated key',
+      expiresAt: key.expiresAt,
+    },
+  });
+  res.status(201).json({ keyId: newKey.keyId, description: newKey.description, rotatedFrom: key.keyId });
+}));
+
+apiKeysRouter.post('/:keyId/revoke', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  await prisma.apiKey.update({ where: { keyId: req.params.keyId }, data: { isActive: false, revokedAt: new Date() } });
+  res.json({ success: true, keyId: req.params.keyId, status: 'revoked' });
+}));

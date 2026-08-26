@@ -1,10 +1,44 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { SocialLogin } from '@/components/auth/SocialLogin';
-import { WalletConnect } from '@/components/auth/WalletConnect';
+import dynamic from 'next/dynamic';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Wallet, Users } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+// DashboardProviders must be a static import so WagmiProvider is available
+// synchronously before any child component calls useAccount() or useConnect().
+// Dynamically importing it would cause a race where WalletConnect renders
+// before the provider mounts, throwing a wagmi context error.
+import { DashboardProviders } from '@/components/providers-dashboard';
+
+// Dynamically import the heavy auth components — they pull in @web3auth/modal
+// and wagmi connectors. Loading them on-demand keeps the auth page's initial
+// JS small while the provider is already in place.
+const SocialLogin = dynamic(
+  () => import('@/components/auth/SocialLogin').then((m) => m.SocialLogin),
+  {
+    loading: () => (
+      <div className="space-y-3 mt-6">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-12 w-full rounded-md" />
+        ))}
+      </div>
+    ),
+    ssr: false,
+  }
+);
+
+const WalletConnect = dynamic(
+  () => import('@/components/auth/WalletConnect').then((m) => m.WalletConnect),
+  {
+    loading: () => (
+      <div className="space-y-3 mt-6">
+        <Skeleton className="h-12 w-full rounded-md" />
+      </div>
+    ),
+    ssr: false,
+  }
+);
 
 export default function AuthPage() {
   return (
@@ -28,31 +62,32 @@ export default function AuthPage() {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
               Welcome to AgenticPay
             </h1>
-            <p className="text-gray-600">
-              Get paid instantly for your work
-            </p>
+            <p className="text-gray-600">Get paid instantly for your work</p>
           </div>
 
-          <Tabs defaultValue="social" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-6">
-              <TabsTrigger value="social" className="flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Social Login
-              </TabsTrigger>
-              <TabsTrigger value="wallet" className="flex items-center gap-2">
-                <Wallet className="h-4 w-4" />
-                Web3 Wallet
-              </TabsTrigger>
-            </TabsList>
+          {/* Provider must wrap the tabs so WalletConnect can call useConnect() */}
+          <DashboardProviders>
+            <Tabs defaultValue="social" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-6">
+                <TabsTrigger value="social" className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Social Login
+                </TabsTrigger>
+                <TabsTrigger value="wallet" className="flex items-center gap-2">
+                  <Wallet className="h-4 w-4" />
+                  Web3 Wallet
+                </TabsTrigger>
+              </TabsList>
 
-            <TabsContent value="social">
-              <SocialLogin />
-            </TabsContent>
+              <TabsContent value="social">
+                <SocialLogin />
+              </TabsContent>
 
-            <TabsContent value="wallet">
-              <WalletConnect />
-            </TabsContent>
-          </Tabs>
+              <TabsContent value="wallet">
+                <WalletConnect />
+              </TabsContent>
+            </Tabs>
+          </DashboardProviders>
 
           <p className="text-xs text-gray-500 text-center mt-6">
             By continuing, you agree to our Terms of Service and Privacy Policy
@@ -62,4 +97,3 @@ export default function AuthPage() {
     </div>
   );
 }
-

@@ -160,30 +160,14 @@ run_migrations() {
     return 0
   fi
 
-  # ── Prisma (uncomment when Prisma is added) ──────────────────────────────
-  # if [[ -f "$BACKEND_DIR/prisma/schema.prisma" ]]; then
-  #   log "Running Prisma migrations..."
-  #   (cd "$BACKEND_DIR" && npx prisma migrate deploy)
-  #   log "Prisma migrations complete."
-  #   return 0
-  # fi
+  if [[ -f "$BACKEND_DIR/prisma/schema.prisma" ]]; then
+    log "Running Prisma migrations (db:migrate)..."
+    (cd "$BACKEND_DIR" && npm run db:generate && npm run db:migrate)
+    log "Database migrations complete."
+    return 0
+  fi
 
-  # ── TypeORM (uncomment when TypeORM is added) ────────────────────────────
-  # if [[ -f "$BACKEND_DIR/src/data-source.ts" ]]; then
-  #   log "Running TypeORM migrations..."
-  #   (cd "$BACKEND_DIR" && npx typeorm-ts-node-commonjs -d src/data-source.ts migration:run)
-  #   log "TypeORM migrations complete."
-  #   return 0
-  # fi
-
-  # ── Custom migration script ──────────────────────────────────────────────
-  # if [[ -f "$BACKEND_DIR/scripts/migrate.sh" ]]; then
-  #   log "Running custom migration script..."
-  #   bash "$BACKEND_DIR/scripts/migrate.sh"
-  #   return 0
-  # fi
-
-  info "No database migration tooling detected — skipping (no-op)."
+  warn "No prisma/schema.prisma found — skipping migrations."
 }
 
 # ─── Build ───────────────────────────────────────────────────────────────────
@@ -255,6 +239,43 @@ start_or_reload_frontend() {
   log "Frontend process started."
 }
 
+# ─── Cache invalidation (CloudFront / CDN) ─────────────────────────────────────
+
+# Invalidates CloudFront cached assets after deploy to ensure users receive
+# the latest frontend build and API responses.  Skips if AWS CLI or
+# CLOUDFRONT_DISTRIBUTION_ID is not configured.
+invalidate_cache() {
+  section "Cache invalidation"
+
+  local dist_id="${CLOUDFRONT_DISTRIBUTION_ID:-}"
+  if [[ -z "$dist_id" ]]; then
+    warn "CLOUDFRONT_DISTRIBUTION_ID not set — skipping CDN cache invalidation."
+    warn "Set it in your environment or AWS SSM Parameter Store to enable."
+    return 0
+  fi
+
+  if ! command -v aws &>/dev/null; then
+    warn "AWS CLI not installed — skipping cache invalidation."
+    return 0
+  fi
+
+  log "Invalidating CloudFront distribution $dist_id..."
+
+  local caller_ref="agenticpay-deploy-$(date +%s)"
+
+  aws cloudfront create-invalidation \
+    --distribution-id "$dist_id" \
+    --paths "/*" \
+    --caller-reference "$caller_ref" \
+    2>/dev/null || {
+    warn "CloudFront invalidation request failed (may be transient)."
+    return 0
+  }
+
+  log "Cache invalidation submitted for distribution $dist_id"
+  info "All edge locations will serve fresh content within ~5 minutes."
+}
+
 # ─── Health check ────────────────────────────────────────────────────────────
 
 health_check() {
@@ -306,6 +327,11 @@ health_check() {
 
 rollback() {
   section "Rolling back"
+
+  if [[ -f "$BACKEND_DIR/prisma/schema.prisma" && "${MIGRATION_ROLLBACK_ON_DEPLOY_FAILURE:-false}" == "true" ]]; then
+    warn "Attempting database rollback-one (dev/staging only)..."
+    (cd "$BACKEND_DIR" && npm run db:rollback:one) || warn "DB rollback-one skipped or failed."
+  fi
 
   if [[ ! -d "$BACKUP_DIR" ]]; then
     error "No backup found at $BACKUP_DIR — cannot roll back."
@@ -401,7 +427,10 @@ main() {
     start_or_reload_frontend
   fi
 
-  # 5. Health check — roll back if it fails
+  # 5. Invalidate CDN cache (frontend assets, API responses)
+  invalidate_cache
+
+  # 6. Health check — roll back if it fails
   health_check || {
     error "Health check failed after deploy."
     warn "Attempting automatic rollback..."

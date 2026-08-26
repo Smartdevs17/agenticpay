@@ -16,7 +16,9 @@
     "verify:deployment": "hardhat run scripts/verify.ts",
     "propose:upgrade": "hardhat run scripts/propose-safe-upgrade.ts",
     "list": "hardhat run scripts/list-deployments.ts",
-    "rollback": "hardhat run scripts/rollback.ts"
+    "rollback": "hardhat run scripts/rollback.ts",
+    "typechain": "hardhat typechain",
+    "ci": "npm run compile && npm run typechain && npm run lint && npm run test:gas"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

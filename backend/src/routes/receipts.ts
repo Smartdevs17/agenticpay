@@ -18,6 +18,8 @@ import {
   searchReceipts,
   archiveReceipts,
   generateReceiptPdf,
+  verifyReceiptOnChain,
+  exportReceipts,
 } from '../services/receipts.js';
 import {
   archiveReceiptSchema,
@@ -172,6 +174,33 @@ receiptsRouter.get(
       valid: verifyReceiptProof(receipt),
       proof: receipt.merkleProof,
     });
+  })
+);
+
+receiptsRouter.get(
+  '/:tokenId/verify/onchain',
+  cacheControl({ maxAge: CacheTTL.SHORT }),
+  asyncHandler(async (req, res) => {
+    const receipt = getReceiptByTokenId(req.params.tokenId);
+    if (!receipt) throw new AppError(404, 'Receipt not found', 'NOT_FOUND');
+    const onChain = verifyReceiptOnChain(receipt);
+    res.json(onChain);
+  })
+);
+
+receiptsRouter.get(
+  '/export',
+  cacheControl({ maxAge: CacheTTL.SHORT }),
+  asyncHandler(async (req, res) => {
+    const format = (req.query.format as string) === 'csv' ? 'csv' : 'json';
+    const data = exportReceipts(format);
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="receipts.csv"');
+      res.send(data);
+    } else {
+      res.json(JSON.parse(data as string));
+    }
   })
 );
 

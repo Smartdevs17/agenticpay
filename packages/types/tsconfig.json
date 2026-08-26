@@ -1,8 +1,14 @@
 {
   "extends": "@agenticpay/typescript-config/base.json",
   "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true
   },
   "include": [
     "src"

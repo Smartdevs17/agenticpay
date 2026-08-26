@@ -21,6 +21,8 @@ type PoolState = {
   droppedMessages?: number;
 };
 
+import { decodeServerBinary } from "./codec.js";
+
 type OutboundItem = { data: string; priority: "high" | "normal" };
 type WireMessage = {
   type: string;
@@ -75,7 +77,9 @@ export class WebSocketPool {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
 
     this.setState({ connected: false, reconnecting: this.reconnectAttempt > 0 });
+    const useBinary = this.options.url.includes("proto=1");
     const ws = new WebSocket(this.options.url);
+    if (useBinary) ws.binaryType = "arraybuffer";
     this.ws = ws;
 
     ws.onopen = () => {
@@ -88,8 +92,17 @@ export class WebSocketPool {
     };
 
     ws.onmessage = (event) => {
-      const data = typeof event.data === "string" ? event.data : "";
-      this.deliverOrdered(data);
+      if (event.data instanceof ArrayBuffer) {
+        // Binary protobuf frame — decode and re-serialize for existing ordered delivery
+        const messages = decodeServerBinary(event.data);
+        const json = messages.length === 1
+          ? JSON.stringify(messages[0])
+          : JSON.stringify(messages);
+        this.deliverOrdered(json);
+      } else {
+        const data = typeof event.data === "string" ? event.data : "";
+        this.deliverOrdered(data);
+      }
     };
 
     ws.onerror = () => {

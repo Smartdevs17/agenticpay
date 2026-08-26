@@ -1,32 +1,58 @@
 'use client';
 
-import { useLanguage } from '@/lib/hooks/useLanguage';
-import { createContext, useContext } from 'react';
-
-type LanguageContextValue = ReturnType<typeof useLanguage>;
-
-const LanguageContext = createContext<LanguageContextValue | null>(null);
+import { useEffect } from 'react';
+import {
+  useLanguageStore,
+  SUPPORTED_LANGUAGES,
+  type SupportedLocale,
+} from '@/store/useLanguageStore';
 
 /**
- * Provides language detection, locale state, and manual override
- * to the entire application. Wrap this around children in the root layout.
+ * LanguageProvider
+ *
+ * Thin initialisation component — no longer uses React Context.
+ * State lives in the Zustand `useLanguageStore` so any component can
+ * subscribe with a selector without re-renders on unrelated state changes.
+ *
+ * On first client mount it detects the browser locale (or reads the stored
+ * preference from localStorage) and marks the store as hydrated.
  */
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const language = useLanguage();
-  return (
-    <LanguageContext.Provider value={language}>
-      {children}
-    </LanguageContext.Provider>
-  );
+  const markHydrated = useLanguageStore((s) => s.markHydrated);
+  const isHydrated = useLanguageStore((s) => s.isHydrated);
+
+  useEffect(() => {
+    if (!isHydrated) {
+      markHydrated();
+    }
+  }, [isHydrated, markHydrated]);
+
+  return <>{children}</>;
 }
 
 /**
- * Consume the current locale and language utilities anywhere in the tree.
+ * useLocale
+ *
+ * Drop-in replacement for the previous Context-based hook.
+ * Components that previously called `useLocale()` continue to work unchanged.
  */
 export function useLocale() {
-  const ctx = useContext(LanguageContext);
-  if (!ctx) {
-    throw new Error('useLocale must be used inside <LanguageProvider>');
-  }
-  return ctx;
+  const locale = useLanguageStore((s) => s.locale);
+  const setLocale = useLanguageStore((s) => s.setLocale);
+  const resetToDetected = useLanguageStore((s) => s.resetToDetected);
+  const isHydrated = useLanguageStore((s) => s.isHydrated);
+
+  const currentLanguage = SUPPORTED_LANGUAGES.find((l) => l.code === locale);
+
+  return {
+    locale,
+    setLocale,
+    resetToDetected,
+    supportedLanguages: SUPPORTED_LANGUAGES,
+    currentLanguage,
+    isHydrated,
+  };
 }
+
+// Re-export type so consumers don't need to import from two places
+export type { SupportedLocale };

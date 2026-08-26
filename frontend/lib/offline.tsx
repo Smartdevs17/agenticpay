@@ -259,7 +259,7 @@ export function useOfflineIndicator() {
 
 export function OfflinePaymentIndicator() {
   const isOnline = useOfflineIndicator();
-  const [pendingCount, setPendingCount] = useState(readQueue().length);
+  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     const listener = () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { messageQueue, QueueJob } from '../services/queue.js';
+import { messageQueue, QueueJob } from './queue.js';
 import {
   queueEmail,
   queueNotification,
@@ -8,7 +8,7 @@ import {
   processNotificationJob,
   processWebhookJob,
   registerDefaultProcessors,
-} from '../services/queue-producers.js';
+} from './queue-producers.js';
 
 describe('Message Queue', () => {
   beforeEach(() => {

@@ -2,7 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter } from '@/i18n/navigation';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { ErrorBoundary } from '@/components/errors/ErrorBoundary';

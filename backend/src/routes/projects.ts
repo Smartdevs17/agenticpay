@@ -1,202 +1,232 @@
-import { Router } from 'express';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
-import { validate } from '../middleware/validate.js';
-import {
-  addMilestoneSchema,
-  approveDeliverableSchema,
-  createProjectSchema,
-  disputeDeliverableSchema,
-  scopeChangeSchema,
-  submitDeliverableSchema,
-  updateProjectSchema,
-} from '../schemas/projects.js';
-import { projectsService } from '../services/projects.js';
+/**
+ * projects.ts — Issue #366
+ *
+ * Project routes using controller-service-repository pattern
+ */
+
+import { Router } from "express";
+import { container } from "../di/container.js";
+import { requireEnhancedPermission } from "../middleware/permissions.js";
+import { attachResponseHelpers } from "../middleware/responseFormatter.js";
+import { projectsService } from "../services/projects.js";
 
 export const projectsRouter = Router();
 
+// Attach response helpers
+projectsRouter.use(attachResponseHelpers);
+
+const projectController = container.getProjectController();
+
+// Create project
 projectsRouter.post(
-  '/',
-  validate(createProjectSchema),
-  asyncHandler(async (req, res) => {
-    const project = projectsService.createProject(req.body);
-    res.status(201).json({ data: project });
-  })
+  "/",
+  requireEnhancedPermission("projects", "write"),
+  projectController.createProject,
 );
 
+// Overdue milestone alerts — must come before /:id to avoid param collision
 projectsRouter.get(
-  '/',
-  asyncHandler(async (req, res) => {
-    const projects = projectsService.listProjects({
-      clientId: req.query.clientId ? String(req.query.clientId) : undefined,
-      ownerId: req.query.ownerId ? String(req.query.ownerId) : undefined,
-      includeArchived: String(req.query.includeArchived || 'false').toLowerCase() === 'true',
-    });
-    res.json({ data: projects, count: projects.length });
-  })
-);
-
-projectsRouter.get(
-  '/client/:clientId/review',
-  asyncHandler(async (req, res) => {
-    const clientId = Array.isArray(req.params.clientId) ? req.params.clientId[0] : req.params.clientId;
-    const review = projectsService.getClientReviewPortal(clientId);
-    res.json({ data: review, count: review.length });
-  })
-);
-
-projectsRouter.get(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.getProject(id);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
+  "/overdue-alerts",
+  requireEnhancedPermission("projects", "read"),
+  (req, res, next) => {
+    try {
+      const sessionUser = (req as typeof req & { user?: { id: string; role: string } }).user;
+      const { projectId } = req.query;
+      const targetProjectId = typeof projectId === 'string' ? projectId : undefined;
+      // Scope to the caller's own projects unless they have admin role
+      const ownerId = sessionUser?.role === 'admin' ? undefined : sessionUser?.id;
+      const alerts = projectsService.getOverdueMilestones(targetProjectId, ownerId);
+      res.json({ alerts, count: alerts.length });
+    } catch (err) {
+      next(err);
     }
-
-    res.json({
-      data: project,
-      milestones: projectsService.listMilestones(id),
-      releases: projectsService.getReleases(id),
-    });
-  })
+  },
 );
+
+// List all projects
+projectsRouter.get(
+  "/",
+  requireEnhancedPermission("projects", "read"),
+  projectController.listProjects,
+);
+
+// Get single project
+projectsRouter.get(
+  "/:id",
+  requireEnhancedPermission("projects", "read"),
+  projectController.getProject,
+);
+
+// List client projects
+projectsRouter.get(
+  "/client/:clientId",
+  requireEnhancedPermission("projects", "read"),
+  projectController.listClientProjects,
+);
+
+// List freelancer projects
+projectsRouter.get(
+  "/freelancer/:freelancerId",
+  requireEnhancedPermission("projects", "read"),
+  projectController.listFreelancerProjects,
+);
+
+// Update project
+projectsRouter.patch(
+  "/:id",
+  requireEnhancedPermission("projects", "write"),
+  projectController.updateProject,
+);
+
+// Fund project
+projectsRouter.post(
+  "/:id/fund",
+  requireEnhancedPermission("projects", "write"),
+  projectController.fundProject,
+);
+
+// Submit work
+projectsRouter.post(
+  "/:id/submit",
+  requireEnhancedPermission("projects", "write"),
+  projectController.submitWork,
+);
+
+// Approve work
+projectsRouter.post(
+  "/:id/approve",
+  requireEnhancedPermission("projects", "write"),
+  projectController.approveWork,
+);
+
+// Raise dispute
+projectsRouter.post(
+  "/:id/dispute",
+  requireEnhancedPermission("projects", "write"),
+  projectController.raiseDispute,
+);
+
+// Delete project
+projectsRouter.delete(
+  "/:id",
+  requireEnhancedPermission("projects", "delete"),
+  projectController.deleteProject,
+);
+
+// ── Milestone Dependency Routes ─────────────────────────────────────────────
+
+// GET /:id/dependencies — list all milestone dependencies
+projectsRouter.get(
+  "/:id/dependencies",
+  requireEnhancedPermission("projects", "read"),
+  (req, res, next) => {
+    try {
+      const projectId = String(req.params.id);
+      const deps = projectsService.getDependencies(projectId);
+      res.json({ dependencies: deps, count: deps.length });
+    } catch (err) { next(err); }
+  },
+);
+
+// GET /:id/dependencies/conflicts — detect dependency conflicts
+projectsRouter.get(
+  "/:id/dependencies/conflicts",
+  requireEnhancedPermission("projects", "read"),
+  (req, res, next) => {
+    try {
+      const projectId = String(req.params.id);
+      const conflicts = projectsService.checkDependencyConflicts(projectId);
+      res.json({ conflicts, hasConflicts: conflicts.length > 0 });
+    } catch (err) { next(err); }
+  },
+);
+
+// PATCH /:id/milestones/:milestoneId/dependencies — update milestone deps
+import { z } from 'zod';
+import { validate } from '../middleware/validate.js';
+
+const updateDepsSchema = z.object({
+  dependsOn: z.array(z.string()),
+});
 
 projectsRouter.patch(
-  '/:id',
-  validate(updateProjectSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.updateProject(id, req.body);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({ data: project });
-  })
+  "/:id/milestones/:milestoneId/dependencies",
+  requireEnhancedPermission("projects", "write"),
+  validate(updateDepsSchema),
+  (req, res, next) => {
+    try {
+      const projectId = String(req.params.id);
+      const milestoneId = String(req.params.milestoneId);
+      const { dependsOn } = req.body;
+      const updated = projectsService.updateMilestoneDependencies(projectId, milestoneId, dependsOn);
+      if (!updated) {
+        res.status(404).json({ error: 'Milestone not found or invalid dependencies' });
+        return;
+      }
+      res.json(updated);
+    } catch (err) { next(err); }
+  },
 );
 
-projectsRouter.post(
-  '/:id/archive',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.archiveProject(id);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({ data: project });
-  })
-);
+// ── Critical Path Routes ────────────────────────────────────────────────────
 
-projectsRouter.post(
-  '/:id/abandon',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.markAbandoned(id);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({ data: project });
-  })
-);
-
-projectsRouter.post(
-  '/:id/scope-change',
-  validate(scopeChangeSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.applyScopeChange(id, req.body.additionalBudget);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({
-      data: project,
-      scopeChange: {
-        additionalBudget: req.body.additionalBudget,
-        reason: req.body.reason,
-      },
-    });
-  })
-);
-
-projectsRouter.post(
-  '/:id/milestones',
-  validate(addMilestoneSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const milestone = projectsService.addMilestone(id, req.body);
-    if (!milestone) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.status(201).json({ data: milestone });
-  })
-);
-
+// GET /:id/critical-path — compute critical path
 projectsRouter.get(
-  '/:id/milestones',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const project = projectsService.getProject(id);
-    if (!project) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    const milestones = projectsService.listMilestones(id);
-    res.json({ data: milestones, count: milestones.length });
-  })
+  "/:id/critical-path",
+  requireEnhancedPermission("projects", "read"),
+  (req, res, next) => {
+    try {
+      const projectId = String(req.params.id);
+      const result = projectsService.computeCriticalPath(projectId);
+      if (!result) {
+        res.status(404).json({ error: 'No milestones found for project' });
+        return;
+      }
+      res.json(result);
+    } catch (err) { next(err); }
+  },
 );
 
-projectsRouter.post(
-  '/:id/milestones/:milestoneId/submit',
-  validate(submitDeliverableSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const milestoneId = Array.isArray(req.params.milestoneId) ? req.params.milestoneId[0] : req.params.milestoneId;
-    const milestone = projectsService.submitDeliverable(id, milestoneId, req.body.submissionUrl, req.body.notes);
-    if (!milestone) {
-      throw new AppError(404, 'Milestone not found', 'NOT_FOUND');
-    }
-    res.json({ data: milestone });
-  })
-);
-
-projectsRouter.post(
-  '/:id/milestones/:milestoneId/approve',
-  validate(approveDeliverableSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const milestoneId = Array.isArray(req.params.milestoneId) ? req.params.milestoneId[0] : req.params.milestoneId;
-
-    const result = projectsService.approveDeliverable(id, milestoneId, req.body.approvedBy);
-    if (!result) {
-      throw new AppError(404, 'Milestone not found', 'NOT_FOUND');
-    }
-    res.json({ data: result.milestone, paymentRelease: result.release });
-  })
-);
-
-projectsRouter.post(
-  '/:id/milestones/:milestoneId/dispute',
-  validate(disputeDeliverableSchema),
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const milestoneId = Array.isArray(req.params.milestoneId) ? req.params.milestoneId[0] : req.params.milestoneId;
-    const milestone = projectsService.disputeMilestone(id, milestoneId, req.body.reason);
-    if (!milestone) {
-      throw new AppError(404, 'Milestone not found', 'NOT_FOUND');
-    }
-    res.json({
-      data: milestone,
-      project: projectsService.getProject(id),
-    });
-  })
-);
-
+// GET /:id/gantt — get Gantt data
 projectsRouter.get(
-  '/:id/dashboard',
-  asyncHandler(async (req, res) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const dashboard = projectsService.getDashboard(id);
-    if (!dashboard) {
-      throw new AppError(404, 'Project not found', 'NOT_FOUND');
-    }
-    res.json({ data: dashboard });
-  })
+  "/:id/gantt",
+  requireEnhancedPermission("projects", "read"),
+  (req, res, next) => {
+    try {
+      const projectId = String(req.params.id);
+      const ganttData = projectsService.getGanttData(projectId);
+      res.json({ items: ganttData, count: ganttData.length });
+    } catch (err) { next(err); }
+  },
+);
+
+// GET /:id/deadline-alerts — get deadline alerts
+projectsRouter.get(
+  "/:id/deadline-alerts",
+  requireEnhancedPermission("projects", "read"),
+  (req, res, next) => {
+    try {
+      const projectId = String(req.params.id);
+      const { thresholdDays } = req.query;
+      const threshold = typeof thresholdDays === 'string' ? parseInt(thresholdDays, 10) : 7;
+      const sessionUser = (req as typeof req & { user?: { id: string; role: string } }).user;
+      const ownerId = sessionUser?.role === 'admin' ? undefined : sessionUser?.id;
+      const alerts = projectsService.getDeadlineAlerts(projectId, ownerId, threshold);
+      res.json({ alerts, count: alerts.length });
+    } catch (err) { next(err); }
+  },
+);
+
+// POST /:id/milestones/:milestoneId/complete — cascade completion
+projectsRouter.post(
+  "/:id/milestones/:milestoneId/complete",
+  requireEnhancedPermission("projects", "write"),
+  (req, res, next) => {
+    try {
+      const projectId = String(req.params.id);
+      const milestoneId = String(req.params.milestoneId);
+      const cascaded = projectsService.cascadeMilestoneCompletion(projectId, milestoneId);
+      res.json({ cascaded, count: cascaded.length });
+    } catch (err) { next(err); }
+  },
 );

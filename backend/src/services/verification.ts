@@ -19,8 +19,6 @@ export interface CodeQualityMetrics {
   cyclomaticComplexity: number;
   documentationCoverage: number;
   duplicateCodeRatio: number;
-  dependencyVulnerabilities: number;
-  lintingIssues: number;
   maintainabilityIndex: number;
 }
 
@@ -197,8 +195,6 @@ function analyzeCodeQuality(contents: string): CodeQualityMetrics {
       cyclomaticComplexity: 0,
       documentationCoverage: 0,
       duplicateCodeRatio: 0,
-      dependencyVulnerabilities: 0,
-      lintingIssues: 0,
       maintainabilityIndex: 0,
     };
   }
@@ -229,8 +225,6 @@ function analyzeCodeQuality(contents: string): CodeQualityMetrics {
     cyclomaticComplexity: Math.round(cyclomaticComplexity * 10) / 10,
     documentationCoverage: Math.round(documentationCoverage),
     duplicateCodeRatio: Math.round(duplicateRatio * 100) / 100,
-    dependencyVulnerabilities: 0,
-    lintingIssues: 0,
     maintainabilityIndex: Math.round(maintainabilityIndex),
   };
 }

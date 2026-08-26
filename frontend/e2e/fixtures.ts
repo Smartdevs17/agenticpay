@@ -5,10 +5,17 @@ import {
   DEFAULT_TEST_USER,
   type SeededAuthUser,
 } from './helpers/test-data';
+import {
+  cleanupTestState,
+  mockOnboardingApi,
+  mockSandboxPaymentsApi,
+} from './helpers/api-mocks';
 
 type Fixtures = {
   seedAuth: (user?: SeededAuthUser) => Promise<void>;
   authenticatedPage: Page;
+  withOnboardingMocks: void;
+  withPaymentMocks: void;
 };
 
 export const test = base.extend<Fixtures>({
@@ -32,6 +39,17 @@ export const test = base.extend<Fixtures>({
   authenticatedPage: async ({ page, seedAuth }, use) => {
     await seedAuth();
     await use(page);
+    await cleanupTestState(page);
+  },
+
+  withOnboardingMocks: async ({ page }, use) => {
+    await mockOnboardingApi(page);
+    await use();
+  },
+
+  withPaymentMocks: async ({ page }, use) => {
+    await mockSandboxPaymentsApi(page);
+    await use();
   },
 });
 

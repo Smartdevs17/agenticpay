@@ -1,6 +1,6 @@
 import { JobScheduler } from './scheduler.js';
-import { defaultJobs } from './default-jobs.js';
-import { gdprJobs } from './gdpr-jobs.js';
+import { buildScheduledTasks } from '../config/scheduled-tasks.js';
+import type { JobDefinition } from './types.js';
 
 let scheduler: JobScheduler | null = null;
 
@@ -9,9 +9,18 @@ export function startJobs(): JobScheduler {
     return scheduler;
   }
 
+  // Validate all cron expressions at startup; throws on invalid config
+  const tasks = buildScheduledTasks();
+
   scheduler = new JobScheduler();
 
-  for (const job of [...defaultJobs, ...gdprJobs]) {
+  for (const task of tasks) {
+    const job: JobDefinition = {
+      id: task.id,
+      name: task.name,
+      schedule: { type: 'cron', expression: task.schedule, timezone: task.timezone },
+      handler: task.handler,
+    };
     scheduler.addJob(job);
   }
 

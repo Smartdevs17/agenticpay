@@ -1,0 +1,39 @@
+// Auto-generated React Query hook for {{operationId}}
+
+import { useQuery, useMutation, useQueryClient } from '{{reactQueryPath}}';
+import { fetch{{pascalCase operationId}} } from './api/{{operationId}}';
+import type { {{responseTypeName}} } from './api/{{operationId}}';
+{{#if hasBody}}
+import type { {{requestTypeName}} } from './api/{{operationId}}';
+{{/if}}
+
+{{#ifEquals hookType 'useQuery'}}
+export function {{hookName}}(
+  {{#if pathParams}}
+  params: { {{#each pathParams}}{{name}}: {{type}}; {{/each}} },
+  {{/if}}
+  {{#if queryParams}}
+  query?: { {{#each queryParams}}{{name}}{{#unless required}}?{{/unless}}: {{type}}; {{/each}} },
+  {{/if}}
+  options?: Omit<Parameters<typeof useQuery<{{responseTypeName}}>>[0], 'queryKey' | 'queryFn'>,
+) {
+  return useQuery({
+    queryKey: ['{{tag}}', '{{operationId}}'{{#if pathParams}}, params{{/if}}{{#if queryParams}}, query{{/if}}],
+    queryFn: () => fetch{{pascalCase operationId}}({{#if pathParams}}params{{/if}}{{#if queryParams}}, query{{/if}}),
+    ...options,
+  });
+}
+{{else}}
+export function {{hookName}}(
+  {{#if pathParams}}
+  params: { {{#each pathParams}}{{name}}: {{type}}; {{/each}} },
+  {{/if}}
+  options?: Omit<Parameters<typeof useMutation<{{responseTypeName}}, Error, {{#if hasBody}}{{requestTypeName}}{{else}}void{{/if}}>>[0], 'mutationFn'>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data{{#unless hasBody}}: void{{/unless}}) => fetch{{pascalCase operationId}}({{#if pathParams}}params{{/if}}{{#if hasBody}}, data{{/if}}),
+    ...options,
+  });
+}
+{{/ifEquals}}

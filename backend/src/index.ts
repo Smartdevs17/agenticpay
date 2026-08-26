@@ -1,31 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
-import * as Sentry from '@sentry/node';
-import { nodeProfilingIntegration } from '@sentry/profiling-node';
-
-Sentry.init({
-  dsn: process.env.SENTRY_DSN || '',
-  integrations: [
-    nodeProfilingIntegration(),
-  ],
-  tracesSampleRate: 1.0,
-  profilesSampleRate: 1.0,
-  environment: process.env.NODE_ENV || 'development',
-  beforeSend(event, hint) {
-    if (event.exception && hint.originalException) {
-      const error = hint.originalException as Error;
-      if (error && error.message && error.message.includes('Database connection timeout')) {
-        event.fingerprint = ['database-timeout'];
-      }
-    }
-    return event;
-  }
-});
 import cors from 'cors';
-import { tokenBucketRateLimit } from './middleware/rate-limit.js';
+import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
 import compression from 'compression';
-import { config } from './config.js';
 import { verificationRouter } from './routes/verification.js';
 import { invoiceRouter } from './routes/invoice.js';
 import { stellarRouter } from './routes/stellar.js';
@@ -34,96 +13,33 @@ import { jobsRouter } from './routes/jobs.js';
 import { healthRouter } from './routes/health.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
-import { legacyRouter } from './routes/legacy.js';
-import { onboardingRouter } from './routes/onboarding.js';
-import { splitsRouter } from './routes/splits.js';
-import { refundsRouter } from './routes/refunds.js';
-import allowancesRouter from './routes/allowances.js';
-import { formsRouter } from './routes/forms.ts';
-import { webhooksRouter } from './routes/webhooks.js';
-import { webhookHandlersRouter } from './routes/webhookHandlers.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
-import { batchProcessor } from './services/batch.js';
-import { featureFlags } from './config/featureFlags.js';
-import { getRedisCache } from './middleware/cache.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
 import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
 import { validateEnv, config as getConfig } from './config/env.js';
+import { config } from './config.js';
 import { flagsRouter } from './routes/flags.js';
-import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
+import { kybRouter } from './routes/kyb.js';
+import { batchRouter } from './routes/batch.js';
 import { emailRouter } from './routes/email.js';
 import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
 import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
-import { nfcRouter } from './routes/nfc.js';
-import { cacheRouter } from './routes/cache.js';
-import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
-import { sessionsRouter } from './routes/sessions.js';
-import { sessionMiddleware } from './middleware/session.js';
-import { notificationsRouter } from './routes/notifications.js';
-import { auditRouter } from './routes/audit.js';
-import { hedgingRouter } from './routes/hedging.js';
-import { complianceRouter } from './routes/compliance.js';
-import { kybRouter } from './routes/kyb.js';
-import { batchRouter } from './routes/batch.js';
-import { relayerRouter } from './routes/relayer.js';
-import { paymentQueueRouter } from './routes/payment-queue.js';
-import { disputeRoutes } from './disputes/index.js';
-import { disputeService } from './disputes/disputeService.js';
-import http from 'node:http';
-import { attachWebSocketServer } from './websocket/server.js';
-import { createWebSocketRouter } from './routes/websocket.js';
-import { bindWebSocketServer } from './events/event-bus.js';
-import { receiptsRouter } from './routes/receipts.js';
-import { eventsRouter } from './routes/events.js';
-import { threatDetectionRouter } from './routes/threat-detection.js';
-import { serviceMeshRouter } from './routes/service-mesh.js';
-import { escrowRouter } from './routes/escrow.js';
-import { multisigRouter } from './routes/multisig.js';
-import { fiatPaymentsRouter } from './routes/fiat-payments.js';
-import { paymentLinksRouter } from './routes/payment-links.js';
-import { taxRouter } from './routes/tax.js';
-import { projectsRouter } from './routes/projects.js';
-import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
-import { fraudDetectionRouter } from './routes/fraud-detection.js';
-import { bridgeRouter } from './routes/bridge.js';
-import { tokenizationRouter } from './routes/tokenization.js';
-import { startWebhookWorker, stopWebhookWorker } from './services/webhooks.js';
-import { analyticsService } from './services/analytics.js';
-import { createAnalyticsRouter } from './routes/analytics.js';
-import { paymentQueue } from './queue/payment-queue.js';
-import './events/projections.js';
 import { stripeRouter } from './routes/stripe.js';
+import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
-import { signaturesRouter } from './routes/signatures.js';
-import { createSandboxRouter } from './routes/sandbox.js';
-import SandboxManager from './services/sandbox.js';
-import MockPaymentProcessor from './services/mock-payments.js';
-import TestDataSeeder from './services/test-data-seeder.js';
-import { emailV2Router } from './routes/email-v2.js';
+import { notificationsRouter } from './routes/notifications.js';
+import { auditRouter } from './routes/audit.js';
+import { taxReportingRouter } from './routes/tax-reporting.js';
 import { apiKeysRouter } from './routes/api-keys.js';
 import { milestonesRouter } from './routes/milestones.js';
 
-// Validate environment variables at startup
-validateEnv();
-const env = getConfig();
-
-// Initialize sandbox services
-const sandboxManager = new SandboxManager(env.NODE_ENV || 'development');
-const mockPaymentProcessor = new MockPaymentProcessor();
-const testDataSeeder = new TestDataSeeder();
-
-// Initialize IP allowlist from environment
-if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
-  const allowedIps = env.IP_ALLOWLIST ? env.IP_ALLOWLIST.split(',').map(ip => ip.trim()).filter(Boolean) : [];
-  initIpAllowlist(allowedIps, env.IP_ALLOWLIST_ENABLED);
-  console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
-}
+dotenv.config();
 
 const traceStorage = new AsyncLocalStorage<string>();
 
@@ -153,16 +69,90 @@ console.error = (...args) => originalConsole.error(...formatMessage(args));
 
 const app = express();
 
-// Token-bucket rate limiter (replaces fixed-window tieredRateLimit)
-const apiRateLimiter = tokenBucketRateLimit({ keyPrefix: 'rl:api' });
-// Stricter limiter for invoice endpoint
-const invoiceLimiter = tokenBucketRateLimit({
-  keyPrefix: 'rl:invoice',
-  endpointConfig: {
-    free:       { capacity: 10,  refillRate: 0.1, burstAllowance: 2  },
-    pro:        { capacity: 60,  refillRate: 1,   burstAllowance: 10 },
-    enterprise: { capacity: 300, refillRate: 5,   burstAllowance: 50 },
-  },
+type UserTier = 'free' | 'pro' | 'enterprise';
+
+type TierRateState = {
+  count: number;
+  resetAtMs: number;
+};
+
+const tierLimits: Record<UserTier, number> = {
+  free: config.rateLimit.free,
+  pro: config.rateLimit.pro,
+  enterprise: config.rateLimit.enterprise,
+};
+
+const tierWindowMs = config.rateLimit.windowMs;
+const tierRateStore = new Map<string, TierRateState>();
+
+function resolveUserTier(req: Request): UserTier {
+  const headerTier = req.headers['x-user-tier'];
+  const normalized = (Array.isArray(headerTier) ? headerTier[0] : headerTier)?.toLowerCase();
+
+  if (normalized === 'pro' || normalized === 'enterprise') {
+    return normalized;
+  }
+
+  return 'free';
+}
+
+function resolveClientIdentifier(req: Request): string {
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    return authHeader;
+  }
+
+  const apiKey = req.headers['x-api-key'];
+  if (typeof apiKey === 'string' && apiKey.trim() !== '') {
+    return apiKey;
+  }
+
+  return req.ip || 'unknown-client';
+}
+
+function tieredRateLimit(req: Request, res: Response, next: NextFunction): void {
+  const tier = resolveUserTier(req);
+  const limit = tierLimits[tier];
+  const identifier = resolveClientIdentifier(req);
+  const storeKey = `${tier}:${identifier}`;
+  const nowMs = Date.now();
+  const existingState = tierRateStore.get(storeKey);
+
+  const state =
+    !existingState || existingState.resetAtMs <= nowMs
+      ? { count: 0, resetAtMs: nowMs + tierWindowMs }
+      : existingState;
+
+  state.count += 1;
+  tierRateStore.set(storeKey, state);
+
+  const remaining = Math.max(0, limit - state.count);
+  const resetInSeconds = Math.ceil((state.resetAtMs - nowMs) / 1000);
+
+  res.setHeader('X-RateLimit-Tier', tier);
+  res.setHeader('X-RateLimit-Limit', String(limit));
+  res.setHeader('X-RateLimit-Remaining', String(remaining));
+  res.setHeader('X-RateLimit-Reset', String(resetInSeconds));
+
+  if (state.count > limit) {
+    res.status(429).json({
+      error: {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: `Rate limit exceeded for tier '${tier}'`,
+        status: 429,
+      },
+    });
+    return;
+  }
+
+  next();
+}
+
+const invoiceLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 app.use(
@@ -170,19 +160,10 @@ app.use(
     origin: config.cors.allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Trace-Id',
-      REQUEST_ID_HEADER,
-      'API-Version',
-      'X-API-Version',
-      'Accept-Version',
-    ],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id', REQUEST_ID_HEADER],
   })
 );
 app.use(express.json());
-app.use(express.text({ type: ['text/csv', 'text/plain'] }));
 
 app.use(
   compression({
@@ -205,46 +186,52 @@ app.use(
 
 app.use(requestIdMiddleware);
 
+// Trace ID middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const traceId = (req.headers['x-trace-id'] as string) || randomUUID();
   res.setHeader('X-Trace-Id', traceId);
 
   traceStorage.run(traceId, () => {
-    console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Started`);
+    console.log(`${req.method} ${req.url} - Started`);
 
     res.on('finish', () => {
-      console.log(`${req.method} ${req.url} [RequestID: ${req.requestId}] - Finished with status ${res.statusCode}`);
+      console.log(`${req.method} ${req.url} - Finished with status ${res.statusCode}`);
     });
 
     next();
   });
 });
 
+// SLA Tracking middleware
 app.use(slaTrackingMiddleware);
-app.use(sessionMiddleware);
 
+// Cache defaults:
+//   - GET/HEAD: individual routes apply cacheControl() with per-route TTLs.
+//   - All other methods: always no-store (mutations must never be cached).
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.setHeader('Cache-Control', 'no-store');
   }
+  // Vary on Accept-Encoding so compressed/uncompressed responses are cached separately
   res.setHeader('Vary', 'Accept-Encoding');
   next();
 });
 
+// Health & Readiness checks
 app.use(healthRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 
-app.use('/api/', apiRateLimiter);
+import { portfolioRouter } from './routes/portfolio.js';
+import { emailRouter } from './routes/email.js';
 
-// Apply sandbox-aware rate limiting for sandbox endpoints
-const sandboxRateLimiter = tokenBucketRateLimit({ 
-  keyPrefix: 'rl:sandbox',
-  sandboxMode: env.NODE_ENV === 'sandbox' || env.NODE_ENV === 'development'
-});
+// Apply tiered limiter to all API routes
+app.use('/api/', tieredRateLimit);
 
+// Versioning middleware
 app.use('/api/', versionMiddleware);
 
+// Define API v1 Router
 const apiV1Router = express.Router();
 apiV1Router.use('/verification', verificationRouter);
 apiV1Router.use('/invoice', invoiceLimiter, invoiceRouter);
@@ -253,68 +240,31 @@ apiV1Router.use('/catalog', catalogRouter);
 apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
 apiV1Router.use('/sla', slaRouter);
-apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
+// Feature flag admin — inspect & override flags at runtime
 apiV1Router.use('/flags', flagsRouter);
 apiV1Router.use('/kyb', kybRouter);
 apiV1Router.use('/batch', batchRouter);
-apiV1Router.use('/relayer', relayerRouter);
-apiV1Router.use('/queue/payments', paymentQueueRouter);
 apiV1Router.use('/splits', splitsRouter);
 apiV1Router.use('/refunds', refundsRouter);
 apiV1Router.use('/allowances', allowancesRouter);
-apiV1Router.use('/forms', formsRouter);
-// Webhook management and verification
-apiV1Router.use('/webhooks', webhooksRouter);
 // Email delivery system
-apiV1Router.use('/disputes', disputeRoutes);
 apiV1Router.use('/emails', emailRouter);
+// Portfolio/wallet aggregation
 apiV1Router.use('/portfolio', portfolioRouter);
+// Backup system
 apiV1Router.use('/backup', backupRouter);
+// IP allowlist management
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
+// Push notifications
 apiV1Router.use('/push', pushRouter);
-// NFC / QR payment requests
-apiV1Router.use('/nfc', nfcRouter);
-// Cache management
-apiV1Router.use('/cache', cacheRouter);
+// Stripe card payments
+apiV1Router.use('/stripe', stripeRouter);
+// Automated tax reporting, export, and calendar — Issues #690–#693
+apiV1Router.use('/tax-reporting', taxReportingRouter);
 
-app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
-
-app.use('/api/v1/notifications', notificationsRouter);
-app.use('/api/v1/audit', auditRouter);
-app.use('/api/v1/hedging', hedgingRouter);
-app.use('/api/v1/compliance', complianceRouter);
-app.use('/api/v1/gdpr', gdprRouter);
-app.use('/api/v1/escrow', escrowRouter);
-app.use('/api/v1/multisig', multisigRouter);
-app.use('/api/v1/webhooks', webhooksRouter);
-app.use('/api/v1/fraud-detection', fraudDetectionRouter);
-app.use('/api/v1/bridge', bridgeRouter);
-app.use('/api/v1/tokenization', tokenizationRouter);
-
-// Payment receipt NFTs
-app.use('/api/v1/receipts', receiptsRouter);
-
-// Event-driven architecture — event store, CQRS projections
-app.use('/api/v1/events', eventsRouter);
-
-// Advanced threat detection with behavioral analysis
-app.use('/api/v1/threat-detection', threatDetectionRouter);
-
-// Microservices service mesh — registry, discovery, circuit breakers
-app.use('/api/v1/service-mesh', serviceMeshRouter);
-
-// Fiat ACH/Wire payment approval workflows
-app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
-
-// Merchant dynamic payment links
-app.use('/api/v1/payment-links', paymentLinksRouter);
-
-// Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export)
-app.use('/api/v1/tax', taxRouter);
-
-// Project + milestone delivery approval workflow
-app.use('/api/v1/projects', projectsRouter);
+// Explicit URL-based mounting
+app.use('/api/v1', apiV1Router);
 
 // Milestone dependency management
 app.use('/api/v1/milestones', milestonesRouter);
@@ -322,20 +272,7 @@ app.use('/api/v1/milestones', milestonesRouter);
 // API key management
 app.use('/api/v1/api-keys', apiKeysRouter);
 
-// Sandbox environment for testing (with relaxed rate limits)
-const sandboxRouter = createSandboxRouter(sandboxManager, mockPaymentProcessor, testDataSeeder);
-app.use('/api/v1/sandbox', sandboxRateLimiter, sandboxRouter);
-
-// Email system v2 with templates, analytics, and localization
-app.use('/api/v2/email', emailV2Router);
-
-// GraphQL gateway with federation-ready schema and subscriptions stream
-app.use('/graphql', graphQLRouter);
-app.use('/graphql/ws', graphQLWsRouter);
-
-// Webhook handlers (outside API versioning for direct access)
-app.use('/webhooks', webhookHandlersRouter);
-
+// Header-based or fallback mounting
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
     return next();
@@ -344,14 +281,11 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.apiVersion === 'v1') {
     return apiV1Router(req, res, next);
   }
-
+  
   next(new AppError(404, `API Version ${req.apiVersion} is not supported`, 'UNSUPPORTED_API_VERSION'));
 });
 
 app.use(notFoundHandler);
-
-Sentry.setupExpressErrorHandler(app);
-
 app.use(errorHandler);
 
 if (config.jobs.enabled) {
@@ -361,42 +295,13 @@ if (config.jobs.enabled) {
 registerDefaultProcessors();
 if (config.queue.enabled) {
   messageQueue.start();
-  paymentQueue.start();
-}
-startWebhookWorker();
-
-// Auto-escalation cron
-setInterval(async () => {
-  const count = await disputeService.processEscalations();
-  if (count > 0) console.log(`Escalated ${count} disputes`);
-}, 5 * 60 * 1000);
-
-if (featureFlags.evaluate('batch-operations')) {
-  batchProcessor.start();
-  console.log('[BatchProcessor] Started');
 }
 
-getRedisCache().connect().then(() => {
-  console.log('[RedisCache] Connection initialized');
-}).catch(() => {
-  console.log('[RedisCache] Not available, using in-memory cache only');
-});
-
-const server = http.createServer(app);
-const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
-bindWebSocketServer(wsServer);
-app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
-app.use('/api/v1/analytics', createAnalyticsRouter(wsServer));
-
-const analyticsInterval = setInterval(() => {
-  wsServer.broadcastToChannel('analytics.updates', { type: 'analytics:update', payload: analyticsService.snapshot() });
-}, 30_000);
-
-server.listen(config.server.port, () => {
+const server = app.listen(config.server.port, () => {
   console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
-  console.log(`WebSocket server listening on path /ws (max ${wsServer.metrics.activeConnections}/${wsServer.metrics.acceptedConnections})`);
 });
 
+// Graceful shutdown
 const shutdown = (signal: string) => {
   console.log(`${signal} received. Starting graceful shutdown...`);
 
@@ -415,26 +320,9 @@ const shutdown = (signal: string) => {
 
     try {
       messageQueue.stop();
-      paymentQueue.stop();
-      stopWebhookWorker();
       console.log('Message queue stopped.');
     } catch (err) {
       console.error('Error stopping message queue:', err);
-    }
-
-    try {
-      batchProcessor.stop();
-      console.log('Batch processor stopped.');
-    } catch (err) {
-      console.error('Error stopping batch processor:', err);
-    }
-
-    clearInterval(analyticsInterval);
-
-    try {
-      wsServer.close().then(() => console.log('WebSocket server closed.'));
-    } catch (err) {
-      console.error('Error closing WebSocket server:', err);
     }
 
     console.log('Graceful shutdown complete. Exiting.');

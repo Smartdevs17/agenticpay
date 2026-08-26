@@ -14,6 +14,13 @@ import {
   getThreatStats,
   refreshThreatIntel,
   getThreatIntelStatus,
+  blockIp,
+  unblockIp,
+  isIpBlocked,
+  getIpBlocks,
+  getThreatAlerts,
+  acknowledgeThreatAlert,
+  getIncidentPlaybooks,
 } from '../services/threat-detection.js';
 import type { ThreatStatus } from '../types/threat-detection.js';
 
@@ -146,5 +153,79 @@ threatDetectionRouter.post(
     }
     refreshThreatIntel(maliciousIps);
     res.json({ message: 'Threat intel refreshed', ...getThreatIntelStatus() });
+  })
+);
+
+// ── IP block management (Issue #394) ─────────────────────────────────────────
+
+threatDetectionRouter.get(
+  '/ip-blocks',
+  cacheControl({ maxAge: CacheTTL.SHORT }),
+  asyncHandler(async (_req, res) => {
+    res.json({ blocks: getIpBlocks(), count: getIpBlocks().length });
+  })
+);
+
+threatDetectionRouter.post(
+  '/ip-blocks',
+  asyncHandler(async (req, res) => {
+    const { ip, reason, durationMs } = req.body as { ip?: string; reason?: string; durationMs?: number };
+
+    if (!ip || typeof ip !== 'string') {
+      throw new AppError(400, 'ip is required', 'VALIDATION_ERROR');
+    }
+    if (!reason || typeof reason !== 'string') {
+      throw new AppError(400, 'reason is required', 'VALIDATION_ERROR');
+    }
+
+    const block = blockIp(ip, { reason, durationMs, autoBlocked: false });
+    res.status(201).json(block);
+  })
+);
+
+threatDetectionRouter.delete(
+  '/ip-blocks/:ip',
+  asyncHandler(async (req, res) => {
+    const removed = unblockIp(req.params.ip);
+    if (!removed) throw new AppError(404, 'IP block not found', 'NOT_FOUND');
+    res.json({ unblocked: true, ip: req.params.ip });
+  })
+);
+
+threatDetectionRouter.get(
+  '/ip-blocks/:ip',
+  asyncHandler(async (req, res) => {
+    res.json({ ip: req.params.ip, blocked: isIpBlocked(req.params.ip) });
+  })
+);
+
+// ── Threat alerts (Issue #394) ────────────────────────────────────────────────
+
+threatDetectionRouter.get(
+  '/alerts',
+  cacheControl({ maxAge: CacheTTL.SHORT }),
+  asyncHandler(async (req, res) => {
+    const unacknowledgedOnly = req.query.unacknowledged === 'true';
+    const alerts = getThreatAlerts(unacknowledgedOnly);
+    res.json({ alerts, count: alerts.length });
+  })
+);
+
+threatDetectionRouter.post(
+  '/alerts/:id/acknowledge',
+  asyncHandler(async (req, res) => {
+    const ok = acknowledgeThreatAlert(req.params.id);
+    if (!ok) throw new AppError(404, 'Alert not found', 'NOT_FOUND');
+    res.json({ acknowledged: true });
+  })
+);
+
+// ── Incident playbooks (Issue #394) ──────────────────────────────────────────
+
+threatDetectionRouter.get(
+  '/playbooks',
+  cacheControl({ maxAge: CacheTTL.LONG }),
+  asyncHandler(async (_req, res) => {
+    res.json({ playbooks: getIncidentPlaybooks() });
   })
 );

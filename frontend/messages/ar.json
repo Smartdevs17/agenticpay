@@ -1,0 +1,96 @@
+{
+  "common": {
+    "appName": "AgenticPay",
+    "loading": "جاري التحميل…",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "error": "حدث خطأ ما",
+    "retry": "إعادة المحاولة",
+    "getStarted": "ابدأ",
+    "learnMore": "اعرف المزيد"
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "projects": "المشاريع",
+    "invoices": "الفواتير",
+    "payments": "المدفوعات",
+    "qrPay": "دفع QR / NFC",
+    "disputes": "النزاعات",
+    "bridgeMonitoring": "مراقبة الجسور",
+    "archival": "الأرشفة على السلسلة",
+    "upgradeSafety": "أمان الترقية",
+    "translations": "الترجمات",
+    "features": "الميزات",
+    "about": "حول",
+    "pricing": "الأسعار"
+  },
+  "language": {
+    "changeLanguage": "تغيير اللغة",
+    "resetToBrowser": "إعادة تعيين إلى لغة المتصفح"
+  },
+  "landing": {
+    "badge": "آمن / سريع / شفاف",
+    "headline": "احصل على أجرك فورًا",
+    "headlineAccent": "مقابل عملك",
+    "subheadline": "AgenticPay تُحدث ثورة في مدفوعات المستقلين بتقنية البلوكشين.",
+    "activeProjects": "المشاريع النشطة",
+    "paidInvoices": "الفواتير المدفوعة",
+    "completedPayments": "المدفوعات المكتملة",
+    "volumeSettled": "حجم التسوية"
+  },
+  "auth": {
+    "title": "مرحبًا بك في AgenticPay",
+    "subtitle": "احصل على أجرك فورًا",
+    "socialLogin": "تسجيل اجتماعي",
+    "walletConnect": "محفظة Web3"
+  },
+  "dashboard": {
+    "title": "لوحة التحكم",
+    "welcome": "مرحبًا بعودتك! إليك نظرة عامة.",
+    "openMenu": "فتح القائمة",
+    "closeMenu": "إغلاق القائمة"
+  },
+  "bridgeMonitor": {
+    "title": "مراقبة الجسور",
+    "subtitle": "تتبع دورة حياة الرسائل عبر السلاسل وصحة الجسر",
+    "health": "صحة الجسر",
+    "totalMessages": "إجمالي الرسائل",
+    "successRate": "معدل النجاح",
+    "avgLatency": "متوسط زمن الاستجابة",
+    "stuckMessages": "رسائل عالقة",
+    "pendingAlerts": "تنبيهات معلقة",
+    "byProvider": "حسب المزود",
+    "volume": "الحجم",
+    "latency": "زمن الاستجابة",
+    "retry": "إعادة المحاولة",
+    "refresh": "تحديث"
+  },
+  "upgradeSafety": {
+    "title": "أمان الترقية",
+    "subtitle": "التحقق قبل النشر وسجل الترقيات",
+    "passed": "ناجح",
+    "failed": "فاشل",
+    "rolledBack": "تم التراجع",
+    "history": "السجل",
+    "historyDesc": "فحوصات التخزين والمحاكاة",
+    "empty": "لا توجد عمليات تحقق مسجلة.",
+    "simulation": "المحاكاة",
+    "smokeTests": "اختبارات",
+    "adminPreserved": "المسؤول محفوظ",
+    "proxyAdmin": "مسؤول الوكيل",
+    "implementation": "التنفيذ",
+    "refresh": "تحديث"
+  },
+  "i18nAdmin": {
+    "title": "إدارة الترجمات",
+    "subtitle": "مراجعة المفاتيح المفقودة وتغطية الترجمة",
+    "locale": "اللغة",
+    "missingKeys": "مفاتيح مفقودة",
+    "coverage": "التغطية",
+    "namespace": "مساحة الاسم"
+  },
+  "metadata": {
+    "title": "AgenticPay - احصل على أجرك فورًا مقابل عملك",
+    "description": "مدفوعات آمنة وسريعة وشفافة للمستقلين مدعومة بتقنية البلوكشين."
+  }
+}

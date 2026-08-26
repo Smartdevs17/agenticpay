@@ -1,0 +1,37 @@
+{
+  "name": "@agenticpay/sdk-testing",
+  "version": "0.1.0",
+  "description": "Testing utilities for AgenticPay SDK integrations",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "test": "vitest run --passWithNoTests"
+  },
+  "keywords": [
+    "agenticpay",
+    "sdk",
+    "testing",
+    "mock"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@agenticpay/sdk": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "typescript": "~5.7.2",
+    "vitest": "^4.1.1"
+  }
+}

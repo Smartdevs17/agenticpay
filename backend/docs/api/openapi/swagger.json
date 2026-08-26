@@ -1,0 +1,642 @@
+{
+	"openapi": "3.1.0",
+	"components": {
+		"securitySchemes": {
+			"bearerAuth": {
+				"type": "http",
+				"scheme": "bearer",
+				"bearerFormat": "JWT",
+				"description": "JWT authentication token"
+			}
+		}
+	},
+	"info": {
+		"title": "AgenticPay API",
+		"version": "1.0.0",
+		"description": "AI-Powered Payment Infrastructure for Autonomous Agents on Stellar",
+		"contact": {
+			"name": "AgenticPay Team",
+			"url": "https://github.com/Smartdevs17/agenticpay",
+			"email": "hello@agenticpay.com"
+		},
+		"license": {
+			"name": "Apache-2.0",
+			"url": "https://opensource.org/licenses/Apache-2.0"
+		}
+	},
+	"paths": {
+		"/health": {
+			"get": {
+				"operationId": "getHealth",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HealthCheckResponse"
+								}
+							}
+						}
+					}
+				},
+				"description": "Get service health status\nReturns dependency status for Stellar, OpenAI, and scheduler",
+				"tags": [
+					"Health"
+				],
+				"security": [],
+				"parameters": []
+			}
+		},
+		"/health/ready": {
+			"get": {
+				"operationId": "getReady",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ReadyResponse"
+								}
+							}
+						}
+					}
+				},
+				"description": "Kubernetes readiness probe\nApplication is ready if the router is mounted and responding",
+				"tags": [
+					"Health"
+				],
+				"security": [],
+				"parameters": []
+			}
+		},
+		"/gas/congestion/{chainId}": {
+			"get": {
+				"operationId": "getGasCongestion",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/NetworkCongestionMetrics"
+								}
+							}
+						}
+					}
+				},
+				"description": "Get current network congestion metrics",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": [
+					{
+						"in": "path",
+						"name": "chainId",
+						"required": true,
+						"schema": {
+							"format": "double",
+							"type": "number"
+						}
+					},
+					{
+						"in": "query",
+						"name": "chainType",
+						"required": false,
+						"schema": {
+							"default": "evm",
+							"type": "string",
+							"enum": [
+								"evm",
+								"stellar"
+							]
+						}
+					}
+				]
+			}
+		},
+		"/gas/recommendation/{chainId}": {
+			"get": {
+				"operationId": "getGasRecommendation",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/EnhancedGasRecommendation"
+								}
+							}
+						}
+					}
+				},
+				"description": "Get gas recommendation for specific priority level",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": [
+					{
+						"in": "path",
+						"name": "chainId",
+						"required": true,
+						"schema": {
+							"format": "double",
+							"type": "number"
+						}
+					},
+					{
+						"in": "query",
+						"name": "chainType",
+						"required": false,
+						"schema": {
+							"default": "evm",
+							"type": "string",
+							"enum": [
+								"evm",
+								"stellar"
+							]
+						}
+					},
+					{
+						"in": "query",
+						"name": "priority",
+						"required": false,
+						"schema": {
+							"default": "medium",
+							"type": "string",
+							"enum": [
+								"low",
+								"medium",
+								"high",
+								"urgent"
+							]
+						}
+					}
+				]
+			}
+		},
+		"/gas/recommendations/{chainId}/all": {
+			"get": {
+				"operationId": "getAllGasRecommendations",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/EnhancedGasRecommendation"
+									},
+									"type": "array"
+								}
+							}
+						}
+					}
+				},
+				"description": "Get all priority level recommendations",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": [
+					{
+						"in": "path",
+						"name": "chainId",
+						"required": true,
+						"schema": {
+							"format": "double",
+							"type": "number"
+						}
+					},
+					{
+						"in": "query",
+						"name": "chainType",
+						"required": false,
+						"schema": {
+							"default": "evm",
+							"type": "string",
+							"enum": [
+								"evm",
+								"stellar"
+							]
+						}
+					}
+				]
+			}
+		},
+		"/gas/predict/{chainId}": {
+			"get": {
+				"operationId": "predictGasPrice",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/GasPredictionResult"
+								}
+							}
+						}
+					}
+				},
+				"description": "Predict gas price for future time horizon",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": [
+					{
+						"in": "path",
+						"name": "chainId",
+						"required": true,
+						"schema": {
+							"format": "double",
+							"type": "number"
+						}
+					},
+					{
+						"in": "query",
+						"name": "chainType",
+						"required": false,
+						"schema": {
+							"default": "evm",
+							"type": "string",
+							"enum": [
+								"evm",
+								"stellar"
+							]
+						}
+					},
+					{
+						"in": "query",
+						"name": "horizon",
+						"required": false,
+						"schema": {
+							"default": 60,
+							"format": "double",
+							"type": "number"
+						}
+					}
+				]
+			}
+		},
+		"/gas/surge/{chainId}": {
+			"get": {
+				"operationId": "isNetworkSurging",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"properties": {
+										"threshold": {
+											"type": "number",
+											"format": "double"
+										},
+										"chainId": {
+											"type": "number",
+											"format": "double"
+										},
+										"surging": {
+											"type": "boolean"
+										}
+									},
+									"required": [
+										"threshold",
+										"chainId",
+										"surging"
+									],
+									"type": "object"
+								}
+							}
+						}
+					}
+				},
+				"description": "Check if network is surging",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": [
+					{
+						"in": "path",
+						"name": "chainId",
+						"required": true,
+						"schema": {
+							"format": "double",
+							"type": "number"
+						}
+					},
+					{
+						"in": "query",
+						"name": "threshold",
+						"required": false,
+						"schema": {
+							"default": 70,
+							"format": "double",
+							"type": "number"
+						}
+					}
+				]
+			}
+		},
+		"/gas/history/{chainId}": {
+			"get": {
+				"operationId": "getGasPriceHistory",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/GasPriceHistoryEntry"
+									},
+									"type": "array"
+								}
+							}
+						}
+					}
+				},
+				"description": "Get gas price history",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": [
+					{
+						"in": "path",
+						"name": "chainId",
+						"required": true,
+						"schema": {
+							"format": "double",
+							"type": "number"
+						}
+					},
+					{
+						"in": "query",
+						"name": "network",
+						"required": false,
+						"schema": {
+							"default": "ethereum",
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "startDate",
+						"required": false,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "endDate",
+						"required": false,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "limit",
+						"required": false,
+						"schema": {
+							"default": 100,
+							"format": "double",
+							"type": "number"
+						}
+					}
+				]
+			}
+		},
+		"/gas/history": {
+			"post": {
+				"operationId": "storeGasPriceHistory",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"properties": {
+										"recorded": {
+											"type": "boolean"
+										}
+									},
+									"required": [
+										"recorded"
+									],
+									"type": "object"
+								}
+							}
+						}
+					}
+				},
+				"description": "Store gas price history entry",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": [],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"properties": {
+									"blockNumber": {
+										"type": "number",
+										"format": "double"
+									},
+									"gasUsed": {
+										"type": "string"
+									},
+									"priorityFeeGwei": {
+										"type": "number",
+										"format": "double"
+									},
+									"baseFeeGwei": {
+										"type": "number",
+										"format": "double"
+									},
+									"chainId": {
+										"type": "number",
+										"format": "double"
+									},
+									"network": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"baseFeeGwei",
+									"chainId",
+									"network"
+								],
+								"type": "object"
+							}
+						}
+					}
+				}
+			}
+		},
+		"/gas/benchmark": {
+			"post": {
+				"operationId": "recordGasBenchmark",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BenchmarkResult"
+								}
+							}
+						}
+					}
+				},
+				"description": "Record accuracy benchmark",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": [],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"properties": {
+									"actualGas": {
+										"type": "string"
+									},
+									"estimatedGas": {
+										"type": "string"
+									},
+									"operation": {
+										"type": "string"
+									},
+									"chainId": {
+										"type": "number",
+										"format": "double"
+									},
+									"network": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"actualGas",
+									"estimatedGas",
+									"operation",
+									"chainId",
+									"network"
+								],
+								"type": "object"
+							}
+						}
+					}
+				}
+			}
+		},
+		"/gas/cache/stats": {
+			"get": {
+				"operationId": "getCacheStats",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/CacheStats"
+								}
+							}
+						}
+					}
+				},
+				"description": "Get cache statistics",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": []
+			}
+		},
+		"/gas/cache": {
+			"delete": {
+				"operationId": "clearCache",
+				"responses": {
+					"200": {
+						"description": "Ok",
+						"content": {
+							"application/json": {
+								"schema": {
+									"properties": {
+										"cleared": {
+											"type": "boolean"
+										}
+									},
+									"required": [
+										"cleared"
+									],
+									"type": "object"
+								}
+							}
+						}
+					}
+				},
+				"description": "Clear cache",
+				"tags": [
+					"Gas"
+				],
+				"security": [],
+				"parameters": []
+			}
+		}
+	},
+	"servers": [
+		{
+			"url": "http://localhost:3001/api/v1",
+			"description": "Development server"
+		},
+		{
+			"url": "https://api.agenticpay.com/api/v1",
+			"description": "Production server"
+		}
+	],
+	"tags": [
+		{
+			"name": "Health",
+			"description": "Service health and readiness checks"
+		},
+		{
+			"name": "Payments",
+			"description": "Payment processing and management"
+		},
+		{
+			"name": "Projects",
+			"description": "Project and milestone management"
+		},
+		{
+			"name": "Gas",
+			"description": "Gas estimation and optimization"
+		},
+		{
+			"name": "Webhooks",
+			"description": "Webhook configuration and management"
+		},
+		{
+			"name": "Auth",
+			"description": "Authentication and authorization"
+		}
+	],
+	"security": [
+		{
+			"bearerAuth": []
+		}
+	]
+}

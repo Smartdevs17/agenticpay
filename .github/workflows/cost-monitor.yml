@@ -1,27 +1,7 @@
 name: Cost Monitor
 
 # ─── Triggers ────────────────────────────────────────────────────────────────
-on:
-  schedule:
-    # Run every Monday at 08:00 UTC — weekly cost snapshot
-    - cron: '0 8 * * 1'
-  # Also run after every CI run on main so bundle-size deltas are always fresh
-  workflow_run:
-    workflows: ['CI']
-    branches: [main]
-    types: [completed]
-  # Manual trigger with configurable alert threshold
-  workflow_dispatch:
-    inputs:
-      alert_threshold_percent:
-        description: 'Alert when this % of monthly limit is consumed (default 80)'
-        required: false
-        default: '80'
-      dry_run:
-        description: 'Print report without creating/updating GitHub Issues'
-        type: boolean
-        required: false
-        default: false
+on: workflow_dispatch
 
 # Only one cost-monitor run at a time
 concurrency:

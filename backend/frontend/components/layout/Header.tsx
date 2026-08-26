@@ -14,9 +14,8 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Bell, LogOut, User, Settings } from 'lucide-react';
 import { toast } from 'sonner';
-
 import { useDisconnect } from 'wagmi';
-import { web3auth } from '@/lib/web3auth';
+import { getWeb3Auth } from '@/lib/web3auth';
 
 export function Header() {
   const { name, email, address, logout } = useAuthStore();
@@ -25,20 +24,28 @@ export function Header() {
 
   const handleLogout = async () => {
     disconnect();
-    if (web3auth) {
-      await web3auth.logout();
+    // Only attempt Web3Auth logout if the SDK was previously loaded and has
+    // an active provider (i.e. user logged in via social, not wallet).
+    const web3auth = await getWeb3Auth();
+    if (web3auth?.provider) {
+      try {
+        await web3auth.logout();
+      } catch {
+        // Ignore logout errors — session may already be expired
+      }
     }
     logout();
     toast.success('Logged out successfully');
     router.push('/auth');
   };
 
-  const initials = name
-    ?.split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2) || 'U';
+  const initials =
+    name
+      ?.split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2) || 'U';
 
   const shortAddress = address
     ? `${address.slice(0, 6)}...${address.slice(-4)}`
@@ -102,4 +109,3 @@ export function Header() {
     </header>
   );
 }
-

@@ -119,6 +119,62 @@ const commands: Record<string, () => void> = {
     run('npx', ['tsx', 'migrations/seed.ts']);
     console.log('[migrate] ✅ Seed complete.');
   },
+
+  /** CI: fail if schema drift or pending migrations would conflict */
+  check() {
+    console.log('[migrate] Validating migration history vs schema…');
+    npx(['prisma', 'migrate', 'status']);
+    npx([
+      'prisma',
+      'migrate',
+      'diff',
+      '--from-migrations',
+      'prisma/migrations',
+      '--to-schema-datamodel',
+      'prisma/schema.prisma',
+      '--exit-code',
+    ]);
+    console.log('[migrate] ✅ No migration conflicts detected.');
+  },
+
+  /** Dev: roll back one migration using down.sql when present */
+  'rollback-one'() {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('rollback-one is blocked in production.');
+      process.exit(1);
+    }
+    const migrations = getAvailableMigrations();
+    const latest = migrations[migrations.length - 1];
+    if (!latest) {
+      console.error('No migrations to roll back.');
+      process.exit(1);
+    }
+    const downPath = join(MIGRATIONS_DIR, latest, 'down.sql');
+    if (!existsSync(downPath)) {
+      console.error(`No down.sql for ${latest}. Use rollback (reset) or add down.sql.`);
+      process.exit(1);
+    }
+    console.log(`[migrate] Applying down migration: ${latest}`);
+    const sql = readFileSync(downPath, 'utf-8');
+    if (!process.env.DATABASE_URL) {
+      console.error('DATABASE_URL required for rollback-one');
+      process.exit(1);
+    }
+    const result = spawnSync('npx', ['prisma', 'db', 'execute', '--stdin'], {
+      cwd: ROOT,
+      input: sql,
+      stdio: ['pipe', 'inherit', 'inherit'],
+      shell: false,
+    });
+    if (result.status !== 0) {
+      throw new Error('down.sql execution failed');
+    }
+    const state = readState();
+    state.migrations = migrations.slice(0, -1);
+    state.appliedAt = new Date().toISOString();
+    writeState(state);
+    console.log('[migrate] ✅ rollback-one complete.');
+  },
 };
 
 const command = process.argv[2];
@@ -131,7 +187,9 @@ Usage: npx tsx migrations/runner.ts <command>
 Commands:
   deploy               Apply all pending migrations (safe for CI/CD)
   status               Show current migration status
-  rollback             Roll back to previous migration (dev only)
+  rollback             Roll back to previous migration (dev only, destructive reset)
+  rollback-one         Apply down.sql for latest migration (dev only)
+  check                CI validation — detect schema/migration drift
   reset                Reset database and re-run all migrations (dev only)
   generate             Regenerate Prisma client from schema
   create-migration     Create a new migration: create-migration <name>

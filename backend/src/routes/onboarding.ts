@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { OnboardingService } from '../services/onboarding.js';
+import { OnboardingAnalyticsService } from '../services/onboardingAnalytics.js';
 import { validate } from '../middleware/validate.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import {
@@ -149,4 +150,49 @@ onboardingRouter.get(
       count: onboardings.length,
     });
   })
+);
+
+// ─── Analytics endpoints (Issue #591) ────────────────────────────────────────
+
+// Record / update an onboarding session from frontend
+onboardingRouter.post(
+  '/analytics/session',
+  asyncHandler(async (req, res) => {
+    const session = OnboardingAnalyticsService.upsertSession(req.body);
+    res.status(200).json({ success: true, data: session });
+  }),
+);
+
+// Get analytics summary
+onboardingRouter.get(
+  '/analytics/summary',
+  asyncHandler(async (_req, res) => {
+    const summary = OnboardingAnalyticsService.getSummary();
+    res.status(200).json({ success: true, data: summary });
+  }),
+);
+
+// List sessions
+onboardingRouter.get(
+  '/analytics/sessions',
+  asyncHandler(async (req, res) => {
+    const { role, variant } = req.query as { role?: string; variant?: string };
+    const sessionList = OnboardingAnalyticsService.listSessions({
+      role: role as any,
+      variant: variant as any,
+    });
+    res.status(200).json({ success: true, data: sessionList, count: sessionList.length });
+  }),
+);
+
+// Get single session
+onboardingRouter.get(
+  '/analytics/sessions/:sessionId',
+  asyncHandler(async (req, res) => {
+    const session = OnboardingAnalyticsService.getSession(req.params.sessionId);
+    if (!session) {
+      throw new AppError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    }
+    res.status(200).json({ success: true, data: session });
+  }),
 );
