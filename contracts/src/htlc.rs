@@ -72,7 +72,7 @@ pub fn claim_lock(env: &Env, lock_id: u64, secret: BytesN<32>) {
         "Timelock has expired"
     );
 
-    let computed_hash = env.crypto().sha256(&secret);
+    let computed_hash: BytesN<32> = env.crypto().sha256(&secret.clone().into()).into();
     assert!(computed_hash == lock.hashlock, "Invalid secret");
 
     lock.status = HtlcStatus::Claimed;

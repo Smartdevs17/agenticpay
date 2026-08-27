@@ -4,7 +4,7 @@ import { z } from 'zod';
 dotenv.config();
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'staging', 'production']).default('development'),
+  NODE_ENV: z.enum(['development', 'staging', 'production', 'test']).default('development'),
   PORT: z.string().default('3001'),
   CORS_ALLOWED_ORIGINS: z.string().default('*'),
   JOBS_ENABLED: z.enum(['true', 'false']).default('true'),
@@ -15,6 +15,14 @@ const envSchema = z.object({
   RATE_LIMIT_ENTERPRISE: z.string().default('1000'),
   RATE_LIMIT_WINDOW_MS: z.string().default(String(15 * 60 * 1000)),
   COMPRESSION_THRESHOLD: z.string().default('1024'),
+  DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/agenticpay'),
+  PGBOUNCER_ENABLED: z.enum(['true', 'false']).default('false'),
+  DB_POOL_MIN: z.string().default('2'),
+  DB_POOL_MAX: z.string().default('10'),
+  DB_POOL_IDLE_TIMEOUT_MS: z.string().default('10000'),
+  DB_POOL_ACQUIRE_TIMEOUT_MS: z.string().default('30000'),
+  DB_POOL_MAX_USES: z.string().default('7500'),
+  DB_STATEMENT_TIMEOUT_MS: z.string().default('30000'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -54,6 +62,20 @@ export const config = {
   },
   compression: {
     threshold: Number(env.COMPRESSION_THRESHOLD),
+  },
+  db: {
+    url: env.DATABASE_URL,
+    pgbouncer: {
+      enabled: env.PGBOUNCER_ENABLED === 'true',
+    },
+    pool: {
+      min: Number(env.DB_POOL_MIN),
+      max: Number(env.DB_POOL_MAX),
+      idleTimeoutMs: Number(env.DB_POOL_IDLE_TIMEOUT_MS),
+      acquireTimeoutMs: Number(env.DB_POOL_ACQUIRE_TIMEOUT_MS),
+      maxUses: Number(env.DB_POOL_MAX_USES),
+      statementTimeoutMs: Number(env.DB_STATEMENT_TIMEOUT_MS),
+    },
   },
 } as const;
 

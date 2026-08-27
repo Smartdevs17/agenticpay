@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, symbol_short, Address, BytesN, Env, String, Vec};
+pub use soroban_sdk::{contracttype, symbol_short, Address, Bytes, BytesN, Env, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -57,6 +57,7 @@ pub enum DataKey {
     HtlcCount,
     HtlcLock(u64),
     BridgeConfig,
+    V2(crate::storage::StorageKey),
 }
 
 #[contracttype]

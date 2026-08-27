@@ -1,5 +1,3 @@
-#![no_std]
-
 use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
 
 // ---------------------------------------------------------------------------
@@ -222,5 +220,42 @@ pub mod migration {
         for id in 1..=count {
             migrate_project_v1_to_v2(env, id);
         }
+    }
+
+    #[test]
+    fn test_lazy_value_operations() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, crate::AgenticPayContract);
+
+        env.as_contract(&contract_id, || {
+            let lazy_lock = LazyValue::new(LazyKey::ReentrancyLock, false);
+
+            // Before init, get returns default false without writing
+            assert_eq!(lazy_lock.get(&env), false);
+
+            // get_or_init returns default and initializes
+            assert_eq!(lazy_lock.get_or_init(&env), false);
+
+            // Set to true
+            lazy_lock.set(&env, &true);
+            assert_eq!(lazy_lock.get(&env), true);
+        });
+    }
+
+    #[test]
+    fn test_approval_bitmap_operations() {
+        let mut bitmap = ApprovalBitmap::new();
+        assert_eq!(bitmap.has_approved(0), false);
+        assert_eq!(bitmap.has_rejected(0), false);
+
+        bitmap.approve(0);
+        bitmap.approve(5);
+        bitmap.reject(2);
+
+        assert_eq!(bitmap.has_approved(0), true);
+        assert_eq!(bitmap.has_approved(5), true);
+        assert_eq!(bitmap.has_approved(1), false);
+        assert_eq!(bitmap.has_rejected(2), true);
+        assert_eq!(bitmap.has_rejected(0), false);
     }
 }

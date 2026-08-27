@@ -15,7 +15,7 @@ pub fn create_wallet(
     assert!(signers.len() >= 2, "At least 2 signers required");
     assert!(threshold >= 1, "Threshold must be at least 1");
     assert!(
-        threshold as usize <= signers.len(),
+        threshold <= signers.len(),
         "Threshold cannot exceed number of signers"
     );
 
@@ -132,7 +132,7 @@ pub fn remove_signer(
     let new_len = wallet.signers.len() - 1;
     assert!(new_len >= 2, "Cannot reduce below 2 signers");
     assert!(
-        wallet.threshold as usize <= new_len,
+        wallet.threshold <= new_len,
         "Removal would make threshold unreachable"
     );
 

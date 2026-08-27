@@ -10,223 +10,12 @@ pub mod escrow;
 pub mod dispute;
 pub mod multisig;
 pub mod htlc;
+pub mod storage;
 
-pub use common::{
-    BridgeConfigData, DataKey, HtlcLock, HtlcLockInput, HtlcStatus, MultisigProposal, MultisigProposalStatus,
-    MultisigWallet, Project, ProjectInput, ProjectStatus, Receipt,
-mod storage;
-use storage::{
+pub use common::*;
+pub use storage::{
     ApprovalBitmap, LazyKey, LazyValue, ProjectV2, ProjectStatusV2, StorageKey,
 };
-
-// ---------------------------------------------------------------------------
-// Multi-signature wallet types
-// ---------------------------------------------------------------------------
-
-/// On-chain status for a multisig transaction proposal.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum MultisigProposalStatus {
-    Pending,
-    Executed,
-    Rejected,
-    Expired,
-    Cancelled,
-}
-
-/// A multisig wallet configuration stored on-chain.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct MultisigWallet {
-    /// Unique wallet id (same as the storage counter key).
-    pub id: u64,
-    /// Ordered list of signer addresses.
-    pub signers: Vec<Address>,
-    /// Minimum number of approvals needed to execute a proposal.
-    pub threshold: u32,
-    /// Ledger timestamp after which new proposals auto-expire (0 = no timeout).
-    pub timeout_ledgers: u64,
-    /// Whether the wallet is active.
-    pub active: bool,
-}
-
-/// An on-chain multisig transaction proposal.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct MultisigProposal {
-    pub id: u64,
-    pub wallet_id: u64,
-    /// Amount in stroops (or smallest denomination).
-    pub amount: i128,
-    pub recipient: Address,
-    pub description: String,
-    pub status: MultisigProposalStatus,
-    /// Addresses that have approved this proposal.
-    pub approvals: Vec<Address>,
-    /// Addresses that have rejected this proposal.
-    pub rejections: Vec<Address>,
-    pub created_at: u64,
-    /// Ledger timestamp at which the proposal expires (0 = never).
-    pub expires_at: u64,
-}
-
-#[contracttype]
-pub enum MultisigDataKey {
-    WalletCount,
-    Wallet(u64),
-    ProposalCount,
-    Proposal(u64),
-}
-
-// ---------------------------------------------------------------------------
-// Reentrancy guard key
-// ---------------------------------------------------------------------------
-// Soroban's execution model is single-threaded and does not allow re-entrant
-// calls into the same contract instance within a single transaction. However,
-// cross-contract calls can still create logical reentrancy if state is not
-// committed before the call. We enforce the checks-effects-interactions (CEI)
-// pattern throughout and additionally maintain an explicit reentrancy latch in
-// instance storage so that any future cross-contract path is blocked.
-//
-// The latch is stored under `DataKey::ReentrancyLock` and is set to `true`
-// while a mutative function body is executing. Any re-entrant call that
-// reaches the `_acquire_lock` helper will panic with "reentrant call".
-// ---------------------------------------------------------------------------
-
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum ProjectStatus {
-    Created,
-    Funded,
-    InProgress,
-    WorkSubmitted,
-    Verified,
-    Completed,
-    Disputed,
-    Cancelled,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct Project {
-    pub id: u64,
-    pub client: Address,
-    pub freelancer: Address,
-    pub amount: i128,
-    pub deposited: i128,
-    pub status: ProjectStatus,
-    pub github_repo: String,
-    pub description: String,
-    pub created_at: u64,
-    /// Unix timestamp deadline. 0 means no deadline.
-    pub deadline: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct Receipt {
-    pub id: u64,
-    pub project_id: u64,
-    pub amount: i128,
-    pub currency: String,
-    pub sender: Address,
-    pub recipient: Address,
-    pub timestamp: u64,
-}
-
-#[contracttype]
-pub enum DataKey {
-    Project(u64),
-    ProjectCount,
-    Receipt(u64),
-    ReceiptCount,
-    Admin,
-    Metadata(String),
-    /// Reentrancy latch: `true` while a mutative function is executing.
-    ReentrancyLock,
-    /// Emergency circuit breaker: `true` means the contract is paused.
-    Paused,
-    // Multisig wallet storage
-    MultisigWalletCount,
-    MultisigWallet(u64),
-    MultisigProposalCount,
-    MultisigProposal(u64),
-    // HTLC bridge storage
-    HtlcCount,
-    HtlcLock(u64),
-    BridgeConfig,
-    // ---- Gas-optimised v2 storage keys (StorageKey enum in storage.rs) ----
-    V2(StorageKey),
-}
-
-// ---------------------------------------------------------------------------
-// HTLC (Hash Time-Lock Contract) bridge types
-// ---------------------------------------------------------------------------
-
-/// Status of an HTLC lock on the Stellar side.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum HtlcStatus {
-    Pending,
-    Claimed,
-    Refunded,
-}
-
-/// An HTLC lock for cross-chain atomic swaps between Stellar and EVM.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct HtlcLock {
-    pub id: u64,
-    pub sender: Address,
-    pub recipient: Address,
-    pub amount: i128,
-    /// SHA-256 hash of the secret (32 bytes).
-    pub hashlock: BytesN<32>,
-    /// Ledger timestamp after which the sender can reclaim.
-    pub timelock: u64,
-    /// Additional dispute window in ledgers after timelock.
-    pub dispute_window: u64,
-    pub status: HtlcStatus,
-    /// Chain identifier of the counterparty (e.g. "ethereum-mainnet").
-    pub target_chain: String,
-    /// Hex-encoded lock ID on the target chain for cross-referencing.
-    pub target_lock_id: String,
-    pub created_at: u64,
-    pub claimed_at: u64,
-    pub refunded_at: u64,
-}
-
-/// Global bridge configuration.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct BridgeConfigData {
-    pub fee_bps: u32,
-    pub fee_collector: Address,
-    pub paused: bool,
-}
-
-/// Input parameters for creating an HTLC lock.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct HtlcLockInput {
-    pub recipient: Address,
-    pub amount: i128,
-    pub hashlock: BytesN<32>,
-    pub timelock: u64,
-    pub dispute_window: u64,
-    pub target_chain: String,
-    pub target_lock_id: String,
-}
-
-/// Input parameters for batch project creation.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct ProjectInput {
-    pub freelancer: Address,
-    pub amount: i128,
-    pub description: String,
-    pub github_repo: String,
-}
 
 #[contract]
 pub struct AgenticPayContract;
@@ -1605,7 +1394,7 @@ impl AgenticPayContract {
         );
 
         // Verify the secret matches the hashlock (SHA-256).
-        let computed_hash = env.crypto().sha256(&secret);
+        let computed_hash: BytesN<32> = env.crypto().sha256(&secret.clone().into()).into();
         assert!(computed_hash == lock.hashlock, "Invalid secret");
 
         lock.status = HtlcStatus::Claimed;
@@ -1984,7 +1773,7 @@ mod test {
         let contract_id = env.register_contract(None, AgenticPayContract);
         let client = AgenticPayContractClient::new(&env, &contract_id);
 
-        assert_eq!(client.version(), 1);
+        assert_eq!(client.version(), 2);
     }
 
     #[test]
@@ -2253,7 +2042,7 @@ mod test {
         client.init_bridge_config(&admin, &30, &admin);
 
         let secret: BytesN<32> = BytesN::from_array(&env, &[42u8; 32]);
-        let hashlock = env.crypto().sha256(&secret);
+        let hashlock: BytesN<32> = env.crypto().sha256(&secret.clone().into()).into();
 
         let lock_id = client.create_htlc_lock(
             &sender,
@@ -2296,7 +2085,7 @@ mod test {
         client.init_bridge_config(&admin, &30, &admin);
 
         let secret: BytesN<32> = BytesN::from_array(&env, &[42u8; 32]);
-        let hashlock = env.crypto().sha256(&secret);
+        let hashlock: BytesN<32> = env.crypto().sha256(&secret.clone().into()).into();
 
         let timelock = env.ledger().timestamp() + 10;
         let lock_id = client.create_htlc_lock(
@@ -2340,7 +2129,7 @@ mod test {
         client.init_bridge_config(&admin, &30, &admin);
 
         let secret: BytesN<32> = BytesN::from_array(&env, &[42u8; 32]);
-        let hashlock = env.crypto().sha256(&secret);
+        let hashlock: BytesN<32> = env.crypto().sha256(&secret.clone().into()).into();
 
         let lock_id = client.create_htlc_lock(
             &sender,
