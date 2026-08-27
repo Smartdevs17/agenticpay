@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { BaseService } from './BaseService.js';
 import type { Result } from '../lib/result.js';
+import { createGdprRequest, updateGdprRequestStatus } from './gdpr.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ export interface ExportJob {
   anonymise: boolean;
   /** GDPR "right to portability" flag */
   isGdprRequest: boolean;
+  /** Linked GdprRequest.id when isGdprRequest is set, so the 30-day SLA is tracked */
+  gdprRequestId?: string;
   downloadUrl?: string;
   fileSizeBytes?: number;
   rowCount?: number;
@@ -156,6 +159,13 @@ export class DataExportService extends BaseService {
       scheduledExportId: input.scheduledExportId,
     };
 
+    // A GDPR data-portability export must be tracked under the same
+    // 30-day SLA as any other data subject request, not just as a job.
+    if (job.isGdprRequest) {
+      const gdprRequest = createGdprRequest(input.userId, 'portability', input.userId, `export:${id}`);
+      job.gdprRequestId = gdprRequest.id;
+    }
+
     exportJobs.set(id, job);
 
     const set = byUser.get(input.userId) ?? new Set<string>();
@@ -205,6 +215,10 @@ export class DataExportService extends BaseService {
     job.rowCount = result.rowCount;
     job.completedAt = new Date().toISOString();
     exportJobs.set(jobId, job);
+
+    if (job.gdprRequestId) {
+      updateGdprRequestStatus(job.gdprRequestId, 'completed', 'system');
+    }
 
     this.addAudit({
       userId: job.userId,
@@ -272,10 +286,23 @@ export class DataExportService extends BaseService {
   toCSV(records: Record<string, unknown>[]): string {
     if (records.length === 0) return '';
     const headers = Object.keys(records[0]);
-    const rows = records.map((r) =>
-      headers.map((h) => JSON.stringify(r[h] ?? '')).join(','),
-    );
-    return [headers.join(','), ...rows].join('\n');
+
+    const escapeCell = (value: unknown): string => {
+      const raw = value === null || value === undefined
+        ? ''
+        : typeof value === 'object'
+          ? JSON.stringify(value)
+          : String(value);
+      // RFC 4180: quote any field containing a comma, quote, or newline,
+      // doubling embedded quotes.
+      if (/[",\n\r]/.test(raw)) {
+        return `"${raw.replace(/"/g, '""')}"`;
+      }
+      return raw;
+    };
+
+    const rows = records.map((r) => headers.map((h) => escapeCell(r[h])).join(','));
+    return [headers.map(escapeCell).join(','), ...rows].join('\r\n');
   }
 
   // ── Scheduled export management ───────────────────────────────────────────
