@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { commentService } from './comments.js';
 
 export type MilestoneDependencyStatus = 'pending' | 'in_progress' | 'blocked' | 'completed' | 'overdue';
 
@@ -105,6 +106,18 @@ export class MilestoneDependencyService {
         updated.push(dep);
       }
     }
+
+    if (updated.length > 0) {
+      commentService.logActivity(projectId, {
+        type: 'milestone_updated',
+        actorId: 'system',
+        actorName: 'System',
+        targetId: milestoneId,
+        targetType: 'milestone',
+        payload: { unblockedDependencyIds: updated.map((d) => d.id) },
+      });
+    }
+
     return updated;
   }
 

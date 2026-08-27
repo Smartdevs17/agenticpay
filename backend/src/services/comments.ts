@@ -366,6 +366,15 @@ export class CommentService extends BaseService {
 
   // ── Activity feed ─────────────────────────────────────────────────────────
 
+  /**
+   * Record an activity event from outside the comment flow (e.g. milestone
+   * status changes, membership changes) so those show up in the same
+   * project activity feed as comments/reactions.
+   */
+  logActivity(projectId: string, event: Omit<ActivityEvent, 'id' | 'createdAt' | 'projectId'>): void {
+    addActivity(projectId, { ...event, projectId });
+  }
+
   getActivityFeed(projectId: string, limit = 50): ActivityEvent[] {
     const events = activityFeed.get(projectId) ?? [];
     return events.slice(-limit).reverse();
