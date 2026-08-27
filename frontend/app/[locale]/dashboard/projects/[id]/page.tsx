@@ -23,6 +23,8 @@ import { MarkdownContent } from '@/components/markdown/MarkdownContent';
 import { CopyButton } from '@/components/ui/copy-button';
 import { parseEther } from 'viem';
 import { generateICS, downloadICS } from '@/lib/generateICS';
+import { CommentThread } from '@/components/collaboration/CommentThread';
+import { ActivityFeed } from '@/components/collaboration/ActivityFeed';
 
 type PendingTransaction = {
   functionName: string;
@@ -38,6 +40,7 @@ export default function ProjectDetailPage() {
   const projectId = params.id as string;
   const { address } = useAccount();
   const timezone = useAuthStore((state) => state.timezone);
+  const userName = useAuthStore((state) => state.name);
 
   const { useProjectDetail, prepareTransaction, isPending, isConfirming, isConfirmed, error, arbitrator } = useAgenticPay();
   const { project, loading, refetch } = useProjectDetail(projectId);
@@ -388,6 +391,34 @@ export default function ProjectDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {address && (
+        <div className="grid md:grid-cols-2 gap-6 mt-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>Discussion</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CommentThread
+                projectId={project.id}
+                targetType="project"
+                targetId={project.id}
+                currentUserId={address}
+                currentUserName={userName || `${address.slice(0, 6)}...${address.slice(-4)}`}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Activity</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ActivityFeed projectId={project.id} currentUserId={address} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <Card className="mt-8 border-yellow-200 bg-yellow-50">
         <CardHeader>
