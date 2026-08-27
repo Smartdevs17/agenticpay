@@ -9,6 +9,7 @@ import { EscrowApi, DisputesApi } from './escrow.js';
 import { InvoicesApi } from './invoices.js';
 import { StellarApi } from './stellar.js';
 import { SandboxApi } from './sandbox.js';
+import { WalletApi } from './wallet.js';
 import { AgenticPayClientOptions } from './types.js';
 
 export * from './types.js';
@@ -20,6 +21,7 @@ export * from './escrow.js';
 export * from './invoices.js';
 export * from './stellar.js';
 export * from './sandbox.js';
+export * from './wallet.js';
 
 
 export class AgenticPaySDK {
@@ -34,6 +36,7 @@ export class AgenticPaySDK {
   readonly invoices: InvoicesApi;
   readonly stellar: StellarApi;
   readonly sandbox: SandboxApi;
+  readonly wallet: WalletApi;
 
   constructor(options: AgenticPayClientOptions, authProvider?: AuthProvider) {
     this.client = new AgenticPayClient(options);
@@ -60,6 +63,7 @@ export class AgenticPaySDK {
     this.invoices = new InvoicesApi(this.client);
     this.stellar = new StellarApi(this.client);
     this.sandbox = new SandboxApi(this.client);
+    this.wallet = new WalletApi(this.client);
   }
 
 }
