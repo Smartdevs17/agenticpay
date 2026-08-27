@@ -39,6 +39,12 @@ import { taxReportingRouter } from './routes/tax-reporting.js';
 import { auditMiddleware } from './middleware/audit.js';
 import { apiKeysRouter } from './routes/api-keys.js';
 import { milestonesRouter } from './routes/milestones.js';
+import { walletRouter } from './routes/wallet.js';
+import { gdprRouter } from './routes/gdpr.js';
+import dataExportRouter from './routes/dataExport.js';
+import securityRouter from './routes/security.js';
+import commentsRouter from './routes/comments.js';
+import collaborationRouter from './routes/collaboration.js';
 
 dotenv.config();
 
@@ -266,6 +272,18 @@ apiV1Router.use('/push', pushRouter);
 apiV1Router.use('/stripe', stripeRouter);
 // Automated tax reporting, export, and calendar — Issues #690–#693
 apiV1Router.use('/tax-reporting', taxReportingRouter);
+// Cross-chain wallet abstraction & unified balance aggregation — Issue #711
+apiV1Router.use('/wallet', walletRouter);
+// GDPR data subject rights: erasure, portability, consent, retention — Issue #713
+apiV1Router.use('/gdpr', gdprRouter);
+// GDPR-aware data export jobs & scheduling — Issue #713
+apiV1Router.use('/data-export', dataExportRouter);
+// Automated security scanning findings & remediation tracking — Issue #712
+apiV1Router.use('/security', securityRouter);
+// Project collaboration: threaded comments, reactions, activity feed — Issue #714
+apiV1Router.use('/comments', commentsRouter);
+// Real-time collaboration: presence, field locks, edit history — Issue #714
+apiV1Router.use('/collaboration', collaborationRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);
