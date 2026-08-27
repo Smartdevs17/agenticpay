@@ -87,9 +87,11 @@ export default function ExportPage() {
   const [exports, setExports] = useState<ExportJob[]>([]);
   const [schedules, setSchedules] = useState<ScheduledExport[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"exports" | "schedules">("exports");
+  const [activeTab, setActiveTab] = useState<"exports" | "schedules" | "privacy">("exports");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [erasing, setErasing] = useState(false);
+  const [erasureConfirm, setErasureConfirm] = useState("");
 
   // New export form
   const [newFormat, setNewFormat] = useState<ExportFormat>("json");
@@ -194,6 +196,28 @@ export default function ExportPage() {
     }
   };
 
+  const handleRequestErasure = async () => {
+    if (erasureConfirm !== "DELETE") return;
+    if (!confirm("This permanently erases your personal data. This cannot be undone. Continue?")) return;
+    setErasing(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/gdpr/erasure/${demoUserId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ performedBy: demoUserId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message ?? "Failed to submit erasure request");
+      setSuccess("Your data erasure request has been submitted and processed.");
+      setErasureConfirm("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to submit erasure request");
+    } finally {
+      setErasing(false);
+    }
+  };
+
   const handleToggleScope = (
     scope: ExportScope,
     current: ExportScope[],
@@ -244,7 +268,7 @@ export default function ExportPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
-        {(["exports", "schedules"] as const).map((tab) => (
+        {(["exports", "schedules", "privacy"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -535,6 +559,40 @@ export default function ExportPage() {
               ))
             )}
           </div>
+        </div>
+      )}
+
+      {/* Privacy / GDPR erasure tab */}
+      {activeTab === "privacy" && (
+        <div className="max-w-lg">
+          <Card className="p-4 space-y-4 border-red-200">
+            <div>
+              <h2 className="font-semibold text-red-700">Right to Erasure</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Under GDPR Article 17, you can request permanent deletion of your
+                personal data. This action is irreversible and is logged in the
+                GDPR audit trail with a 30-day processing deadline.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">
+                Type DELETE to confirm
+              </label>
+              <Input
+                value={erasureConfirm}
+                onChange={(e) => setErasureConfirm(e.target.value)}
+                placeholder="DELETE"
+                className="text-sm"
+              />
+            </div>
+            <Button
+              onClick={handleRequestErasure}
+              disabled={erasing || erasureConfirm !== "DELETE"}
+              className="w-full bg-red-600 hover:bg-red-700"
+            >
+              {erasing ? "Submitting…" : "Erase My Data"}
+            </Button>
+          </Card>
         </div>
       )}
     </div>
