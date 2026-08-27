@@ -100,6 +100,14 @@ jobs:
           path: ${{ env.SECURITY_REPORT_DIR }}/
           retention-days: 30
 
+      - name: Publish findings to security dashboard
+        if: always()
+        continue-on-error: true
+        env:
+          SECURITY_API_URL: ${{ secrets.SECURITY_API_URL }}
+          SECURITY_API_TOKEN: ${{ secrets.SECURITY_API_TOKEN }}
+        run: node scripts/security/publish-findings.mjs smart_contract
+
       - name: Fail on Critical Findings
         if: steps.parse_slither.outputs.slither_high_findings == 'true'
         run: |
@@ -179,6 +187,14 @@ jobs:
           name: mythril-reports
           path: ${{ env.SECURITY_REPORT_DIR }}/
           retention-days: 30
+
+      - name: Publish findings to security dashboard
+        if: always()
+        continue-on-error: true
+        env:
+          SECURITY_API_URL: ${{ secrets.SECURITY_API_URL }}
+          SECURITY_API_TOKEN: ${{ secrets.SECURITY_API_TOKEN }}
+        run: node scripts/security/publish-findings.mjs smart_contract
 
   # ── Property-Based Testing ─────────────────────────────────────────────────
   property-tests:

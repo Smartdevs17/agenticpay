@@ -209,6 +209,14 @@ jobs:
           path: ${{ env.SECURITY_REPORT_DIR }}/
           retention-days: 30
 
+      - name: Publish findings to security dashboard
+        if: always()
+        continue-on-error: true
+        env:
+          SECURITY_API_URL: ${{ secrets.SECURITY_API_URL }}
+          SECURITY_API_TOKEN: ${{ secrets.SECURITY_API_TOKEN }}
+        run: node scripts/security/publish-findings.mjs dependency
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Job 3 — DAST: OWASP ZAP baseline scan
 # ─────────────────────────────────────────────────────────────────────────────
@@ -331,6 +339,14 @@ jobs:
           retention-days: 30
         continue-on-error: true
 
+      - name: Publish findings to security dashboard
+        if: always()
+        continue-on-error: true
+        env:
+          SECURITY_API_URL: ${{ secrets.SECURITY_API_URL }}
+          SECURITY_API_TOKEN: ${{ secrets.SECURITY_API_TOKEN }}
+        run: node scripts/security/publish-findings.mjs smart_contract
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Job 5 — Aggregate & report
 # ─────────────────────────────────────────────────────────────────────────────
@@ -360,7 +376,9 @@ jobs:
           echo "| SAST | ${{ needs.sast.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dependency Scan | ${{ needs.dependency-scan.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Full reports available as workflow artifacts." >> $GITHUB_STEP_SUMMARY
+          echo "Full reports available as workflow artifacts. Findings with remediation" >> $GITHUB_STEP_SUMMARY
+          echo "status/assignee tracking are published to the Security dashboard when" >> $GITHUB_STEP_SUMMARY
+          echo "\`SECURITY_API_URL\` is configured for this repo." >> $GITHUB_STEP_SUMMARY
 
       - name: Comment on PR
         if: github.event_name == 'pull_request'
