@@ -96,6 +96,14 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+const REMEDIATION_STATUSES: VulnerabilityStatus[] = [
+  "open",
+  "in_progress",
+  "resolved",
+  "accepted",
+  "false_positive",
+];
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SecurityPage() {
@@ -107,6 +115,8 @@ export default function SecurityPage() {
   const [filterSeverity, setFilterSeverity] = useState<VulnerabilitySeverity | "all">("all");
   const [filterStatus, setFilterStatus] = useState<VulnerabilityStatus | "all">("all");
   const [error, setError] = useState<string | null>(null);
+  const [assigneeDrafts, setAssigneeDrafts] = useState<Record<string, string>>({});
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -137,6 +147,45 @@ export default function SecurityPage() {
     if (filterStatus !== "all" && v.status !== filterStatus) return false;
     return true;
   });
+
+  const handleUpdateStatus = async (id: string, status: VulnerabilityStatus) => {
+    setUpdatingId(id);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/security/vulnerabilities/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error("Failed to update status");
+      await fetchData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update status");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleAssign = async (id: string) => {
+    const assignee = assigneeDrafts[id]?.trim();
+    if (!assignee) return;
+    setUpdatingId(id);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/security/vulnerabilities/${id}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedTo: assignee }),
+      });
+      if (!res.ok) throw new Error("Failed to assign vulnerability");
+      setAssigneeDrafts((prev) => ({ ...prev, [id]: "" }));
+      await fetchData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to assign vulnerability");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
 
   const openCritical = vulns.filter((v) => v.severity === "critical" && v.status === "open").length;
   const openHigh = vulns.filter((v) => v.severity === "high" && v.status === "open").length;
@@ -338,6 +387,38 @@ export default function SecurityPage() {
                     <p className="text-xs text-blue-600 mt-1.5">
                       💡 {v.remediation}
                     </p>
+
+                    {/* Remediation controls */}
+                    <div className="flex flex-wrap items-center gap-2 mt-3 pt-2 border-t border-gray-100">
+                      <select
+                        value={v.status}
+                        disabled={updatingId === v.id}
+                        onChange={(e) => handleUpdateStatus(v.id, e.target.value as VulnerabilityStatus)}
+                        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-600"
+                      >
+                        {REMEDIATION_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {s.replace("_", " ")}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Assign to…"
+                        value={assigneeDrafts[v.id] ?? ""}
+                        onChange={(e) =>
+                          setAssigneeDrafts((prev) => ({ ...prev, [v.id]: e.target.value }))
+                        }
+                        className="text-xs border border-gray-200 rounded-md px-2 py-1 w-28"
+                      />
+                      <button
+                        onClick={() => handleAssign(v.id)}
+                        disabled={updatingId === v.id || !assigneeDrafts[v.id]?.trim()}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-40"
+                      >
+                        Assign
+                      </button>
+                    </div>
                   </div>
                   <Badge className="text-xs bg-gray-100 text-gray-500 capitalize shrink-0">
                     {v.scanType.replace("_", " ")}
