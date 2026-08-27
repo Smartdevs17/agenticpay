@@ -40,6 +40,39 @@ export interface ConnectedWallet {
   isActive: boolean;
 }
 
+/**
+ * Chain-agnostic contract a wallet connector implements (EVM injected/
+ * WalletConnect, Stellar Freighter, etc.) so the store and UI can treat
+ * every chain the same way instead of branching on `chainType`.
+ */
+export interface WalletAdapter {
+  readonly chainType: SupportedChain;
+  readonly providerName: string;
+  isAvailable(): boolean;
+  connect(): Promise<{ address: string }>;
+  disconnect(): Promise<void>;
+  getAddress(): string | null;
+}
+
+const adapterRegistry = new Map<string, WalletAdapter>();
+
+function adapterKey(chainType: SupportedChain, providerName: string): string {
+  return `${chainType}:${providerName}`;
+}
+
+/** Register a wallet adapter so `connectWithAdapter` can find it later. */
+export function registerWalletAdapter(adapter: WalletAdapter): void {
+  adapterRegistry.set(adapterKey(adapter.chainType, adapter.providerName), adapter);
+}
+
+export function getWalletAdapter(chainType: SupportedChain, providerName: string): WalletAdapter | undefined {
+  return adapterRegistry.get(adapterKey(chainType, providerName));
+}
+
+export function listWalletAdapters(): WalletAdapter[] {
+  return Array.from(adapterRegistry.values());
+}
+
 export interface TransactionRecord {
   hash: string;
   status: TxStatus;
@@ -85,6 +118,7 @@ interface Web3Actions {
   setActiveChain: (chain: SupportedChain | null) => void;
   setAggregatedBalance: (balance: AggregatedWalletState) => void;
   fetchAggregatedBalance: (userId: string) => Promise<void>;
+  connectWithAdapter: (chainType: SupportedChain, providerName: string) => Promise<ConnectedWallet>;
 }
 
 export type Web3Store = Web3State & Web3Actions;
@@ -310,6 +344,35 @@ export const useWeb3Store = create<Web3Store>()(
                 'web3/fetchAggregatedBalance/error',
               );
             }
+          },
+
+          connectWithAdapter: async (chainType, providerName) => {
+            const adapter = getWalletAdapter(chainType, providerName);
+            if (!adapter) {
+              throw new Error(`No wallet adapter registered for ${chainType}/${providerName}`);
+            }
+            if (!adapter.isAvailable()) {
+              throw new Error(`${providerName} is not available for ${chainType}`);
+            }
+            const { address } = await adapter.connect();
+            const wallet: ConnectedWallet = {
+              id: `${chainType}-${address}`,
+              chainType,
+              address,
+              providerName,
+              isActive: true,
+            };
+            set(
+              (state) => ({
+                connectedWallets: [
+                  ...state.connectedWallets.filter((w) => w.id !== wallet.id),
+                  wallet,
+                ],
+              }),
+              false,
+              'web3/connectWithAdapter',
+            );
+            return wallet;
           },
         }),
         {
