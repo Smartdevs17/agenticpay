@@ -1,7 +1,10 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
+import { applyEnvironmentFileDefaults } from './config/environments/index.js';
 
 dotenv.config();
+// Apply environment-specific defaults before validation (environment file < process.env)
+applyEnvironmentFileDefaults();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'staging', 'production', 'test']).default('development'),

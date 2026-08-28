@@ -34,7 +34,7 @@ export interface PerformanceMetrics {
   timestamp: string;
 }
 
-class PerformanceMonitor {
+export class PerformanceMonitor {
   private vitals: CoreWebVitals = {};
   private startTime = performance.now();
   private reportedMetrics = false;
@@ -77,7 +77,7 @@ class PerformanceMonitor {
     window.addEventListener("unload", () => this.reportMetrics());
 
     // Also report on page navigation
-    if ("PerformanceObserver" in window) {
+    if (typeof window !== 'undefined' && typeof PerformanceObserver !== 'undefined') {
       try {
         const navObserver = new PerformanceObserver((list) => {
           for (const entry of list.getEntries()) {
@@ -95,7 +95,7 @@ class PerformanceMonitor {
    * Track Largest Contentful Paint
    */
   private trackLCP(): void {
-    if ("PerformanceObserver" in window && "LargestContentfulPaint" in window) {
+    if (typeof window !== 'undefined' && typeof PerformanceObserver !== 'undefined' && typeof (window as any).LargestContentfulPaint !== 'undefined') {
       try {
         const observer = new PerformanceObserver((list) => {
           const entries = list.getEntries();
@@ -119,7 +119,7 @@ class PerformanceMonitor {
    * Track First Input Delay (FID) / Interaction to Next Paint (INP)
    */
   private trackInteractivity(): void {
-    if ("PerformanceObserver" in window) {
+    if (typeof window !== 'undefined' && typeof PerformanceObserver !== 'undefined') {
       try {
         const observer = new PerformanceObserver((list) => {
           for (const entry of list.getEntries()) {
@@ -145,7 +145,7 @@ class PerformanceMonitor {
    * Track Cumulative Layout Shift
    */
   private trackCLS(): void {
-    if ("PerformanceObserver" in window) {
+    if (typeof window !== 'undefined' && typeof PerformanceObserver !== 'undefined') {
       try {
         let clsValue = 0;
         const observer = new PerformanceObserver((list) => {
@@ -192,7 +192,7 @@ class PerformanceMonitor {
    * Track First Contentful Paint
    */
   private trackFCP(): void {
-    if ("PerformanceObserver" in window) {
+    if (typeof window !== 'undefined' && typeof PerformanceObserver !== 'undefined') {
       try {
         const observer = new PerformanceObserver((list) => {
           const entries = list.getEntries();
@@ -307,7 +307,7 @@ class PerformanceMonitor {
   /**
    * Track route transition performance
    */
-  trackRouteTransition(fromRoute: string, toRoute: string): void {
+  trackRouteTransition(fromRoute: string, toRoute: string): any {
     const navigationStart = performance.now();
 
     return new Proxy(new Object(), {

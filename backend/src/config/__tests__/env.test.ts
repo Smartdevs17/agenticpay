@@ -1,14 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { validateEnv, config } from '../env.js';
+import { validateEnv, config, clearEnvCache } from '../env.js';
 import { z } from 'zod';
 
 describe('Environment Validation', () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
-    vi.resetModules();
     process.env = { ...originalEnv };
-    // Clear the cached config
+    clearEnvCache();
     vi.stubGlobal('process', {
       ...process,
       exit: vi.fn() as any,
@@ -22,10 +21,9 @@ describe('Environment Validation', () => {
 
   it('throws and exits when OPENAI_API_KEY is missing', () => {
     delete process.env.OPENAI_API_KEY;
-    
-    // We expect process.exit(1) to be called
-    validateEnv();
-    
+
+    // validateEnv calls process.exit(1) and throws in test (mocked exit)
+    expect(() => validateEnv()).toThrow();
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 
@@ -54,14 +52,17 @@ describe('Environment Validation', () => {
 
   it('transforms JOBS_ENABLED correctly', () => {
     process.env.OPENAI_API_KEY = 'test-key';
-    
+
     process.env.JOBS_ENABLED = 'false';
+    clearEnvCache();
     expect(validateEnv().JOBS_ENABLED).toBe(false);
 
     process.env.JOBS_ENABLED = 'true';
+    clearEnvCache();
     expect(validateEnv().JOBS_ENABLED).toBe(true);
-    
+
     process.env.JOBS_ENABLED = 'any-other-string';
+    clearEnvCache();
     expect(validateEnv().JOBS_ENABLED).toBe(true);
   });
 });

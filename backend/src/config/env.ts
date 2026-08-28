@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
+import { applyEnvironmentFileDefaults } from './environments/index.js';
 
 dotenv.config();
+applyEnvironmentFileDefaults();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -32,8 +34,10 @@ export const validateEnv = (): Env => {
     _config = envSchema.parse(process.env);
     return _config;
   } catch (error: unknown) {
-    if (error instanceof z.ZodError) {
-      const missingVars = error.errors.map((err: z.ZodIssue) => `${err.path.join('.')}: ${err.message}`);
+    const isZodError = error instanceof z.ZodError || (error as any)?.name === 'ZodError';
+    if (isZodError) {
+      const zodError = error as z.ZodError;
+      const missingVars = zodError.errors.map((err: z.ZodIssue) => `${err.path.join('.')}: ${err.message}`);
       console.error('❌ Invalid environment variables:');
       missingVars.forEach((msg: string) => console.error(`   - ${msg}`));
       process.exit(1);
@@ -41,6 +45,10 @@ export const validateEnv = (): Env => {
     throw error;
   }
 };
+
+export function clearEnvCache(): void {
+  _config = undefined;
+}
 
 export const config = (): Env => {
   if (!_config) {

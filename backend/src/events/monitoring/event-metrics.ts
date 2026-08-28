@@ -125,8 +125,9 @@ export class EventMetricsCollector {
     const currentAvg = metrics.avgProcessingTime;
     const currentCount = 'count' in metrics ? metrics.count : metrics.totalProcessed;
 
-    // Update average
-    metrics.avgProcessingTime = (currentAvg * currentCount + processingTime) / (currentCount + 1);
+    // currentCount already includes the newly incremented entry, so subtract one for previous average
+    const prevCount = Math.max(0, currentCount - 1);
+    metrics.avgProcessingTime = prevCount === 0 ? processingTime : (currentAvg * prevCount + processingTime) / currentCount;
 
     // Update min/max
     metrics.minProcessingTime = Math.min(metrics.minProcessingTime, processingTime);

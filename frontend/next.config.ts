@@ -11,7 +11,10 @@ const bundleAnalyzer = withBundleAnalyzer({
 
 const nextConfig: NextConfig = {
   assetPrefix: process.env.NEXT_PUBLIC_CDN_URL || undefined,
+  productionBrowserSourceMaps: false,
   experimental: {
+    instrumentationHook: true,
+    webVitalsAttribution: ['CLS', 'LCP', 'FID', 'FCP', 'TTFB'],
     optimizePackageImports: [
       "lucide-react",
       "@radix-ui/react-dialog",

@@ -6,6 +6,9 @@ import type { EnvironmentName, EnvironmentOverrides } from './types.js';
 
 export * from './types.js';
 export { loadSecretsManagerOverrides };
+export { developmentOverrides } from './development.js';
+export { stagingOverrides } from './staging.js';
+export { productionOverrides } from './production.js';
 
 const ENVIRONMENT_CONFIGS: Record<EnvironmentName, EnvironmentOverrides> = {
   development: developmentOverrides,
