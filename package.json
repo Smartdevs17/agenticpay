@@ -25,10 +25,14 @@
     "generate:api-hooks:watch": "node packages/api-hooks-generator/dist/cli.js --watch",
     "analyze:bundle": "bash scripts/analyze-bundle.sh",
     "lighthouse:ci": "lhci autorun --config=./lighthouse/lighthouse.config.json",
-    "log-viewer": "node packages/log-viewer/dist/cli.js"
+    "log-viewer": "node packages/log-viewer/dist/cli.js",
+    "release": "semantic-release"
   },
   "devDependencies": {
-    "turbo": "^1.10.16"
+    "turbo": "^1.10.16",
+    "semantic-release": "^24.2.0",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.62.2",

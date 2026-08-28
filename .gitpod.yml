@@ -1,0 +1,38 @@
+image:
+  file: .devcontainer/Dockerfile
+
+tasks:
+  - name: Setup
+    init: |
+      npm ci --prefer-offline || npm install
+      if command -v rustup >/dev/null 2>&1; then
+        rustup target add wasm32-unknown-unknown
+      fi
+      (cd backend && npm run db:generate)
+    command: |
+      docker compose -f docker-compose.yml up -d postgres redis
+      npm run dev
+
+ports:
+  - name: Frontend
+    port: 3000
+    onOpen: open-preview
+  - name: Backend API
+    port: 3001
+    onOpen: ignore
+  - name: PostgreSQL
+    port: 5432
+    onOpen: ignore
+    visibility: private
+  - name: Redis
+    port: 6379
+    onOpen: ignore
+    visibility: private
+
+vscode:
+  extensions:
+    - dbaeumer.vscode-eslint
+    - esbenp.prettier-vscode
+    - bradlc.vscode-tailwindcss
+    - rust-lang.rust-analyzer
+    - Prisma.prisma

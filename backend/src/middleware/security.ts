@@ -2,11 +2,32 @@ import { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { InputSanitizer, sanitizeInput, contentSecurityPolicy, createSecurityRateLimit } from './sanitize';
+import { config } from '../config';
 
 /**
  * Comprehensive Security Middleware Stack
  * Implements defense-in-depth security measures
  */
+
+/**
+ * Security headers middleware — HSTS and Permissions-Policy.
+ *
+ * Kept independent of the CSP-bearing helmet() configuration in
+ * `applySecurity()` so it can be wired into the app without pulling in
+ * CSP directives, which are managed separately.
+ */
+export function securityHeadersMiddleware() {
+  const hsts = helmet.hsts({
+    maxAge: config.security.hsts.maxAge,
+    includeSubDomains: config.security.hsts.includeSubDomains,
+    preload: config.security.hsts.preload,
+  });
+
+  return (req: Request, res: Response, next: NextFunction): void => {
+    res.setHeader('Permissions-Policy', config.security.permissionsPolicy);
+    hsts(req, res, next);
+  };
+}
 
 export class SecurityMiddleware {
   private static instance: SecurityMiddleware;

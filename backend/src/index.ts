@@ -11,6 +11,7 @@ import { stellarRouter } from './routes/stellar.js';
 import { catalogRouter } from './routes/catalog.js';
 import { jobsRouter } from './routes/jobs.js';
 import { healthRouter } from './routes/health.js';
+import { docsRouter } from './routes/docs.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
@@ -31,7 +32,7 @@ import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { stripeRouter } from './routes/stripe.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
-import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
+import { SecurityMiddleware, SecurityMonitor, securityHeadersMiddleware } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
@@ -164,6 +165,7 @@ const invoiceLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+app.use(securityHeadersMiddleware());
 app.use(
   cors({
     origin: config.cors.allowedOrigins,
@@ -229,6 +231,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Health & Readiness checks
 app.use(healthRouter);
+
+// Interactive API documentation & playground — Issue #758
+app.use('/docs', docsRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 

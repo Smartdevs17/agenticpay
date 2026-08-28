@@ -23,6 +23,10 @@ const envSchema = z.object({
   DB_POOL_ACQUIRE_TIMEOUT_MS: z.string().default('30000'),
   DB_POOL_MAX_USES: z.string().default('7500'),
   DB_STATEMENT_TIMEOUT_MS: z.string().default('30000'),
+  HSTS_MAX_AGE_SECONDS: z.string().default('31536000'),
+  PERMISSIONS_POLICY: z
+    .string()
+    .default('camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), interest-cohort=()'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -76,6 +80,14 @@ export const config = {
       maxUses: Number(env.DB_POOL_MAX_USES),
       statementTimeoutMs: Number(env.DB_STATEMENT_TIMEOUT_MS),
     },
+  },
+  security: {
+    hsts: {
+      maxAge: Number(env.HSTS_MAX_AGE_SECONDS),
+      includeSubDomains: true,
+      preload: true,
+    },
+    permissionsPolicy: env.PERMISSIONS_POLICY,
   },
 } as const;
 
