@@ -1578,6 +1578,14 @@ model ApiKey {
   expiresAt     DateTime? @map("expires_at")
   revokedAt     DateTime? @map("revoked_at")
 
+  // Issue #756: rotation with grace period. When a key is rotated, the
+  // predecessor stays active until gracePeriodEndsAt so in-flight clients
+  // have time to switch to the new key before the old one stops working.
+  rotatedAt         DateTime? @map("rotated_at")
+  gracePeriodEndsAt DateTime? @map("grace_period_ends_at")
+  predecessorKeyId  String?   @map("predecessor_key_id")
+  successorKeyId    String?   @map("successor_key_id")
+
   usage ApiKeyUsage[]
   quota ApiKeyQuota?
 

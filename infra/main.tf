@@ -54,6 +54,21 @@ module "vpc" {
 }
 
 # ------------------------------------------------------------------------------
+# ENCRYPTION AT REST (customer-managed KMS key for sensitive data fields)
+# ------------------------------------------------------------------------------
+
+resource "aws_kms_key" "data_at_rest" {
+  description             = "Customer-managed key for agenticpay-${var.environment} encryption at rest (RDS, Secrets Manager, backups)"
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+}
+
+resource "aws_kms_alias" "data_at_rest" {
+  name          = "alias/agenticpay-${var.environment}-data-at-rest"
+  target_key_id = aws_kms_key.data_at_rest.key_id
+}
+
+# ------------------------------------------------------------------------------
 # DATABASE RESOURCES (PostgreSQL + PgBouncer via RDS Proxy)
 # ------------------------------------------------------------------------------
 
@@ -101,6 +116,7 @@ resource "aws_db_instance" "postgres" {
   max_allocated_storage = var.db_max_allocated_storage
   storage_type          = "gp3"
   storage_encrypted     = true
+  kms_key_id            = aws_kms_key.data_at_rest.arn
 
   backup_retention_period = var.environment == "prod" ? 30 : 7
   backup_window          = "03:00-04:00"
@@ -114,6 +130,7 @@ resource "aws_db_instance" "postgres" {
 
   performance_insights_enabled          = var.environment == "prod"
   performance_insights_retention_period = var.environment == "prod" ? 7 : 0
+  performance_insights_kms_key_id       = var.environment == "prod" ? aws_kms_key.data_at_rest.arn : null
 
   enabled_cloudwatch_logs_exports = ["postgresql"]
 
@@ -195,7 +212,8 @@ resource "aws_db_proxy_target" "main" {
 
 # Secrets Manager for database credentials
 resource "aws_secretsmanager_secret" "db_credentials" {
-  name = "agenticpay-${var.environment}-db-credentials"
+  name       = "agenticpay-${var.environment}-db-credentials"
+  kms_key_id = aws_kms_key.data_at_rest.arn
 }
 
 # Secrets Manager for application-level secrets (Stripe, OpenAI, VAPID keys, etc).
@@ -204,7 +222,8 @@ resource "aws_secretsmanager_secret" "db_credentials" {
 resource "aws_secretsmanager_secret" "app_secrets" {
   count = var.environment == "dev" ? 0 : 1
 
-  name = "agenticpay-${var.environment}-app-secrets"
+  name       = "agenticpay-${var.environment}-app-secrets"
+  kms_key_id = aws_kms_key.data_at_rest.arn
 }
 
 resource "aws_iam_policy" "app_secrets_read" {
@@ -276,6 +295,7 @@ resource "aws_iam_role_policy" "rds_proxy_secrets" {
 
 resource "aws_backup_vault" "db_backup_vault" {
   name        = "agenticpay-${var.environment}-db-backup-vault"
+  kms_key_arn = aws_kms_key.data_at_rest.arn
 }
 
 resource "aws_backup_plan" "db_backup_plan" {

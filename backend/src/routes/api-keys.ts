@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { quotaManagerService } from '../services/keys/quota-manager.js';
+import { rotateApiKeyWithGracePeriod, settleGracePeriod } from '../services/keys/rotation.js';
 import { randomBytes, createHash } from 'node:crypto';
 
 export const apiKeysRouter = Router();
@@ -37,7 +38,8 @@ apiKeysRouter.get('/', asyncHandler(async (req, res) => {
       quota: true,
     },
   });
-  res.json({ keys });
+  const settled = await Promise.all(keys.map((key) => settleGracePeriod(key)));
+  res.json({ keys: settled });
 }));
 
 apiKeysRouter.get('/:keyId', asyncHandler(async (req, res) => {
@@ -47,7 +49,8 @@ apiKeysRouter.get('/:keyId', asyncHandler(async (req, res) => {
     include: { quota: true },
   });
   if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
-  res.json(key);
+  const settled = await settleGracePeriod(key);
+  res.json(settled);
 }));
 
 apiKeysRouter.delete('/:keyId', asyncHandler(async (req, res) => {
@@ -62,8 +65,20 @@ apiKeysRouter.get('/:keyId/usage', asyncHandler(async (req, res) => {
   const tenantId = resolveTenant(req);
   const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
   if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  const settled = await settleGracePeriod(key);
   const summary = await quotaManagerService.getUsageSummary(req.params.keyId);
-  res.json(summary);
+  res.json({
+    ...summary,
+    rotation: {
+      rotatedAt: settled.rotatedAt,
+      gracePeriodEndsAt: settled.gracePeriodEndsAt,
+      predecessorKeyId: settled.predecessorKeyId,
+      successorKeyId: settled.successorKeyId,
+      inGracePeriod: Boolean(
+        settled.isActive && settled.gracePeriodEndsAt && settled.gracePeriodEndsAt.getTime() > Date.now(),
+      ),
+    },
+  });
 }));
 
 apiKeysRouter.get('/:keyId/usage/daily', asyncHandler(async (req, res) => {
@@ -93,19 +108,24 @@ apiKeysRouter.post('/:keyId/rotate', asyncHandler(async (req, res) => {
   const tenantId = resolveTenant(req);
   const key = await prisma.apiKey.findUnique({ where: { keyId: req.params.keyId } });
   if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  if (!key.isActive) throw new AppError(409, 'API key is not active', 'KEY_INACTIVE');
 
-  await prisma.apiKey.update({ where: { keyId: req.params.keyId }, data: { isActive: false, revokedAt: new Date() } });
+  const { gracePeriodHours } = req.body as { gracePeriodHours?: number };
+  const { previousKey, newKey, gracePeriodEndsAt } = await rotateApiKeyWithGracePeriod({
+    tenantId,
+    keyId: key.keyId,
+    gracePeriodHours,
+  });
 
-  const newKeyId = `ak_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const newKey = await prisma.apiKey.create({
-    data: {
-      tenantId,
-      keyId: newKeyId,
-      description: key.description ? `${key.description} (rotated)` : 'Rotated key',
-      expiresAt: key.expiresAt,
+  res.status(201).json({
+    keyId: newKey.keyId,
+    description: newKey.description,
+    rotatedFrom: previousKey.keyId,
+    gracePeriod: {
+      predecessorKeyId: previousKey.keyId,
+      gracePeriodEndsAt,
     },
   });
-  res.status(201).json({ keyId: newKey.keyId, description: newKey.description, rotatedFrom: key.keyId });
 }));
 
 apiKeysRouter.post('/:keyId/revoke', asyncHandler(async (req, res) => {
