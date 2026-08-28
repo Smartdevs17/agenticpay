@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Request, Response } from 'express';
-import { AppError, asyncHandler, notFoundHandler, errorHandler } from '../errorHandler.js';
+import { AppError, PaymentError, asyncHandler, notFoundHandler, errorHandler } from '../errorHandler.js';
 
 function makeReq(overrides: Partial<Request> = {}): Request {
   return { method: 'GET', originalUrl: '/test', ...overrides } as unknown as Request;
@@ -157,5 +157,22 @@ describe('errorHandler', () => {
 
     const callArg = (res.json as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(callArg.error.details).toEqual({ field: 'email' });
+  });
+
+  it('honors a domain error subclass statusCode/message instead of downgrading it to 500', () => {
+    // Regression test for Issue #719: PaymentError (and the other domain
+    // errors in types/errors.ts) used to extend `Error` directly, so
+    // `err instanceof AppError` was false and this handler discarded their
+    // statusCode/message in favor of a generic 500 "Internal server error".
+    const err = new PaymentError('Insufficient balance to cover this payment');
+    const req = makeReq();
+    const { res } = makeRes();
+    const next = vi.fn();
+
+    errorHandler(err, req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    const callArg = (res.json as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(callArg.error.message).toBe('Insufficient balance to cover this payment');
   });
 });

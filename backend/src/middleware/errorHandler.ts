@@ -1,26 +1,10 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { ERROR_CODE_REGISTRY, resolveErrorCode } from '@agenticpay/error-codes';
-import { PaymentError, AuthError, ProjectError, DisputeError, ValidationError, NotFoundError } from '../types/errors';
+import { AppError, PaymentError, AuthError, ProjectError, DisputeError, ValidationError, NotFoundError } from '../types/errors';
 
 type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<unknown>;
 
-export class AppError extends Error {
-  statusCode: number;
-  code: string;
-  details?: unknown;
-  metadata?: Record<string, unknown>;
-
-  constructor(statusCode: number, message: string, code = 'INTERNAL_SERVER_ERROR', details?: unknown, metadata?: Record<string, unknown>) {
-    super(message);
-    this.name = 'AppError';
-    this.statusCode = statusCode;
-    this.code = code;
-    this.details = details;
-    this.metadata = metadata;
-  }
-}
-
-export { PaymentError, AuthError, ProjectError, DisputeError, ValidationError, NotFoundError };
+export { AppError, PaymentError, AuthError, ProjectError, DisputeError, ValidationError, NotFoundError };
 
 export function asyncHandler(handler: AsyncRouteHandler): RequestHandler {
   return (req, res, next) => {

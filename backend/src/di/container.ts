@@ -13,10 +13,7 @@ import { ProjectRepository } from "../repositories/ProjectRepository.js";
 import { ProjectService } from "../services/ProjectService.js";
 import { ProjectController } from "../controllers/ProjectController.js";
 import { providerRegistry } from "../services/payments/provider-registry.js";
-import { SorobanPaymentProvider } from "../services/payments/providers/soroban.js";
-import { EvmPaymentProvider } from "../services/payments/providers/evm.js";
-import { FiatPaymentProvider } from "../services/payments/providers/fiat.js";
-import { CreditPaymentProvider } from "../services/payments/providers/credit.js";
+import { registerDefaultPaymentProviders } from "../services/payments/bootstrap.js";
 
 export class DIContainer {
   private static instance: DIContainer;
@@ -82,10 +79,7 @@ export class DIContainer {
     const projectController = new ProjectController(projectService);
     this.set("ProjectController", projectController);
 
-    providerRegistry.register(new SorobanPaymentProvider());
-    providerRegistry.register(new EvmPaymentProvider());
-    providerRegistry.register(new FiatPaymentProvider());
-    providerRegistry.register(new CreditPaymentProvider());
+    registerDefaultPaymentProviders(providerRegistry);
     this.set("PaymentProviderRegistry", providerRegistry);
   }
 

@@ -45,6 +45,8 @@ import dataExportRouter from './routes/dataExport.js';
 import securityRouter from './routes/security.js';
 import commentsRouter from './routes/comments.js';
 import collaborationRouter from './routes/collaboration.js';
+import { paymentStrategiesRouter } from './routes/payment-strategies.js';
+import { registerDefaultPaymentProviders } from './services/payments/bootstrap.js';
 
 dotenv.config();
 
@@ -284,6 +286,8 @@ apiV1Router.use('/security', securityRouter);
 apiV1Router.use('/comments', commentsRouter);
 // Real-time collaboration: presence, field locks, edit history — Issue #714
 apiV1Router.use('/collaboration', collaborationRouter);
+// Multi-chain payment processing via the PaymentProvider strategy pattern — Issue #726
+apiV1Router.use('/payment-strategies', paymentStrategiesRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);
@@ -318,6 +322,8 @@ registerDefaultProcessors();
 if (config.queue.enabled) {
   messageQueue.start();
 }
+
+registerDefaultPaymentProviders();
 
 const server = app.listen(config.server.port, () => {
   console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
