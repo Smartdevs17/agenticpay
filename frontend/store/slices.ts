@@ -1,4 +1,5 @@
-import { create } from 'zustand';
+import { StateCreator } from 'zustand';
+import type { AppStore } from './useStore';
 
 export interface AuthSlice {
   address: string | null;
@@ -13,7 +14,7 @@ export interface AuthSlice {
   logout: () => void;
 }
 
-export const createAuthSlice = (): AuthSlice => ({
+export const createAuthSlice: StateCreator<AppStore, [], [], AuthSlice> = (set) => ({
   address: null,
   email: undefined,
   name: undefined,
@@ -62,7 +63,7 @@ export type PaymentSliceActions = {
 
 export type PaymentSlice = PaymentSliceState & PaymentSliceActions;
 
-export const createPaymentSlice = (): PaymentSlice => ({
+export const createPaymentSlice: StateCreator<AppStore, [], [], PaymentSlice> = (set) => ({
   paymentType: null,
   formData: {},
   isProcessing: false,
@@ -89,7 +90,7 @@ export type ProjectSliceActions = {
 
 export type ProjectSlice = ProjectSliceState & ProjectSliceActions;
 
-export const createProjectSlice = (): ProjectSlice => ({
+export const createProjectSlice: StateCreator<AppStore, [], [], ProjectSlice> = (set) => ({
   projects: [],
   currentProjectId: null,
   isLoading: false,

@@ -150,31 +150,23 @@ pub struct ProjectInput {
     pub github_repo: String,
 }
 
+// Reentrancy/pause state is owned by `AgenticPayContract`'s gas-optimised
+// `LazyValue` helpers (see lib.rs) so that every call path — the
+// `#[contractimpl]` entry points and these module functions alike — reads
+// and writes the exact same storage slot. Delegating here instead of
+// re-implementing the check against `DataKey` avoids two independent, and
+// therefore silently divergent, reentrancy/pause flags.
+
 pub fn _acquire_lock(env: &Env) {
-    let locked: bool = env
-        .storage()
-        .instance()
-        .get(&DataKey::ReentrancyLock)
-        .unwrap_or(false);
-    assert!(!locked, "reentrant call");
-    env.storage()
-        .instance()
-        .set(&DataKey::ReentrancyLock, &true);
+    crate::AgenticPayContract::_acquire_lock(env)
 }
 
 pub fn _release_lock(env: &Env) {
-    env.storage()
-        .instance()
-        .set(&DataKey::ReentrancyLock, &false);
+    crate::AgenticPayContract::_release_lock(env)
 }
 
 pub fn _require_not_paused(env: &Env) {
-    let paused: bool = env
-        .storage()
-        .instance()
-        .get(&DataKey::Paused)
-        .unwrap_or(false);
-    assert!(!paused, "contract paused");
+    crate::AgenticPayContract::_require_not_paused(env)
 }
 
 pub fn get_admin(env: &Env) -> Address {

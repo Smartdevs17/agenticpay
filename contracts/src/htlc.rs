@@ -1,5 +1,65 @@
-use soroban_sdk::{Address, BytesN, Env};
+use soroban_sdk::{symbol_short, Address, BytesN, Env};
 use crate::common::{self, *};
+
+/// Initialize the bridge configuration. Admin-only.
+pub fn init_bridge_config(env: &Env, admin: Address, fee_bps: u32, fee_collector: Address) {
+    admin.require_auth();
+    let stored_admin = common::get_admin(env);
+    assert!(admin == stored_admin, "Only admin can init bridge config");
+    assert!(fee_bps <= 1000, "Fee bps cannot exceed 1000 (10%)");
+
+    let config = BridgeConfigData {
+        fee_bps,
+        fee_collector,
+        paused: false,
+    };
+    env.storage().instance().set(&DataKey::BridgeConfig, &config);
+
+    env.events().publish(
+        (symbol_short!("bridge"), symbol_short!("config")),
+        (fee_bps,),
+    );
+}
+
+/// Update bridge configuration. Admin-only.
+pub fn update_bridge_config(
+    env: &Env,
+    admin: Address,
+    fee_bps: Option<u32>,
+    fee_collector: Option<Address>,
+    paused: Option<bool>,
+) {
+    admin.require_auth();
+    let stored_admin = common::get_admin(env);
+    assert!(admin == stored_admin, "Only admin can update bridge config");
+
+    let mut config: BridgeConfigData = env
+        .storage()
+        .instance()
+        .get(&DataKey::BridgeConfig)
+        .expect("Bridge config not initialized");
+
+    if let Some(fee) = fee_bps {
+        assert!(fee <= 1000, "Fee bps cannot exceed 1000 (10%)");
+        config.fee_bps = fee;
+    }
+    if let Some(collector) = fee_collector {
+        config.fee_collector = collector;
+    }
+    if let Some(p) = paused {
+        config.paused = p;
+    }
+
+    env.storage().instance().set(&DataKey::BridgeConfig, &config);
+}
+
+/// Retrieve the bridge configuration.
+pub fn get_bridge_config(env: &Env) -> BridgeConfigData {
+    env.storage()
+        .instance()
+        .get(&DataKey::BridgeConfig)
+        .expect("Bridge config not initialized")
+}
 
 pub fn create_lock(
     env: &Env,
