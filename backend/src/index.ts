@@ -172,6 +172,10 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id', REQUEST_ID_HEADER],
   })
 );
+
+// Content Security Policy & related security headers (XSS prevention)
+app.use(contentSecurityPolicy());
+
 app.use(express.json());
 
 app.use(

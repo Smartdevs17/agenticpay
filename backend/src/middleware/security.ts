@@ -197,25 +197,24 @@ export class SQLInjectionPrevention {
   }
 
   /**
-   * Create safe SQL query with parameterization
+   * Create a safe, parameterized SQL query.
+   *
+   * Values are NEVER interpolated into the query string — `?` placeholders
+   * are rewritten to positional bind parameters (`$1`, `$2`, ...) and the
+   * caller must execute the returned `query`/`safeParams` pair through the
+   * database driver's parameter-binding API (e.g. `pool.query(query, safeParams)`).
    */
   public static createSafeQuery(template: string, params: any[]): { query: string; safeParams: any[] } {
     if (!this.validateQueryParams(params)) {
       throw new Error('Invalid SQL parameters detected');
     }
 
-    // Simple parameterization (in production, use proper ORM)
-    let query = template;
     let paramIndex = 0;
+    const query = template.replace(/\?/g, () => `$${++paramIndex}`);
 
-    // Replace placeholders with safe parameters
-    query = query.replace(/\?/g, () => {
-      if (paramIndex < params.length) {
-        const param = params[paramIndex++];
-        return typeof param === 'string' ? `'${param.replace(/'/g, "''")}'` : String(param);
-      }
-      return '?';
-    });
+    if (paramIndex !== params.length) {
+      throw new Error('Parameter count does not match placeholder count');
+    }
 
     return { query, safeParams: params };
   }
