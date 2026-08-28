@@ -1,0 +1,35 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        flags:
+          - frontend
+        informational: false
+    patch:
+      default:
+        target: 80%
+        threshold: 1%
+        informational: false
+  ignore:
+    - "frontend/e2e/**"
+    - "frontend/.next/**"
+    - "frontend/playwright-report/**"
+    - "frontend/test-results/**"
+    - "**/*.config.*"
+    - "**/*.d.ts"
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+  threshold: 1%
+  flags:
+    - frontend
+
+github_checks:
+  annotations: true
+
+fixes:
+  - "frontend/::"

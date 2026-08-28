@@ -1,0 +1,41 @@
+name: Coverage
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '!frontend/e2e/**'
+  push:
+    branches:
+      - main
+
+jobs:
+  coverage:
+    name: Code coverage with threshold enforcement
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm run test -- --coverage
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: frontend/coverage
+          flags: frontend
+          fail_ci_if_error: false

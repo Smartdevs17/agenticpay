@@ -168,6 +168,28 @@ const nextConfig: NextConfig = {
       };
     }
 
+    if (process.env.SIZE_LIMIT === "true" && !isServer) {
+      config.plugins = config.plugins || [];
+      config.plugins.push({
+        apply(compiler: any) {
+          compiler.hooks.done.tap("SizeLimitStats", (stats: any) => {
+            const fs = require("fs");
+            const path = require("path");
+            const out = stats.toJson({
+              all: false,
+              assets: true,
+              chunks: true,
+              chunkGroups: true,
+            });
+            fs.writeFileSync(
+              path.join(process.cwd(), ".next", "size-limit-stats.json"),
+              JSON.stringify(out),
+            );
+          });
+        },
+      } as any);
+    }
+
     return config;
   },
   images: {

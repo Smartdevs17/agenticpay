@@ -18,7 +18,26 @@ export default defineConfig({
     exclude: ['node_modules/**', '.next/**', 'e2e/**', 'playwright-report/**', 'test-results/**'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      exclude: [
+        'node_modules/**',
+        '.next/**',
+        'e2e/**',
+        'playwright-report/**',
+        'test-results/**',
+        '**/*.config.*',
+        '**/*.d.ts',
+        '**/*.test.{ts,tsx}',
+        '**/vitest.setup.ts',
+      ],
+      thresholds: {
+        statements: 80,
+        branches: 80,
+        functions: 80,
+        lines: 80,
+      },
+      skipFull: true,
     },
   },
 })
