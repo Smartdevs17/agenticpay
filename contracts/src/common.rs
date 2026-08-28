@@ -1,5 +1,7 @@
 pub use soroban_sdk::{contracttype, symbol_short, Address, Bytes, BytesN, Env, String, Vec};
 
+use crate::storage::{LazyKey, LazyValue};
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProjectStatus {
@@ -150,30 +152,34 @@ pub struct ProjectInput {
     pub github_repo: String,
 }
 
+// ReentrancyLock and Paused are read on every mutative call but written
+// only during initialise / pause / unpause. `LazyValue` avoids paying the
+// initialise SSTORE cost for paths that never toggle the circuit breaker
+// or trigger reentrancy — the first read returns the default without a
+// storage write. This is the single canonical lock/pause implementation;
+// every module (`escrow`, `dispute`, `multisig`, `htlc`) and the contract's
+// own admin entry points share it so a reentrancy guard or pause acquired
+// in one module is visible to all the others.
+fn _lock() -> LazyValue<bool> {
+    LazyValue::new(LazyKey::ReentrancyLock, false)
+}
+
+fn _pause_flag() -> LazyValue<bool> {
+    LazyValue::new(LazyKey::Paused, false)
+}
+
 pub fn _acquire_lock(env: &Env) {
-    let locked: bool = env
-        .storage()
-        .instance()
-        .get(&DataKey::ReentrancyLock)
-        .unwrap_or(false);
+    let locked = _lock().get(env);
     assert!(!locked, "reentrant call");
-    env.storage()
-        .instance()
-        .set(&DataKey::ReentrancyLock, &true);
+    _lock().set(env, &true);
 }
 
 pub fn _release_lock(env: &Env) {
-    env.storage()
-        .instance()
-        .set(&DataKey::ReentrancyLock, &false);
+    _lock().set(env, &false);
 }
 
 pub fn _require_not_paused(env: &Env) {
-    let paused: bool = env
-        .storage()
-        .instance()
-        .get(&DataKey::Paused)
-        .unwrap_or(false);
+    let paused = _pause_flag().get(env);
     assert!(!paused, "contract paused");
 }
 
@@ -188,16 +194,17 @@ pub fn initialize(env: &Env, admin: Address) {
     env.storage().instance().set(&DataKey::Admin, &admin);
     env.storage().instance().set(&DataKey::ProjectCount, &0u64);
     env.storage().instance().set(&DataKey::ReceiptCount, &0u64);
-    env.storage().instance().set(&DataKey::ReentrancyLock, &false);
-    env.storage().instance().set(&DataKey::Paused, &false);
+    // ReentrancyLock and Paused are lazily initialised via LazyValue — the
+    // first read returns `false` without a storage write.
 }
 
 pub fn pause(env: &Env, admin: Address) {
     admin.require_auth();
     let stored_admin = get_admin(env);
     assert!(admin == stored_admin, "Only admin can pause");
+    // Acquire lock so pause cannot be called re-entrantly.
     _acquire_lock(env);
-    env.storage().instance().set(&DataKey::Paused, &true);
+    _pause_flag().set(env, &true);
     env.events().publish(
         (symbol_short!("circuit"), symbol_short!("paused")),
         true,
@@ -209,8 +216,9 @@ pub fn unpause(env: &Env, admin: Address) {
     admin.require_auth();
     let stored_admin = get_admin(env);
     assert!(admin == stored_admin, "Only admin can unpause");
+    // Acquire lock so unpause cannot be called re-entrantly.
     _acquire_lock(env);
-    env.storage().instance().set(&DataKey::Paused, &false);
+    _pause_flag().set(env, &false);
     env.events().publish(
         (symbol_short!("circuit"), symbol_short!("paused")),
         false,
@@ -219,10 +227,7 @@ pub fn unpause(env: &Env, admin: Address) {
 }
 
 pub fn is_paused(env: &Env) -> bool {
-    env.storage()
-        .instance()
-        .get(&DataKey::Paused)
-        .unwrap_or(false)
+    _pause_flag().get(env)
 }
 
 pub fn set_metadata(env: &Env, admin: Address, key: String, value: String) {

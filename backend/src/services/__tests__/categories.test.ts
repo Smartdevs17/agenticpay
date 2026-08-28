@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { inferCategory } from '../../services/categories.js';
+import { inferCategory } from '../../services/CategoryService.js';
 
 describe('inferCategory', () => {
   it('returns refund for type=refund', () => {

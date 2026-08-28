@@ -12,6 +12,7 @@ import { registerPaymentModule } from './modules/payment.module.js';
 import { registerComplianceModule } from './modules/compliance.module.js';
 import { registerOnboardingModule } from './modules/onboarding.module.js';
 import { registerWalletModule } from './modules/wallet.module.js';
+import { registerCategoryModule } from './modules/category.module.js';
 
 export function bootstrapDI(): void {
   registerProjectModule(container);
@@ -20,6 +21,7 @@ export function bootstrapDI(): void {
   registerComplianceModule(container);
   registerOnboardingModule(container);
   registerWalletModule(container);
+  registerCategoryModule(container);
 
   if (process.env.DI_VALIDATION !== 'false') {
     try {

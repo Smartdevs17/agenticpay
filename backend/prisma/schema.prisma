@@ -1,5 +1,20 @@
 // Prisma schema — Issue #207
 // Full type-safe schema with soft deletes, indexes, and relations.
+//
+// ─── Base model convention — Issue #716 ────────────────────────────────────
+// Prisma's schema language has no model-inheritance construct (no `extends`,
+// no shared field blocks to pull into a model), so the ~100 models below
+// can't literally inherit from a common base. Instead every model in this
+// schema follows the same base-fields convention by hand:
+//   id        String   @id @default(uuid())
+//   createdAt DateTime @default(now()) @map("created_at")
+//   updatedAt DateTime @updatedAt @map("updated_at")   // when mutable
+//   tenantId  String   @map("tenant_id")               // when tenant-scoped
+// Treat this block as the "base model" every model below implicitly extends.
+// New models should follow it rather than inventing new id/timestamp shapes.
+// The equivalent duplication in the *repository* layer (every in-memory
+// BaseRepository<T> hand-rolling the same CRUD/pagination) is addressed with
+// real class inheritance — see `backend/src/repositories/InMemoryRepository.ts`.
 
 generator client {
   provider = "prisma-client-js"

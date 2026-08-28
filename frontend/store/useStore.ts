@@ -1,19 +1,22 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { createAuthSlice, createPaymentSlice, createProjectSlice } from './slices';
+import {
+  createAuthSlice,
+  createPaymentSlice,
+  createProjectSlice,
+  type AuthSlice,
+  type PaymentSlice,
+  type ProjectSlice,
+} from './slices';
 
-type AuthSlice = ReturnType<typeof createAuthSlice>;
-type PaymentSlice = ReturnType<typeof createPaymentSlice>;
-type ProjectSlice = ReturnType<typeof createProjectSlice>;
-
-interface AppStore extends AuthSlice, PaymentSlice, ProjectSlice {}
+export type AppStore = AuthSlice & PaymentSlice & ProjectSlice;
 
 export const useStore = create<AppStore>()(
   persist(
     (...args) => ({
-      ...createAuthSlice(),
-      ...createPaymentSlice(),
-      ...createProjectSlice(),
+      ...createAuthSlice(...args),
+      ...createPaymentSlice(...args),
+      ...createProjectSlice(...args),
     }),
     {
       name: 'agenticpay-store',

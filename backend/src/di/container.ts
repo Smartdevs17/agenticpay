@@ -136,6 +136,18 @@ export class DIContainer {
   getProjectRepository() {
     return this.get<import('../repositories/ProjectRepository.js').ProjectRepository>('ProjectRepository');
   }
+
+  getCategoryController() {
+    return this.get<import('../controllers/CategoryController.js').CategoryController>('CategoryController');
+  }
+
+  getCategoryService() {
+    return this.get<import('../services/CategoryService.js').CategoryService>('CategoryService');
+  }
+
+  getCategoryRepository() {
+    return this.get<import('../repositories/CategoryRepository.js').CategoryRepository>('CategoryRepository');
+  }
 }
 
 export const container = DIContainer.getInstance();
