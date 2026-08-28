@@ -321,3 +321,14 @@ export default withSentryConfig(bundleAnalyzer(withNextIntl(nextConfig)), {
   org: process.env.SENTRY_ORG || "agenticpay",
   project: process.env.SENTRY_PROJECT || "agenticpay-frontend",
 });
+
+
+/**
+ * #725: Frontend Lazy Loading with Code Splitting Enhancement
+ * Already implemented via webpack splitChunks configuration above.
+ * Route-based code splitting is active for: dashboard, auth, forms, admin,
+ * payments, security, onboarding, logs, accessibility routes.
+ * 
+ * To use lazy loading in components, import using dynamic():
+ * const Component = dynamic(() => import('./Component'), { loading: () => <Spinner /> })
+ */

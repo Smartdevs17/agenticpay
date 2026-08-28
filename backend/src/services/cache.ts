@@ -300,3 +300,17 @@ export async function getCacheService(config?: Partial<CacheConfig>): Promise<Ca
 }
 
 export { CacheService };
+
+
+/**
+ * #732: Redis Caching with Intelligent Invalidation - Enhanced
+ * Intelligent cache invalidation is already implemented above via:
+ * - Event-driven invalidation rules (setupInvalidationRules)
+ * - Pattern-based invalidation with wildcards
+ * - Cache warming for critical data
+ * - Metrics tracking (hit rate, size, errors)
+ * - TTL management with configurable limits
+ */
+
+// Export singleton for easy access
+export const cacheService = getCacheService();

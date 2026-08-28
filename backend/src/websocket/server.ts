@@ -205,3 +205,37 @@ export function attachWebSocketServer(params: {
 
   return { wss, metrics, broadcast, broadcastToChannel, close };
 }
+
+
+/**
+ * #722: Event-Driven WebSocket Architecture Enhancement
+ * Adds event emitter patterns for decoupled message handling
+ */
+import { EventEmitter } from 'events';
+
+export class WebSocketEventBus extends EventEmitter {
+  private static instance: WebSocketEventBus;
+
+  static getInstance(): WebSocketEventBus {
+    if (!this.instance) {
+      this.instance = new WebSocketEventBus();
+    }
+    return this.instance;
+  }
+
+  emitConnection(connectionId: string, metadata: any): void {
+    this.emit('connection:opened', { connectionId, metadata, timestamp: Date.now() });
+  }
+
+  emitDisconnection(connectionId: string): void {
+    this.emit('connection:closed', { connectionId, timestamp: Date.now() });
+  }
+
+  emitMessage(connectionId: string, message: any): void {
+    this.emit('message:received', { connectionId, message, timestamp: Date.now() });
+  }
+
+  emitBroadcast(message: WebSocketOutboundMessage): void {
+    this.emit('broadcast', { message, timestamp: Date.now() });
+  }
+}

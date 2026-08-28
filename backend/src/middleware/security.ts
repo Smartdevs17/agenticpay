@@ -467,3 +467,27 @@ export class SecurityMonitor {
 }
 
 export default SecurityMiddleware;
+
+
+/**
+ * #730: Composable Security Middleware Chains
+ */
+export class SecurityChain {
+  private middlewares: any[] = [];
+
+  add(mw: any): this {
+    this.middlewares.push(mw);
+    return this;
+  }
+
+  compose(): any {
+    return (req: any, res: any, next: any) => {
+      let i = 0;
+      const run = (err?: any) => {
+        if (err || i >= this.middlewares.length) return next(err);
+        this.middlewares[i++](req, res, run);
+      };
+      run();
+    };
+  }
+}
