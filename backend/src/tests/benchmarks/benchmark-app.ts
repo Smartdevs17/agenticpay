@@ -2,6 +2,8 @@
  * Self-contained Express app for benchmarks (no Prisma, Stellar, or job scheduler).
  */
 import express from 'express';
+import { etag } from '../../middleware/etag.js';
+import { cacheControl } from '../../middleware/cache.js';
 
 const escrows: Array<Record<string, unknown>> = [];
 const payments = new Map<string, Record<string, unknown>>();
@@ -65,6 +67,37 @@ export function createBenchmarkApp(): express.Application {
     payments.set(txnId, payment);
     res.json({ success: true, payment });
   });
+
+  // ── Response caching benchmarks ──────────────────────────────────────────
+  // Same logical body for every cache strategy so timings are comparable.
+  api.get('/cache/plain', (_req, res) => {
+    res.json({ cache: 'none', timestamp: Date.now() });
+  });
+
+  api.get(
+    '/cache/header',
+    cacheControl({ maxAge: 300 }),
+    (_req, res) => {
+      res.json({ cache: 'header', timestamp: Date.now() });
+    },
+  );
+
+  api.get(
+    '/cache/memory',
+    cacheControl({ maxAge: 300, inMemory: true }),
+    (_req, res) => {
+      res.json({ cache: 'memory', timestamp: Date.now() });
+    },
+  );
+
+  // Always-conditional route: wildcard If-None-Match forces a 304 fast path.
+  api.get(
+    '/cache/etag-304',
+    etag(),
+    (_req, res) => {
+      res.json({ cache: 'etag' });
+    },
+  );
 
   app.use('/api/v1', api);
   return app;

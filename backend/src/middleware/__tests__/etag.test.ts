@@ -20,6 +20,8 @@ import {
   strongMatch,
   getETagMetrics,
   resetETagMetrics,
+  defaultETag,
+  publicETag,
 } from '../etag.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -48,10 +50,15 @@ function makeRes(): {
   let endCalled = false;
 
   const res = {
+    statusCode: 200,
     setHeader: vi.fn((name: string, value: string | number) => {
       headers[name] = value;
     }),
+    getHeader: vi.fn((name: string): string | number | undefined => {
+      return headers[name];
+    }),
     status: vi.fn(function (code: number) {
+      res.statusCode = code;
       sentStatus = code;
       return res;
     }),
@@ -189,7 +196,7 @@ describe('etag() middleware', () => {
   it('returns full response when If-None-Match does not match', () => {
     const req = makeReq({ headers: { 'if-none-match': '"stale-etag"' } });
     const result = makeRes();
-    const { res, jsonCalled } = result;
+    const { res } = result;
     const mw = etag();
 
     mw(req, res, next);
@@ -277,5 +284,153 @@ describe('etag() middleware', () => {
       tags.add(generateETag(`body-${i}-${Math.random()}`));
     }
     expect(tags.size).toBe(100);
+  });
+
+  it('does not tag or short-circuit error responses (status >= 400)', () => {
+    const req = makeReq();
+    const wrapper = makeRes();
+    const mw = etag();
+    (wrapper.res.status as unknown as ReturnType<typeof vi.fn>)(500);
+
+    mw(req, wrapper.res, next);
+    (wrapper.res.json as ReturnType<typeof vi.fn>)({ error: 'boom' });
+
+    expect(wrapper.headers['ETag']).toBeUndefined();
+    expect(wrapper.jsonCalled).toBe(true);
+  });
+
+  it('honours an ETag already set by another middleware', () => {
+    const req = makeReq();
+    const { res, headers } = makeRes();
+    const mw = etag();
+    res.setHeader('ETag', '"precomputed"');
+
+    mw(req, res, next);
+    (res.json as ReturnType<typeof vi.fn>)({ data: 1 });
+
+    expect(headers['ETag']).toBe('"precomputed"');
+
+    // Metrics: no new tag generated, nothing incrementing generated counter
+    const m = getETagMetrics();
+    expect(m.generated).toBe(0);
+  });
+
+  it('bypasses requests carrying an API key when configured', () => {
+    const req = makeReq({ headers: { 'x-api-key': 'k123' } });
+    const { res, headers } = makeRes();
+    const mw = etag({ bypassAuthenticated: true });
+
+    mw(req, res, next);
+
+    expect(headers['ETag']).toBeUndefined();
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('does not bypass authenticated requests when bypass is disabled', () => {
+    const req = makeReq({ headers: { authorization: 'Bearer x' } });
+    const { res, headers } = makeRes();
+    const mw = etag();
+
+    mw(req, res, next);
+    (res.json as ReturnType<typeof vi.fn>)({ private: true });
+
+    expect(headers['ETag']).toBeDefined();
+  });
+
+  it('skips ETag generation for oversized responses', () => {
+    const req = makeReq();
+    const wrapper = makeRes();
+    const mw = etag({ maxBodySize: 10 });
+
+    mw(req, wrapper.res, next);
+    (wrapper.res.json as ReturnType<typeof vi.fn>)({ data: 'a-payload-larger-than-the-limit' });
+
+    expect(wrapper.headers['ETag']).toBeUndefined();
+    expect(wrapper.jsonCalled).toBe(true);
+
+    const m = getETagMetrics();
+    expect(m.bypassed).toBeGreaterThan(0);
+  });
+
+  it('matches a client ETag from a comma-separated If-None-Match list', () => {
+    const body = { data: 'listed' };
+    const tag = generateETag(JSON.stringify(body));
+    const req = makeReq({ headers: { 'if-none-match': `"stale", ${tag}` } });
+    const wrapper = makeRes();
+    const mw = etag();
+
+    mw(req, wrapper.res, next);
+    (wrapper.res.json as ReturnType<typeof vi.fn>)(body);
+
+    expect(wrapper.sentStatus).toBe(304);
+  });
+
+  it('responds 200 when no entry in a If-None-Match list matches', () => {
+    const req = makeReq({ headers: { 'if-none-match': '"one", "two"' } });
+    const result = makeRes();
+    const { res } = result;
+    const mw = etag();
+
+    mw(req, res, next);
+    (res.json as ReturnType<typeof vi.fn>)({ data: 'fresh' });
+
+    expect(result.sentStatus).toBeNull();
+    expect(result.jsonCalled).toBe(true);
+    expect(getETagMetrics().mismatched).toBe(1);
+  });
+
+  it('matches when the client sends a weak (W/) variant of a strong ETag', () => {
+    const body = { data: 'weak-client' };
+    const strong = generateETag(JSON.stringify(body));
+    const weakVariant = strong.replace(/^"/, 'W/"');
+    const req = makeReq({ headers: { 'if-none-match': weakVariant } });
+    const wrapper = makeRes();
+    const mw = etag();
+
+    mw(req, wrapper.res, next);
+    (wrapper.res.json as ReturnType<typeof vi.fn>)(body);
+
+    expect(wrapper.sentStatus).toBe(304);
+  });
+
+  it('accepts an arbitrary hash algorithm', () => {
+    const tag = generateETag('hello', 'md5');
+    expect(tag).toMatch(/^"[a-f0-9]+"$/);
+    expect(tag).not.toBe(generateETag('hello', 'sha256'));
+  });
+
+  it('handles HEAD requests with conditional 304', () => {
+    const body = { data: 'head-304' };
+    const tag = generateETag(JSON.stringify(body));
+    const req = makeReq({ method: 'HEAD', headers: { 'if-none-match': tag } });
+    const wrapper = makeRes();
+    const mw = etag();
+
+    mw(req, wrapper.res, next);
+    (wrapper.res.json as ReturnType<typeof vi.fn>)(body);
+
+    expect(wrapper.sentStatus).toBe(304);
+  });
+
+  it('defaultETag and publicETag presets wire the middleware', () => {
+    expect(typeof defaultETag()).toBe('function');
+    expect(typeof publicETag()).toBe('function');
+
+    // publicETag bypasses authenticated traffic
+    const req = makeReq({ headers: { authorization: 'Bearer t' } });
+    const { res, headers } = makeRes();
+    publicETag()(req, res, next);
+    expect(headers['ETag']).toBeUndefined();
+  });
+
+  it('strongMatch rejects weak ETags even when underlying value matches', () => {
+    expect(strongMatch('"abc"', 'W/"abc"')).toBe(false);
+    expect(strongMatch('"abc"', '"abc"')).toBe(true);
+  });
+
+  it('weakMatch strips W/ prefixes on both sides', () => {
+    expect(weakMatch('W/"x"', 'W/"x"')).toBe(true);
+    expect(weakMatch('W/"x"', '"x"')).toBe(true);
+    expect(weakMatch('"x"', '"y"')).toBe(false);
   });
 });

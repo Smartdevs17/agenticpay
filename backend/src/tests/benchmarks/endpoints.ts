@@ -53,6 +53,27 @@ export const BENCHMARK_ENDPOINTS: BenchmarkEndpoint[] = [
     }),
   },
   { name: 'circuit_breaker', method: 'GET', path: '/api/v1/circuit-breaker' },
+  {
+    name: 'cache_plain',
+    method: 'GET',
+    path: '/api/v1/cache/plain',
+  },
+  {
+    name: 'cache_header_only',
+    method: 'GET',
+    path: '/api/v1/cache/header',
+  },
+  {
+    name: 'cache_memory_hit',
+    method: 'GET',
+    path: '/api/v1/cache/memory',
+  },
+  {
+    name: 'cache_etag_304',
+    method: 'GET',
+    path: '/api/v1/cache/etag-304',
+    headers: { 'if-none-match': '*' },
+  },
 ];
 
 export const DEFAULT_BENCHMARK_OPTIONS = {

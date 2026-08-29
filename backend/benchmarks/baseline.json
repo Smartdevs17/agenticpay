@@ -1,77 +1,202 @@
 {
-  "generatedAt": "2026-05-30T08:13:11.739Z",
+  "generatedAt": "2026-08-29T20:38:19.951Z",
   "port": 3099,
-  "note": "Auto-established with 2.5x headroom",
   "endpoints": [
     {
       "name": "health",
       "path": "/health",
+      "requests": 5761,
+      "throughput": 645248,
       "latency": {
-        "p99": 1625
-      }
+        "average": 4.7,
+        "p50": 4,
+        "p99": 14,
+        "max": 66
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "ready",
       "path": "/ready",
+      "requests": 6817,
+      "throughput": 663466.67,
       "latency": {
-        "p99": 598
-      }
+        "average": 3.87,
+        "p50": 4,
+        "p99": 10,
+        "max": 27
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "sandbox_status",
       "path": "/api/v1/sandbox/status",
+      "requests": 7467,
+      "throughput": 754261.34,
       "latency": {
-        "p99": 1195
-      }
+        "average": 3.47,
+        "p50": 3,
+        "p99": 9,
+        "max": 16
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "escrow_list",
       "path": "/api/v1/escrow",
+      "requests": 8415,
+      "throughput": 659200,
       "latency": {
-        "p99": 2340
-      }
+        "average": 3.1,
+        "p50": 3,
+        "p99": 8,
+        "max": 12
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "flags",
       "path": "/api/v1/flags",
+      "requests": 8370,
+      "throughput": 733781.34,
       "latency": {
-        "p99": 0
-      }
+        "average": 3.11,
+        "p50": 3,
+        "p99": 8,
+        "max": 12
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "compression_metrics",
       "path": "/api/v1/compression/metrics",
+      "requests": 8222,
+      "throughput": 723370.67,
       "latency": {
-        "p99": 0
-      }
+        "average": 3.15,
+        "p50": 3,
+        "p99": 8,
+        "max": 12
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "pool_metrics",
       "path": "/api/v1/pool/metrics",
+      "requests": 8188,
+      "throughput": 731562.67,
       "latency": {
-        "p99": 1070
-      }
+        "average": 3.18,
+        "p50": 3,
+        "p99": 8,
+        "max": 13
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "sandbox_payment_process",
       "path": "/api/v1/sandbox/payments/process",
+      "requests": 4689,
+      "throughput": 833109.34,
       "latency": {
-        "p99": 1628
-      }
+        "average": 5.88,
+        "p50": 5,
+        "p99": 15,
+        "max": 84
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "escrow_create",
       "path": "/api/v1/escrow",
+      "requests": 5189,
+      "throughput": 840618.67,
       "latency": {
-        "p99": 2420
-      }
+        "average": 5.24,
+        "p50": 5,
+        "p99": 13,
+        "max": 19
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "circuit_breaker",
       "path": "/api/v1/circuit-breaker",
+      "requests": 7322,
+      "throughput": 654250.67,
       "latency": {
-        "p99": 1585
-      }
+        "average": 3.57,
+        "p50": 3,
+        "p99": 9,
+        "max": 17
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cache_plain",
+      "path": "/api/v1/cache/plain",
+      "requests": 8065,
+      "throughput": 744533.34,
+      "latency": {
+        "average": 3.2,
+        "p50": 3,
+        "p99": 9,
+        "max": 29
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cache_header_only",
+      "path": "/api/v1/cache/header",
+      "requests": 5569,
+      "throughput": 555136,
+      "latency": {
+        "average": 4.87,
+        "p50": 4,
+        "p99": 14,
+        "max": 22
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cache_memory_hit",
+      "path": "/api/v1/cache/memory",
+      "requests": 5514,
+      "throughput": 575232,
+      "latency": {
+        "average": 4.91,
+        "p50": 4,
+        "p99": 15,
+        "max": 30
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cache_etag_304",
+      "path": "/api/v1/cache/etag-304",
+      "requests": 7747,
+      "throughput": 459690.67,
+      "latency": {
+        "average": 3.41,
+        "p50": 3,
+        "p99": 9,
+        "max": 17
+      },
+      "errors": 0,
+      "non2xx": 7747
     }
   ]
 }

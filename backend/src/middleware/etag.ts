@@ -5,13 +5,14 @@
  * via If-None-Match headers, returning 304 Not Modified when appropriate.
  *
  * Features:
- *   - Content-based ETag generation (SHA-256 hash)
+ *   - Content-based ETag generation (configurable hash algorithm)
  *   - Weak ETags for large payloads to reduce hashing cost
- *   - If-None-Match / If-Match header handling
+ *   - If-None-Match handling: comma-separated lists and `*` wildcard
+ *   - Weak/strong comparison semantics per RFC 7232
  *   - 304 Not Modified responses for matching ETags
- *   - Cache bypass for authenticated mutation requests
- *   - Collision-resistant hashing with configurable algorithm
- *   - Per-endpoint Cache-Control header integration
+ *   - Cache bypass for authenticated requests (Bearer tokens and API keys)
+ *   - Error responses (status >= 400) are never tagged or short-circuited
+ *   - Composes safely with other ETag-emitting middleware (e.g. cacheControl)
  */
 
 import { createHash } from 'node:crypto';
@@ -30,8 +31,6 @@ export interface ETagOptions {
   maxBodySize?: number;
   /** Bypass ETag for authenticated requests (default: false) */
   bypassAuthenticated?: boolean;
-  /** Custom function to derive the cache key from a request */
-  cacheKeyFn?: (req: Request) => string;
 }
 
 export interface ETagMetrics {
@@ -47,7 +46,7 @@ export interface ETagMetrics {
 const DEFAULT_ALGORITHM = 'sha256';
 const DEFAULT_WEAK_THRESHOLD = 1_048_576; // 1 MiB
 const DEFAULT_MAX_BODY_SIZE = 10_485_760; // 10 MiB
-const HASH_DIGEST_LENGTH = 32; // hex chars to keep from the hash
+const HASH_DIGEST_LENGTH = 32; // hex chars retained from the hash
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────
 
@@ -121,6 +120,11 @@ export function strongMatch(etagA: string, etagB: string): boolean {
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
+/** True when a request carries credentials of any kind. */
+function carriesCredentials(req: Request): boolean {
+  return Boolean(req.headers.authorization || req.headers['x-api-key']);
+}
+
 /**
  * Express middleware that adds ETag headers and handles conditional requests.
  *
@@ -129,6 +133,8 @@ export function strongMatch(etagA: string, etagB: string): boolean {
  *   - Returns 304 Not Modified when the client's If-None-Match matches
  *
  * Mutations (POST/PUT/PATCH/DELETE) are passed through without ETag logic.
+ * If another middleware (or route) already set an ETag header, this middleware
+ * honours it instead of generating a conflicting one.
  */
 export function etag(options: ETagOptions = {}) {
   const {
@@ -137,7 +143,6 @@ export function etag(options: ETagOptions = {}) {
     weakThresholdBytes = DEFAULT_WEAK_THRESHOLD,
     maxBodySize = DEFAULT_MAX_BODY_SIZE,
     bypassAuthenticated = false,
-    cacheKeyFn,
   } = options;
 
   return function etagMiddleware(req: Request, res: Response, next: NextFunction): void {
@@ -148,7 +153,7 @@ export function etag(options: ETagOptions = {}) {
     }
 
     // Optionally bypass for authenticated requests
-    if (bypassAuthenticated && req.headers.authorization) {
+    if (bypassAuthenticated && carriesCredentials(req)) {
       metrics.bypassed++;
       next();
       return;
@@ -158,6 +163,16 @@ export function etag(options: ETagOptions = {}) {
 
     res.json = function etagJson(body: unknown): Response {
       res.json = originalJson;
+
+      // Never tag or short-circuit error responses
+      if (res.statusCode >= 400) {
+        metrics.bypassed++;
+        return originalJson(body);
+      }
+
+      // If an upstream middleware already tagged this response, defer to it
+      const existingHeader = res.getHeader('ETag');
+      const existing = Array.isArray(existingHeader) ? existingHeader[0] : existingHeader;
 
       const bodyStr = JSON.stringify(body);
 
@@ -170,8 +185,14 @@ export function etag(options: ETagOptions = {}) {
       // Determine if we should use a weak ETag
       const useWeak = weak || bodyStr.length > weakThresholdBytes;
 
-      const tag = generateETag(bodyStr, algorithm, useWeak);
-      metrics.generated++;
+      const tag =
+        typeof existing === 'string' && existing.length > 0
+          ? existing
+          : generateETag(bodyStr, algorithm, useWeak);
+
+      if (typeof existing !== 'string' || existing.length === 0) {
+        metrics.generated++;
+      }
 
       res.setHeader('ETag', tag);
 
