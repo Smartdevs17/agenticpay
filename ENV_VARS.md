@@ -14,6 +14,10 @@
 | VAPID_PRIVATE_KEY    | VAPID private key for Web Push API  | auto-generated | No       |
 | WS_ENABLED           | Enable/disable WebSocket support    | true    | No       |
 | WS_PORT              | WebSocket port                      | 3001    | No       |
+| DB_READ_REPLICA_URLS | Comma-separated PostgreSQL read replica URLs | - | No |
+| DB_REPLICA_MAX_LAG_MS | Maximum replica lag before primary failover | 5000 | No |
+| DB_REPLICA_HEALTH_CHECK_INTERVAL_MS | Interval for replica health checks | 30000 | No |
+| DB_REPLICA_FAILOVER_COOLDOWN_MS | Cooldown after replica failover | 15000 | No |
 
 ## Frontend
 
@@ -37,6 +41,8 @@ AGENTICPAY_ALLOWED_SIGNATURE_ORIGINS=https://agenticpay.com,http://localhost:300
 VAPID_PUBLIC_KEY=your-vapid-public-key
 VAPID_PRIVATE_KEY=your-vapid-private-key
 WS_ENABLED=true
+DB_READ_REPLICA_URLS=
+DB_REPLICA_MAX_LAG_MS=5000
 ```
 
 - `.env.development` — local development

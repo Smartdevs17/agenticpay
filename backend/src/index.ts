@@ -4,7 +4,6 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
-import compression from 'compression';
 import { verificationRouter } from './routes/verification.js';
 import { invoiceRouter } from './routes/invoice.js';
 import { stellarRouter } from './routes/stellar.js';
@@ -48,6 +47,12 @@ import commentsRouter from './routes/comments.js';
 import collaborationRouter from './routes/collaboration.js';
 import { paymentStrategiesRouter } from './routes/payment-strategies.js';
 import { registerDefaultPaymentProviders } from './services/payments/bootstrap.js';
+import { compressionMiddleware } from './middleware/compression.js';
+import { streamingExportRouter } from './routes/streaming-export.js';
+import { poolMonitorRouter } from './routes/pool-monitor.js';
+import { legacyRouter } from './routes/legacy.js';
+import { splitsRouter } from './routes/splits.js';
+import { refundsRouter } from './routes/refunds.js';
 
 dotenv.config();
 
@@ -180,24 +185,7 @@ app.use(contentSecurityPolicy());
 
 app.use(express.json());
 
-app.use(
-  compression({
-    threshold: config.compression.threshold,
-    filter: (req, res) => {
-      if (req.headers['x-no-compression']) {
-        return false;
-      }
-      const contentType = res.getHeader('Content-Type');
-      if (typeof contentType === 'string' && contentType.includes('application/json')) {
-        return true;
-      }
-      if (Array.isArray(contentType) && contentType.some((ct) => ct.includes('application/json'))) {
-        return true;
-      }
-      return compression.filter(req, res);
-    },
-  })
-);
+app.use(compressionMiddleware({ minSizeBytes: config.compression.threshold }));
 
 app.use(requestIdMiddleware);
 app.use(auditMiddleware());
@@ -240,9 +228,6 @@ app.use(healthRouter);
 app.use('/docs', docsRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
-
-import { portfolioRouter } from './routes/portfolio.js';
-import { emailRouter } from './routes/email.js';
 
 // Apply tiered limiter to all API routes
 app.use('/api/', tieredRateLimit);
@@ -297,6 +282,10 @@ apiV1Router.use('/comments', commentsRouter);
 apiV1Router.use('/collaboration', collaborationRouter);
 // Multi-chain payment processing via the PaymentProvider strategy pattern — Issue #726
 apiV1Router.use('/payment-strategies', paymentStrategiesRouter);
+// Large dataset streaming exports
+apiV1Router.use('/exports', streamingExportRouter);
+// Performance and pool monitoring
+apiV1Router.use('/monitoring', poolMonitorRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);

@@ -26,6 +26,10 @@ const envSchema = z.object({
   DB_POOL_ACQUIRE_TIMEOUT_MS: z.string().default('30000'),
   DB_POOL_MAX_USES: z.string().default('7500'),
   DB_STATEMENT_TIMEOUT_MS: z.string().default('30000'),
+  DB_READ_REPLICA_URLS: z.string().default(''),
+  DB_REPLICA_MAX_LAG_MS: z.string().default('5000'),
+  DB_REPLICA_HEALTH_CHECK_INTERVAL_MS: z.string().default('30000'),
+  DB_REPLICA_FAILOVER_COOLDOWN_MS: z.string().default('15000'),
   HSTS_MAX_AGE_SECONDS: z.string().default('31536000'),
   PERMISSIONS_POLICY: z
     .string()
@@ -82,6 +86,12 @@ export const config = {
       acquireTimeoutMs: Number(env.DB_POOL_ACQUIRE_TIMEOUT_MS),
       maxUses: Number(env.DB_POOL_MAX_USES),
       statementTimeoutMs: Number(env.DB_STATEMENT_TIMEOUT_MS),
+    },
+    replicas: {
+      urls: env.DB_READ_REPLICA_URLS.split(',').map((url) => url.trim()).filter(Boolean),
+      maxLagMs: Number(env.DB_REPLICA_MAX_LAG_MS),
+      healthCheckIntervalMs: Number(env.DB_REPLICA_HEALTH_CHECK_INTERVAL_MS),
+      failoverCooldownMs: Number(env.DB_REPLICA_FAILOVER_COOLDOWN_MS),
     },
   },
   security: {

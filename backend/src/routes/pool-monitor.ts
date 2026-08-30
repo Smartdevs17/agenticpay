@@ -12,7 +12,7 @@ import { poolMetrics, getPgBouncerConfig } from '../config/database.js';
 export const poolMonitorRouter = Router();
 
 /**
- * GET /api/v1/monitoring/pool/health
+ * GET /api/v1/monitoring/health
  * Get comprehensive pool health report
  */
 poolMonitorRouter.get('/health', async (req: Request, res: Response) => {
@@ -32,7 +32,7 @@ poolMonitorRouter.get('/health', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/v1/monitoring/pool/metrics
+ * GET /api/v1/monitoring/metrics
  * Get detailed pool metrics
  */
 poolMonitorRouter.get('/metrics', async (req: Request, res: Response) => {
@@ -51,7 +51,7 @@ poolMonitorRouter.get('/metrics', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/v1/monitoring/pool/config
+ * GET /api/v1/monitoring/config
  * Get PgBouncer configuration
  */
 poolMonitorRouter.get('/config', async (req: Request, res: Response) => {
