@@ -172,6 +172,9 @@ model Payment {
   @@index([txHash])
   @@index([projectId])
   @@index([providerId])
+  @@index([tenantId, status])
+  @@index([userId, createdAt])
+  @@index([tenantId, type])
   @@map("payments")
 }
 
@@ -195,6 +198,7 @@ model Project {
 
   @@index([tenantId, createdAt])
   @@index([status])
+  @@index([tenantId, status])
   @@map("projects")
 }
 
@@ -215,6 +219,7 @@ model Milestone {
   payments Payment[]
 
   @@index([projectId])
+  @@index([projectId, status])
   @@map("milestones")
 }
 
@@ -239,6 +244,8 @@ model Invoice {
   @@index([tenantId, generatedAt])
   @@index([projectId])
   @@index([status])
+  @@index([tenantId, status])
+  @@index([tenantId, dueAt])
   @@map("invoices")
 }
 
@@ -264,6 +271,7 @@ model Webhook {
 
   @@index([tenantId])
   @@index([status])
+  @@index([tenantId, status])
   @@map("webhooks")
 }
 
@@ -333,6 +341,7 @@ model OutboxEvent {
   @@index([aggregateType, aggregateId])
   @@index([eventType])
   @@index([publishedAt])
+  @@index([status, attempts])
   @@map("outbox_events")
 }
 
