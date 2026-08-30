@@ -4,6 +4,8 @@
 import express from 'express';
 import { etag } from '../../middleware/etag.js';
 import { cacheControl } from '../../middleware/cache.js';
+import { createCorsMiddleware } from '../../middleware/cors.js';
+import { WebhookKeyRegistry } from '../../services/webhookKeys.js';
 
 const escrows: Array<Record<string, unknown>> = [];
 const payments = new Map<string, Record<string, unknown>>();
@@ -98,6 +100,81 @@ export function createBenchmarkApp(): express.Application {
       res.json({ cache: 'etag' });
     },
   );
+
+  // ── CORS benchmarks ──────────────────────────────────────────────────────
+  // Dynamic-whitelist middleware resolving an exact origin and a wildcard
+  // tenant pattern per request. Mounted router-level so preflights are
+  // answered by the middleware (as in the real app) before route matching.
+  const corsMiddleware = createCorsMiddleware({
+    allowedOrigins: ['https://app.example.com', 'https://*.tenant.example.com'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
+
+  api.use('/cors', corsMiddleware);
+
+  api.get(
+    '/cors/allowed',
+    (_req, res) => {
+      res.json({ cors: 'allowed', timestamp: Date.now() });
+    },
+  );
+
+  // ── Webhook signature verification benchmarks ──────────────────────────
+  // Rotation-aware HMAC verification against a registered key. A valid
+  // signature/timestamp pair is precomputed at boot and replayed for the
+  // "valid" route; the invalid route signs over a different body so every
+  // request exercises the constant-time rejection path.
+  const BENCH_WEBHOOK_BODY = JSON.stringify({ event: 'bench.webhook', data: { id: 'bench_w_1' } });
+  const BENCH_WEBHOOK_BODY_INVALID = JSON.stringify({ event: 'bench.webhook', data: { id: 'bench_w_2' } });
+  const BENCH_WEBHOOK_TS = String(Math.floor(Date.now() / 1000));
+  const benchKeyRegistry = new WebhookKeyRegistry({
+    keys: [{ provider: 'custom', secret: 'bench_webhook_secret_0123456789abcdef0123456789abcdef' }],
+  });
+  const benchWebhookSignature = benchKeyRegistry
+    .sign({ provider: 'custom', body: BENCH_WEBHOOK_BODY, timestamp: Number(BENCH_WEBHOOK_TS) })
+    .signature;
+  const benchWebhookSignatureInvalid = benchKeyRegistry
+    .sign({ provider: 'custom', body: BENCH_WEBHOOK_BODY_INVALID, timestamp: Number(BENCH_WEBHOOK_TS) })
+    .signature;
+
+  const resolveWebhookBody = (body: unknown): string => {
+    if (typeof body === 'string') return body;
+    if (body && typeof body === 'object' && Object.keys(body as Record<string, unknown>).length > 0) {
+      return JSON.stringify(body);
+    }
+    return BENCH_WEBHOOK_BODY;
+  };
+
+  api.post('/webhook/verify', (req, res) => {
+    const signature = (req.headers['x-signature'] as string) || benchWebhookSignature;
+    const timestamp = (req.headers['x-timestamp'] as string) || BENCH_WEBHOOK_TS;
+    const ok = benchKeyRegistry.verify({
+      signature,
+      timestamp,
+      body: resolveWebhookBody(req.body),
+      provider: 'custom',
+    });
+    if (ok.isValid) {
+      res.json({ verified: true });
+    } else {
+      res.status(401).json({ verified: false });
+    }
+  });
+
+  api.post('/webhook/verify-invalid', (_req, res) => {
+    const ok = benchKeyRegistry.verify({
+      signature: benchWebhookSignatureInvalid,
+      timestamp: BENCH_WEBHOOK_TS,
+      body: BENCH_WEBHOOK_BODY,
+      provider: 'custom',
+    });
+    if (ok.isValid) {
+      res.json({ verified: true });
+    } else {
+      res.status(401).json({ verified: false });
+    }
+  });
 
   app.use('/api/v1', api);
   return app;

@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import compression from 'compression';
@@ -34,6 +33,9 @@ import { stripeRouter } from './routes/stripe.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { SecurityMiddleware, SecurityMonitor, securityHeadersMiddleware } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { createCorsMiddleware } from './middleware/cors.js';
+import { initCorsPolicy } from './services/cors.js';
+import { corsRouter } from './routes/cors.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
 import { taxReportingRouter } from './routes/tax-reporting.js';
@@ -166,9 +168,15 @@ const invoiceLimiter = rateLimit({
 });
 
 app.use(securityHeadersMiddleware());
+
+// Dynamic CORS policy: seed the allowlist from config, then serve every
+// request through the shared CORSOriginPolicy (runtime-mutable).
+initCorsPolicy({
+  allowedOrigins: config.cors.allowedOrigins,
+  allowCredentials: true,
+});
 app.use(
-  cors({
-    origin: config.cors.allowedOrigins,
+  createCorsMiddleware({
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id', REQUEST_ID_HEADER],
@@ -277,6 +285,8 @@ apiV1Router.use('/backup', backupRouter);
 apiV1Router.use('/audit', auditRouter);
 // IP allowlist management
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
+// Dynamic CORS policy management
+apiV1Router.use('/cors', corsRouter);
 // Push notifications
 apiV1Router.use('/push', pushRouter);
 // Stripe card payments

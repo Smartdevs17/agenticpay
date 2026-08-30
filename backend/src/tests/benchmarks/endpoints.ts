@@ -5,7 +5,7 @@
 
 export interface BenchmarkEndpoint {
   name: string;
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'OPTIONS';
   path: string;
   body?: string;
   headers?: Record<string, string>;
@@ -73,6 +73,41 @@ export const BENCHMARK_ENDPOINTS: BenchmarkEndpoint[] = [
     method: 'GET',
     path: '/api/v1/cache/etag-304',
     headers: { 'if-none-match': '*' },
+  },
+  {
+    name: 'cors_allowed',
+    method: 'GET',
+    path: '/api/v1/cors/allowed',
+    headers: { origin: 'https://app.example.com' },
+  },
+  {
+    name: 'cors_wildcard',
+    method: 'GET',
+    path: '/api/v1/cors/allowed',
+    headers: { origin: 'https://app.tenant.example.com' },
+  },
+  {
+    name: 'cors_preflight',
+    method: 'OPTIONS',
+    path: '/api/v1/cors/allowed',
+    headers: {
+      origin: 'https://app.example.com',
+      'access-control-request-method': 'GET',
+    },
+  },
+  {
+    name: 'webhook_verify_valid',
+    method: 'POST',
+    path: '/api/v1/webhook/verify',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event: 'bench.webhook', data: { id: 'bench_w_1' } }),
+  },
+  {
+    name: 'webhook_verify_invalid',
+    method: 'POST',
+    path: '/api/v1/webhook/verify-invalid',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event: 'bench.webhook', data: { id: 'bench_w_2' } }),
   },
 ];
 

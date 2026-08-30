@@ -1,17 +1,17 @@
 {
-  "generatedAt": "2026-08-29T20:38:19.951Z",
+  "generatedAt": "2026-08-30T13:59:47.337Z",
   "port": 3099,
   "endpoints": [
     {
       "name": "health",
       "path": "/health",
-      "requests": 5761,
-      "throughput": 645248,
+      "requests": 5538,
+      "throughput": 620330.67,
       "latency": {
-        "average": 4.7,
+        "average": 4.9,
         "p50": 4,
         "p99": 14,
-        "max": 66
+        "max": 75
       },
       "errors": 0,
       "non2xx": 0
@@ -19,13 +19,13 @@
     {
       "name": "ready",
       "path": "/ready",
-      "requests": 6817,
-      "throughput": 663466.67,
+      "requests": 6078,
+      "throughput": 591616,
       "latency": {
-        "average": 3.87,
+        "average": 4.41,
         "p50": 4,
-        "p99": 10,
-        "max": 27
+        "p99": 14,
+        "max": 43
       },
       "errors": 0,
       "non2xx": 0
@@ -33,13 +33,13 @@
     {
       "name": "sandbox_status",
       "path": "/api/v1/sandbox/status",
-      "requests": 7467,
-      "throughput": 754261.34,
+      "requests": 5739,
+      "throughput": 579669.34,
       "latency": {
-        "average": 3.47,
-        "p50": 3,
-        "p99": 9,
-        "max": 16
+        "average": 4.7,
+        "p50": 4,
+        "p99": 12,
+        "max": 21
       },
       "errors": 0,
       "non2xx": 0
@@ -47,13 +47,13 @@
     {
       "name": "escrow_list",
       "path": "/api/v1/escrow",
-      "requests": 8415,
-      "throughput": 659200,
+      "requests": 7733,
+      "throughput": 605610.67,
       "latency": {
-        "average": 3.1,
+        "average": 3.35,
         "p50": 3,
         "p99": 8,
-        "max": 12
+        "max": 11
       },
       "errors": 0,
       "non2xx": 0
@@ -61,13 +61,13 @@
     {
       "name": "flags",
       "path": "/api/v1/flags",
-      "requests": 8370,
-      "throughput": 733781.34,
+      "requests": 7984,
+      "throughput": 699989.34,
       "latency": {
-        "average": 3.11,
+        "average": 3.24,
         "p50": 3,
         "p99": 8,
-        "max": 12
+        "max": 11
       },
       "errors": 0,
       "non2xx": 0
@@ -75,10 +75,10 @@
     {
       "name": "compression_metrics",
       "path": "/api/v1/compression/metrics",
-      "requests": 8222,
-      "throughput": 723370.67,
+      "requests": 8079,
+      "throughput": 710912,
       "latency": {
-        "average": 3.15,
+        "average": 3.18,
         "p50": 3,
         "p99": 8,
         "max": 12
@@ -89,13 +89,13 @@
     {
       "name": "pool_metrics",
       "path": "/api/v1/pool/metrics",
-      "requests": 8188,
-      "throughput": 731562.67,
+      "requests": 8525,
+      "throughput": 761600,
       "latency": {
-        "average": 3.18,
+        "average": 3.04,
         "p50": 3,
         "p99": 8,
-        "max": 13
+        "max": 14
       },
       "errors": 0,
       "non2xx": 0
@@ -103,13 +103,13 @@
     {
       "name": "sandbox_payment_process",
       "path": "/api/v1/sandbox/payments/process",
-      "requests": 4689,
-      "throughput": 833109.34,
+      "requests": 4656,
+      "throughput": 827136,
       "latency": {
-        "average": 5.88,
+        "average": 5.91,
         "p50": 5,
         "p99": 15,
-        "max": 84
+        "max": 96
       },
       "errors": 0,
       "non2xx": 0
@@ -117,13 +117,13 @@
     {
       "name": "escrow_create",
       "path": "/api/v1/escrow",
-      "requests": 5189,
-      "throughput": 840618.67,
+      "requests": 4898,
+      "throughput": 793514.67,
       "latency": {
-        "average": 5.24,
+        "average": 5.59,
         "p50": 5,
         "p99": 13,
-        "max": 19
+        "max": 21
       },
       "errors": 0,
       "non2xx": 0
@@ -131,13 +131,13 @@
     {
       "name": "circuit_breaker",
       "path": "/api/v1/circuit-breaker",
-      "requests": 7322,
-      "throughput": 654250.67,
+      "requests": 7426,
+      "throughput": 663296,
       "latency": {
-        "average": 3.57,
+        "average": 3.51,
         "p50": 3,
         "p99": 9,
-        "max": 17
+        "max": 13
       },
       "errors": 0,
       "non2xx": 0
@@ -145,13 +145,13 @@
     {
       "name": "cache_plain",
       "path": "/api/v1/cache/plain",
-      "requests": 8065,
-      "throughput": 744533.34,
+      "requests": 7753,
+      "throughput": 715861.34,
       "latency": {
-        "average": 3.2,
+        "average": 3.33,
         "p50": 3,
-        "p99": 9,
-        "max": 29
+        "p99": 8,
+        "max": 14
       },
       "errors": 0,
       "non2xx": 0
@@ -159,13 +159,13 @@
     {
       "name": "cache_header_only",
       "path": "/api/v1/cache/header",
-      "requests": 5569,
-      "throughput": 555136,
+      "requests": 6863,
+      "throughput": 683946.67,
       "latency": {
-        "average": 4.87,
-        "p50": 4,
-        "p99": 14,
-        "max": 22
+        "average": 3.85,
+        "p50": 3,
+        "p99": 9,
+        "max": 15
       },
       "errors": 0,
       "non2xx": 0
@@ -173,13 +173,13 @@
     {
       "name": "cache_memory_hit",
       "path": "/api/v1/cache/memory",
-      "requests": 5514,
-      "throughput": 575232,
+      "requests": 6532,
+      "throughput": 681557.34,
       "latency": {
-        "average": 4.91,
+        "average": 4.04,
         "p50": 4,
-        "p99": 15,
-        "max": 30
+        "p99": 10,
+        "max": 17
       },
       "errors": 0,
       "non2xx": 0
@@ -187,16 +187,86 @@
     {
       "name": "cache_etag_304",
       "path": "/api/v1/cache/etag-304",
-      "requests": 7747,
-      "throughput": 459690.67,
+      "requests": 8298,
+      "throughput": 492373.34,
       "latency": {
-        "average": 3.41,
+        "average": 3.15,
         "p50": 3,
         "p99": 9,
-        "max": 17
+        "max": 35
       },
       "errors": 0,
-      "non2xx": 7747
+      "non2xx": 8298
+    },
+    {
+      "name": "cors_allowed",
+      "path": "/api/v1/cors/allowed",
+      "requests": 5764,
+      "throughput": 743509.34,
+      "latency": {
+        "average": 4.7,
+        "p50": 4,
+        "p99": 11,
+        "max": 19
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cors_wildcard",
+      "path": "/api/v1/cors/allowed",
+      "requests": 5831,
+      "throughput": 765866.67,
+      "latency": {
+        "average": 4.64,
+        "p50": 4,
+        "p99": 11,
+        "max": 15
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cors_preflight",
+      "path": "/api/v1/cors/allowed",
+      "requests": 8415,
+      "throughput": 953770.67,
+      "latency": {
+        "average": 3.09,
+        "p50": 3,
+        "p99": 8,
+        "max": 11
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "webhook_verify_valid",
+      "path": "/api/v1/webhook/verify",
+      "requests": 4506,
+      "throughput": 378496,
+      "latency": {
+        "average": 6.14,
+        "p50": 6,
+        "p99": 14,
+        "max": 31
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "webhook_verify_invalid",
+      "path": "/api/v1/webhook/verify-invalid",
+      "requests": 4805,
+      "throughput": 421248,
+      "latency": {
+        "average": 5.74,
+        "p50": 5,
+        "p99": 13,
+        "max": 18
+      },
+      "errors": 0,
+      "non2xx": 4805
     }
   ]
 }
