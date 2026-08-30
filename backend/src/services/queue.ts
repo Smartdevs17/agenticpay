@@ -25,6 +25,7 @@ export interface QueueJob {
   createdAt: Date;
   processedAt?: Date;
   nextRetryAt?: Date;
+  scheduledAt?: Date;
   completedAt?: Date;
   enqueuedBy?: string;
   tags?: string[];
@@ -164,17 +165,25 @@ class MessageQueue {
       priority?: JobPriority;
       enqueuedBy?: string;
       tags?: string[];
+      delayMs?: number;
+      jobId?: string;
     }
   ): Promise<QueueJob> {
+    const scheduledAt = options?.delayMs && options.delayMs > 0
+      ? new Date(Date.now() + options.delayMs)
+      : undefined;
+
     const job: QueueJob = {
-      id: this.generateJobId(),
+      id: options?.jobId ?? this.generateJobId(),
       queue,
       data,
-      status: 'pending',
+      status: scheduledAt ? 'retrying' : 'pending',
       priority: options?.priority ?? 'normal',
       attempts: 0,
       maxAttempts: options?.maxAttempts ?? this.config.maxAttempts,
       createdAt: new Date(),
+      scheduledAt,
+      nextRetryAt: scheduledAt,
       enqueuedBy: options?.enqueuedBy,
       tags: options?.tags,
     };
@@ -207,7 +216,10 @@ class MessageQueue {
   }
 
   start(): void {
-    if (this.isRunning) return;
+    if (this.isRunning) {
+      console.warn('Queue processor already running');
+      return;
+    }
     this.isRunning = true;
     this.processingInterval = setInterval(() => {
       this.processJobs();
@@ -254,12 +266,20 @@ class MessageQueue {
     }
   }
 
+  async processNextBatch(): Promise<void> {
+    const wasRunning = this.isRunning;
+    this.isRunning = true;
+    await this.processJobs();
+    this.isRunning = wasRunning;
+  }
+
   private async processJob(job: QueueJob): Promise<void> {
     const processor = this.processors.get(job.queue);
 
     if (!processor) {
       job.status = 'failed';
       job.lastError = `No processor found for queue: ${job.queue}`;
+      this.metrics.totalFailed++;
       return;
     }
 
@@ -345,6 +365,7 @@ class MessageQueue {
     job.status = 'pending';
     job.attempts = 0;
     job.nextRetryAt = undefined;
+    job.scheduledAt = undefined;
     job.lastError = undefined;
     return true;
   }
@@ -361,6 +382,7 @@ class MessageQueue {
       status: 'pending',
       attempts: 0,
       nextRetryAt: undefined,
+      scheduledAt: undefined,
       lastError: undefined,
       createdAt: new Date(),
     };
@@ -476,3 +498,4 @@ class MessageQueue {
 }
 
 export const messageQueue = new MessageQueue();
+export { MessageQueue };

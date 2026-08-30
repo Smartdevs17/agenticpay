@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracttype, Address, Env, String};
 
 // ---------------------------------------------------------------------------
 // Gas-optimized storage utilities for AgenticPay contracts.
@@ -29,12 +29,19 @@ pub enum LazyKey {
     Paused,
 }
 
-pub struct LazyValue<T: soroban_sdk::IntoVal<Env, soroban_sdk::Val> + soroban_sdk::TryFromVal<Env, soroban_sdk::Val>> {
+pub struct LazyValue<
+    T: soroban_sdk::IntoVal<Env, soroban_sdk::Val> + soroban_sdk::TryFromVal<Env, soroban_sdk::Val>,
+> {
     key: LazyKey,
     default: T,
 }
 
-impl<T: soroban_sdk::IntoVal<Env, soroban_sdk::Val> + soroban_sdk::TryFromVal<Env, soroban_sdk::Val> + Clone> LazyValue<T> {
+impl<
+        T: soroban_sdk::IntoVal<Env, soroban_sdk::Val>
+            + soroban_sdk::TryFromVal<Env, soroban_sdk::Val>
+            + Clone,
+    > LazyValue<T>
+{
     pub fn new(key: LazyKey, default: T) -> Self {
         LazyValue { key, default }
     }
@@ -78,16 +85,23 @@ pub struct ApprovalBitmap {
 
 impl ApprovalBitmap {
     pub fn new() -> Self {
-        ApprovalBitmap { approvals: 0, rejections: 0 }
+        ApprovalBitmap {
+            approvals: 0,
+            rejections: 0,
+        }
     }
 
     pub fn has_approved(&self, signer_index: u32) -> bool {
-        if signer_index >= 128 { return false; }
+        if signer_index >= 128 {
+            return false;
+        }
         (self.approvals >> signer_index) & 1 == 1
     }
 
     pub fn has_rejected(&self, signer_index: u32) -> bool {
-        if signer_index >= 128 { return false; }
+        if signer_index >= 128 {
+            return false;
+        }
         (self.rejections >> signer_index) & 1 == 1
     }
 
@@ -137,12 +151,77 @@ pub struct ProjectV2 {
     pub freelancer: Address,
     pub amount: i128,
     pub deposited: i128,
-    pub status: ProjectStatusV2,
+    pub header: PackedProjectHeader,
     pub github_repo: String,
     pub description: String,
+}
+
+const PROJECT_FLAG_HAS_DEADLINE: u32 = 1;
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PackedProjectHeader {
+    pub status: u32,
+    pub flags: u32,
     pub created_at: u64,
-    /// Unix timestamp deadline. 0 means no deadline.
     pub deadline: u64,
+}
+
+impl PackedProjectHeader {
+    pub fn new(status: ProjectStatusV2, created_at: u64, deadline: u64) -> Self {
+        let flags = if deadline > 0 {
+            PROJECT_FLAG_HAS_DEADLINE
+        } else {
+            0
+        };
+        Self {
+            status: status.to_u32(),
+            flags,
+            created_at,
+            deadline,
+        }
+    }
+
+    pub fn status(&self) -> ProjectStatusV2 {
+        ProjectStatusV2::from_u32(self.status)
+    }
+
+    pub fn set_status(&mut self, status: ProjectStatusV2) {
+        self.status = status.to_u32();
+    }
+
+    pub fn has_deadline(&self) -> bool {
+        self.flags & PROJECT_FLAG_HAS_DEADLINE != 0
+    }
+}
+
+impl ProjectStatusV2 {
+    pub fn to_u32(&self) -> u32 {
+        match self {
+            ProjectStatusV2::Created => 0,
+            ProjectStatusV2::Funded => 1,
+            ProjectStatusV2::InProgress => 2,
+            ProjectStatusV2::WorkSubmitted => 3,
+            ProjectStatusV2::Verified => 4,
+            ProjectStatusV2::Completed => 5,
+            ProjectStatusV2::Disputed => 6,
+            ProjectStatusV2::Cancelled => 7,
+        }
+    }
+
+    pub fn from_u32(value: u32) -> Self {
+        match value {
+            0 => ProjectStatusV2::Created,
+            1 => ProjectStatusV2::Funded,
+            2 => ProjectStatusV2::InProgress,
+            3 => ProjectStatusV2::WorkSubmitted,
+            4 => ProjectStatusV2::Verified,
+            5 => ProjectStatusV2::Completed,
+            6 => ProjectStatusV2::Disputed,
+            7 => ProjectStatusV2::Cancelled,
+            _ => panic!("Invalid project status"),
+        }
+    }
 }
 
 // ── Gas-optimised storage key layout ────────────────────────────────────────
@@ -169,9 +248,9 @@ pub enum StorageKey {
     Receipt(u64),
     Wallet(u64),
     Proposal(u64),
-    ApprovalBitmap(u64),   // proposal_id → bitmap (instead of Vec in Proposal)
+    ApprovalBitmap(u64), // proposal_id → bitmap (instead of Vec in Proposal)
     HtlcLock(u64),
-    Signer(u64, u32),      // (wallet_id, index) → Address
+    Signer(u64, u32), // (wallet_id, index) → Address
     Metadata(String),
 }
 
@@ -196,24 +275,30 @@ pub mod migration {
             freelancer: old.freelancer,
             amount: old.amount,
             deposited: old.deposited,
-            status: match old.status {
-                crate::ProjectStatus::Created => ProjectStatusV2::Created,
-                crate::ProjectStatus::Funded => ProjectStatusV2::Funded,
-                crate::ProjectStatus::InProgress => ProjectStatusV2::InProgress,
-                crate::ProjectStatus::WorkSubmitted => ProjectStatusV2::WorkSubmitted,
-                crate::ProjectStatus::Verified => ProjectStatusV2::Verified,
-                crate::ProjectStatus::Completed => ProjectStatusV2::Completed,
-                crate::ProjectStatus::Disputed => ProjectStatusV2::Disputed,
-                crate::ProjectStatus::Cancelled => ProjectStatusV2::Cancelled,
-            },
+            header: PackedProjectHeader::new(
+                match old.status {
+                    crate::ProjectStatus::Created => ProjectStatusV2::Created,
+                    crate::ProjectStatus::Funded => ProjectStatusV2::Funded,
+                    crate::ProjectStatus::InProgress => ProjectStatusV2::InProgress,
+                    crate::ProjectStatus::WorkSubmitted => ProjectStatusV2::WorkSubmitted,
+                    crate::ProjectStatus::Verified => ProjectStatusV2::Verified,
+                    crate::ProjectStatus::Completed => ProjectStatusV2::Completed,
+                    crate::ProjectStatus::Disputed => ProjectStatusV2::Disputed,
+                    crate::ProjectStatus::Cancelled => ProjectStatusV2::Cancelled,
+                },
+                old.created_at,
+                old.deadline,
+            ),
             github_repo: old.github_repo,
             description: old.description,
-            created_at: old.created_at,
-            deadline: old.deadline,
         };
 
-        env.storage().persistent().set(&StorageKey::Project(project_id), &new);
-        env.storage().persistent().remove(&DataKey::Project(project_id));
+        env.storage()
+            .persistent()
+            .set(&StorageKey::Project(project_id), &new);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Project(project_id));
     }
 
     pub fn migrate_all(env: &Env, count: u64) {
@@ -257,5 +342,18 @@ pub mod migration {
         assert_eq!(bitmap.has_approved(1), false);
         assert_eq!(bitmap.has_rejected(2), true);
         assert_eq!(bitmap.has_rejected(0), false);
+    }
+
+    #[test]
+    fn test_packed_project_header_round_trip() {
+        let mut header = PackedProjectHeader::new(ProjectStatusV2::Created, 123, 456);
+
+        assert_eq!(header.status(), ProjectStatusV2::Created);
+        assert_eq!(header.created_at, 123);
+        assert_eq!(header.deadline, 456);
+        assert_eq!(header.has_deadline(), true);
+
+        header.set_status(ProjectStatusV2::Completed);
+        assert_eq!(header.status(), ProjectStatusV2::Completed);
     }
 }

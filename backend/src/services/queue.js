@@ -1,321 +1,373 @@
 "use strict";
-/**
- * Message Queue Service
- * Manages async task processing with retry logic and state management
- */
-var __assign = (this && this.__assign) || function () {
-    __assign = Object.assign || function(t) {
-        for (var s, i = 1, n = arguments.length; i < n; i++) {
-            s = arguments[i];
-            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
-                t[p] = s[p];
-        }
-        return t;
-    };
-    return __assign.apply(this, arguments);
-};
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var __generator = (this && this.__generator) || function (thisArg, body) {
-    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g = Object.create((typeof Iterator === "function" ? Iterator : Object).prototype);
-    return g.next = verb(0), g["throw"] = verb(1), g["return"] = verb(2), typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
-    function verb(n) { return function (v) { return step([n, v]); }; }
-    function step(op) {
-        if (f) throw new TypeError("Generator is already executing.");
-        while (g && (g = 0, op[0] && (_ = 0)), _) try {
-            if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
-            if (y = 0, t) op = [op[0] & 2, t.value];
-            switch (op[0]) {
-                case 0: case 1: t = op; break;
-                case 4: _.label++; return { value: op[1], done: false };
-                case 5: _.label++; y = op[1]; op = [0]; continue;
-                case 7: op = _.ops.pop(); _.trys.pop(); continue;
-                default:
-                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
-                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
-                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
-                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
-                    if (t[2]) _.ops.pop();
-                    _.trys.pop(); continue;
-            }
-            op = body.call(thisArg, _);
-        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
-        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
-    }
-};
+
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.messageQueue = void 0;
-var DEFAULT_CONFIG = {
-    maxAttempts: 3,
-    retryDelayMs: 1000, // 1 second
-    retryBackoffMultiplier: 2, // exponential backoff
-    maxRetryDelayMs: 60 * 1000, // 1 minute max
-    pollIntervalMs: 1000, // 1 second
-    batchSize: 10,
+exports.MessageQueue = exports.messageQueue = void 0;
+
+const crypto = require("node:crypto");
+
+const PRIORITY_ORDER = {
+  critical: 0,
+  high: 1,
+  normal: 2,
+  low: 3,
 };
-/**
- * In-memory message queue implementation
- * Suitable for single-instance deployments; use Redis for distributed systems
- */
-var MessageQueue = /** @class */ (function () {
-    function MessageQueue(config) {
-        if (config === void 0) { config = {}; }
-        this.jobs = new Map();
-        this.processors = new Map();
-        this.isRunning = false;
-        this.config = __assign(__assign({}, DEFAULT_CONFIG), config);
+
+const DEFAULT_CONFIG = {
+  maxAttempts: 3,
+  retryDelayMs: 1000,
+  retryBackoffMultiplier: 2,
+  maxRetryDelayMs: 60 * 1000,
+  pollIntervalMs: 1000,
+  batchSize: 10,
+  rateLimits: {
+    email: { maxPerSecond: 10, maxBurst: 20 },
+    notifications: { maxPerSecond: 50, maxBurst: 100 },
+    webhooks: { maxPerSecond: 30, maxBurst: 60 },
+    "external-api": { maxPerSecond: 5, maxBurst: 10 },
+  },
+  enableDlq: true,
+  dlqMaxRetentionMs: 7 * 24 * 60 * 60 * 1000,
+};
+
+class TokenBucket {
+  constructor(maxTokens, refillRate) {
+    this.maxTokens = maxTokens;
+    this.refillRate = refillRate;
+    this.tokens = maxTokens;
+    this.lastRefill = Date.now();
+  }
+
+  tryConsume(count) {
+    this.refill();
+    if (this.tokens >= count) {
+      this.tokens -= count;
+      return true;
     }
-    /**
-     * Register a job processor for a queue
-     */
-    MessageQueue.prototype.registerProcessor = function (queue, processor) {
-        this.processors.set(queue, processor);
+    return false;
+  }
+
+  refill() {
+    const now = Date.now();
+    const elapsed = (now - this.lastRefill) / 1000;
+    this.tokens = Math.min(this.maxTokens, this.tokens + elapsed * this.refillRate);
+    this.lastRefill = now;
+  }
+
+  get usage() {
+    this.refill();
+    return this.maxTokens - this.tokens;
+  }
+
+  get remaining() {
+    this.refill();
+    return this.tokens;
+  }
+}
+
+class MessageQueue {
+  constructor(config = {}) {
+    this.jobs = new Map();
+    this.processors = new Map();
+    this.isRunning = false;
+    this.dlq = [];
+    this.rateLimiters = new Map();
+    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.metrics = {
+      totalEnqueued: 0,
+      totalCompleted: 0,
+      totalFailed: 0,
+      totalDlq: 0,
+      totalRetried: 0,
+      avgProcessingTimeMs: 0,
+      processingTimeSamples: 0,
+      priorityDistribution: { critical: 0, high: 0, normal: 0, low: 0 },
+      perQueueLatency: {},
     };
-    /**
-     * Queue a new job
-     */
-    MessageQueue.prototype.enqueue = function (queue, data, maxAttempts) {
-        return __awaiter(this, void 0, void 0, function () {
-            var job;
-            return __generator(this, function (_a) {
-                job = {
-                    id: this.generateJobId(),
-                    queue: queue,
-                    data: data,
-                    status: 'pending',
-                    attempts: 0,
-                    maxAttempts: maxAttempts || this.config.maxAttempts,
-                    createdAt: new Date(),
-                };
-                this.jobs.set(job.id, job);
-                console.log("Job enqueued: ".concat(JSON.stringify(job)));
-                return [2 /*return*/, job];
-            });
-        });
+    this.configureRateLimiters(this.config.rateLimits);
+  }
+
+  configureRateLimiters(rateLimits = {}) {
+    for (const [queue, rl] of Object.entries(rateLimits)) {
+      if (rl) this.rateLimiters.set(queue, new TokenBucket(rl.maxBurst, rl.maxPerSecond));
+    }
+  }
+
+  registerProcessor(queue, processor) {
+    this.processors.set(queue, processor);
+  }
+
+  async enqueue(queue, data, options = {}) {
+    if (typeof options === "number") options = { maxAttempts: options };
+    const scheduledAt = options.delayMs && options.delayMs > 0 ? new Date(Date.now() + options.delayMs) : undefined;
+    const job = {
+      id: options.jobId || this.generateJobId(),
+      queue,
+      data,
+      status: scheduledAt ? "retrying" : "pending",
+      priority: options.priority || "normal",
+      attempts: 0,
+      maxAttempts: options.maxAttempts || this.config.maxAttempts,
+      createdAt: new Date(),
+      scheduledAt,
+      nextRetryAt: scheduledAt,
+      enqueuedBy: options.enqueuedBy,
+      tags: options.tags,
     };
-    /**
-     * Get a job by ID
-     */
-    MessageQueue.prototype.getJob = function (jobId) {
-        return this.jobs.get(jobId);
+    this.jobs.set(job.id, job);
+    this.metrics.totalEnqueued++;
+    this.metrics.priorityDistribution[job.priority]++;
+    return job;
+  }
+
+  getJob(jobId) {
+    return this.jobs.get(jobId);
+  }
+
+  getAllJobs() {
+    return Array.from(this.jobs.values());
+  }
+
+  getJobsByQueue(queue) {
+    return Array.from(this.jobs.values()).filter((job) => job.queue === queue);
+  }
+
+  getJobsByStatus(status) {
+    return Array.from(this.jobs.values()).filter((job) => job.status === status);
+  }
+
+  getJobsByPriority(priority) {
+    return Array.from(this.jobs.values()).filter((job) => job.priority === priority);
+  }
+
+  start() {
+    if (this.isRunning) {
+      console.warn("Queue processor already running");
+      return;
+    }
+    this.isRunning = true;
+    this.processingInterval = setInterval(() => {
+      this.processJobs();
+    }, this.config.pollIntervalMs);
+  }
+
+  stop() {
+    this.isRunning = false;
+    if (this.processingInterval) clearInterval(this.processingInterval);
+  }
+
+  async processJobs() {
+    if (!this.isRunning) return;
+    const now = new Date();
+    const candidates = Array.from(this.jobs.values()).filter((job) =>
+      (job.status === "pending" || (job.status === "retrying" && job.nextRetryAt && job.nextRetryAt <= now)) &&
+      job.attempts < job.maxAttempts
+    );
+    candidates.sort((a, b) => {
+      const priority = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+      return priority !== 0 ? priority : a.createdAt.getTime() - b.createdAt.getTime();
+    });
+    for (const job of candidates.slice(0, this.config.batchSize)) {
+      const limiter = this.rateLimiters.get(job.queue);
+      if (limiter && !limiter.tryConsume(1)) continue;
+      await this.processJob(job);
+    }
+  }
+
+  async processNextBatch() {
+    const wasRunning = this.isRunning;
+    this.isRunning = true;
+    await this.processJobs();
+    this.isRunning = wasRunning;
+  }
+
+  async processJob(job) {
+    const processor = this.processors.get(job.queue);
+    if (!processor) {
+      job.status = "failed";
+      job.lastError = `No processor found for queue: ${job.queue}`;
+      this.metrics.totalFailed++;
+      return;
+    }
+    const startTime = Date.now();
+    try {
+      job.status = "processing";
+      job.attempts += 1;
+      await processor(job);
+      job.status = "completed";
+      job.completedAt = new Date();
+      job.processedAt = new Date();
+      this.metrics.totalCompleted++;
+      this.recordLatency(job.queue, Date.now() - startTime);
+    } catch (error) {
+      job.lastError = error instanceof Error ? error.message : String(error);
+      job.processedAt = new Date();
+      this.recordLatency(job.queue, Date.now() - startTime);
+      if (job.attempts < job.maxAttempts) {
+        const delayMs = this.calculateRetryDelay(job.attempts);
+        job.status = "retrying";
+        job.nextRetryAt = new Date(Date.now() + delayMs);
+        this.metrics.totalRetried++;
+      } else if (this.config.enableDlq) {
+        this.moveToDlq(job);
+      } else {
+        job.status = "failed";
+        this.metrics.totalFailed++;
+      }
+    }
+  }
+
+  calculateRetryDelay(attempt) {
+    const base = this.config.retryDelayMs * Math.pow(this.config.retryBackoffMultiplier, attempt - 1);
+    const capped = Math.min(base, this.config.maxRetryDelayMs);
+    const jitter = capped * 0.1 * (Math.random() * 2 - 1);
+    return Math.max(100, Math.round(capped + jitter));
+  }
+
+  moveToDlq(job) {
+    job.status = "dlq";
+    this.dlq.push({
+      job: { ...job },
+      failedAt: new Date(),
+      failureReason: job.lastError || "Unknown error",
+      originalQueue: job.queue,
+    });
+    this.metrics.totalDlq++;
+    this.pruneDlq();
+  }
+
+  pruneDlq() {
+    const cutoff = Date.now() - this.config.dlqMaxRetentionMs;
+    this.dlq = this.dlq.filter((entry) => entry.failedAt.getTime() > cutoff);
+  }
+
+  recordLatency(queue, durationMs) {
+    if (!this.metrics.perQueueLatency[queue]) this.metrics.perQueueLatency[queue] = { count: 0, totalMs: 0 };
+    const entry = this.metrics.perQueueLatency[queue];
+    entry.count++;
+    entry.totalMs += durationMs;
+    this.metrics.processingTimeSamples++;
+    const total = this.metrics.avgProcessingTimeMs * (this.metrics.processingTimeSamples - 1) + durationMs;
+    this.metrics.avgProcessingTimeMs = total / this.metrics.processingTimeSamples;
+  }
+
+  retryJob(jobId) {
+    const job = this.jobs.get(jobId);
+    if (!job || (job.status !== "failed" && job.status !== "dlq")) return false;
+    job.status = "pending";
+    job.attempts = 0;
+    job.nextRetryAt = undefined;
+    job.scheduledAt = undefined;
+    job.lastError = undefined;
+    return true;
+  }
+
+  replayFromDlq(jobId) {
+    const idx = this.dlq.findIndex((entry) => entry.job.id === jobId);
+    if (idx === -1) return false;
+    const entry = this.dlq[idx];
+    this.dlq.splice(idx, 1);
+    this.jobs.set(jobId, {
+      ...entry.job,
+      status: "pending",
+      attempts: 0,
+      nextRetryAt: undefined,
+      scheduledAt: undefined,
+      lastError: undefined,
+      createdAt: new Date(),
+    });
+    return true;
+  }
+
+  replayAllFromDlq(queue) {
+    let count = 0;
+    for (const entry of [...this.dlq]) {
+      if (queue && entry.originalQueue !== queue) continue;
+      if (this.replayFromDlq(entry.job.id)) count++;
+    }
+    return count;
+  }
+
+  deleteJob(jobId) {
+    return this.jobs.delete(jobId);
+  }
+
+  deleteFromDlq(jobId) {
+    const idx = this.dlq.findIndex((entry) => entry.job.id === jobId);
+    if (idx === -1) return false;
+    this.dlq.splice(idx, 1);
+    return true;
+  }
+
+  clearDlq() {
+    const count = this.dlq.length;
+    this.dlq = [];
+    return count;
+  }
+
+  clearByStatus(status) {
+    let count = 0;
+    for (const [jobId, job] of this.jobs.entries()) {
+      if (job.status === status) {
+        this.jobs.delete(jobId);
+        count++;
+      }
+    }
+    return count;
+  }
+
+  getDlq() {
+    this.pruneDlq();
+    return [...this.dlq];
+  }
+
+  getRateLimitStatus() {
+    const status = {};
+    for (const [queue, limiter] of this.rateLimiters.entries()) {
+      status[queue] = {
+        maxTokens: limiter.remaining + limiter.usage,
+        remaining: limiter.remaining,
+        usage: limiter.usage,
+      };
+    }
+    return status;
+  }
+
+  getStats() {
+    const jobs = Array.from(this.jobs.values());
+    return {
+      total: jobs.length,
+      pending: jobs.filter((job) => job.status === "pending").length,
+      processing: jobs.filter((job) => job.status === "processing").length,
+      completed: jobs.filter((job) => job.status === "completed").length,
+      failed: jobs.filter((job) => job.status === "failed").length,
+      retrying: jobs.filter((job) => job.status === "retrying").length,
+      dlq: jobs.filter((job) => job.status === "dlq").length,
+      priorityBreakdown: {
+        critical: jobs.filter((job) => job.priority === "critical").length,
+        high: jobs.filter((job) => job.priority === "high").length,
+        normal: jobs.filter((job) => job.priority === "normal").length,
+        low: jobs.filter((job) => job.priority === "low").length,
+      },
     };
-    /**
-     * Get all jobs
-     */
-    MessageQueue.prototype.getAllJobs = function () {
-        return Array.from(this.jobs.values());
-    };
-    /**
-     * Get jobs by queue
-     */
-    MessageQueue.prototype.getJobsByQueue = function (queue) {
-        return Array.from(this.jobs.values()).filter(function (job) { return job.queue === queue; });
-    };
-    /**
-     * Get jobs by status
-     */
-    MessageQueue.prototype.getJobsByStatus = function (status) {
-        return Array.from(this.jobs.values()).filter(function (job) { return job.status === status; });
-    };
-    /**
-     * Start processing jobs
-     */
-    MessageQueue.prototype.start = function () {
-        var _this = this;
-        if (this.isRunning) {
-            console.warn('Queue processor already running');
-            return;
-        }
-        this.isRunning = true;
-        console.log('Message queue processor started');
-        this.processingInterval = setInterval(function () {
-            _this.processJobs();
-        }, this.config.pollIntervalMs);
-    };
-    /**
-     * Stop processing jobs
-     */
-    MessageQueue.prototype.stop = function () {
-        if (!this.isRunning) {
-            return;
-        }
-        this.isRunning = false;
-        if (this.processingInterval) {
-            clearInterval(this.processingInterval);
-        }
-        console.log('Message queue processor stopped');
-    };
-    /**
-     * Process pending and retryable jobs
-     */
-    MessageQueue.prototype.processJobs = function () {
-        return __awaiter(this, void 0, void 0, function () {
-            var now_1, jobsToProcess, _i, jobsToProcess_1, job, error_1;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        if (!this.isRunning) {
-                            return [2 /*return*/];
-                        }
-                        _a.label = 1;
-                    case 1:
-                        _a.trys.push([1, 6, , 7]);
-                        now_1 = new Date();
-                        jobsToProcess = Array.from(this.jobs.values())
-                            .filter(function (job) {
-                            return (job.status === 'pending' ||
-                                (job.status === 'retrying' && job.nextRetryAt && job.nextRetryAt <= now_1)) &&
-                                job.attempts < job.maxAttempts;
-                        })
-                            .slice(0, this.config.batchSize);
-                        _i = 0, jobsToProcess_1 = jobsToProcess;
-                        _a.label = 2;
-                    case 2:
-                        if (!(_i < jobsToProcess_1.length)) return [3 /*break*/, 5];
-                        job = jobsToProcess_1[_i];
-                        return [4 /*yield*/, this.processJob(job)];
-                    case 3:
-                        _a.sent();
-                        _a.label = 4;
-                    case 4:
-                        _i++;
-                        return [3 /*break*/, 2];
-                    case 5: return [3 /*break*/, 7];
-                    case 6:
-                        error_1 = _a.sent();
-                        console.error('Error in job processing loop:', error_1);
-                        return [3 /*break*/, 7];
-                    case 7: return [2 /*return*/];
-                }
-            });
-        });
-    };
-    /**
-     * Process a single job
-     */
-    MessageQueue.prototype.processJob = function (job) {
-        return __awaiter(this, void 0, void 0, function () {
-            var processor, error_2, delayMs;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        processor = this.processors.get(job.queue);
-                        if (!processor) {
-                            console.warn("No processor registered for queue: ".concat(job.queue));
-                            job.status = 'failed';
-                            job.lastError = "No processor found for queue: ".concat(job.queue);
-                            return [2 /*return*/];
-                        }
-                        _a.label = 1;
-                    case 1:
-                        _a.trys.push([1, 3, , 4]);
-                        job.status = 'processing';
-                        job.attempts += 1;
-                        return [4 /*yield*/, processor(job)];
-                    case 2:
-                        _a.sent();
-                        job.status = 'completed';
-                        job.completedAt = new Date();
-                        job.processedAt = new Date();
-                        console.log("Job completed: ".concat(job.id));
-                        return [3 /*break*/, 4];
-                    case 3:
-                        error_2 = _a.sent();
-                        job.lastError = error_2 instanceof Error ? error_2.message : String(error_2);
-                        job.processedAt = new Date();
-                        if (job.attempts < job.maxAttempts) {
-                            delayMs = Math.min(this.config.retryDelayMs * Math.pow(this.config.retryBackoffMultiplier, job.attempts - 1), this.config.maxRetryDelayMs);
-                            job.status = 'retrying';
-                            job.nextRetryAt = new Date(Date.now() + delayMs);
-                            console.log("Job scheduled for retry: ".concat(job.id, " in ").concat(delayMs, "ms"));
-                        }
-                        else {
-                            // Max retries exceeded
-                            job.status = 'failed';
-                            console.error("Job failed after ".concat(job.attempts, " attempts: ").concat(job.id), job.lastError);
-                        }
-                        return [3 /*break*/, 4];
-                    case 4: return [2 /*return*/];
-                }
-            });
-        });
-    };
-    /**
-     * Retry a failed job
-     */
-    MessageQueue.prototype.retryJob = function (jobId) {
-        var job = this.jobs.get(jobId);
-        if (!job) {
-            return false;
-        }
-        if (job.status !== 'failed') {
-            return false;
-        }
-        job.status = 'pending';
-        job.attempts = 0;
-        job.nextRetryAt = undefined;
-        return true;
-    };
-    /**
-     * Delete a job
-     */
-    MessageQueue.prototype.deleteJob = function (jobId) {
-        return this.jobs.delete(jobId);
-    };
-    /**
-     * Clear jobs by status
-     */
-    MessageQueue.prototype.clearByStatus = function (status) {
-        var count = 0;
-        for (var _i = 0, _a = this.jobs.entries(); _i < _a.length; _i++) {
-            var _b = _a[_i], jobId = _b[0], job = _b[1];
-            if (job.status === status) {
-                this.jobs.delete(jobId);
-                count++;
-            }
-        }
-        return count;
-    };
-    /**
-     * Get queue statistics
-     */
-    MessageQueue.prototype.getStats = function () {
-        var jobs = Array.from(this.jobs.values());
-        return {
-            total: jobs.length,
-            pending: jobs.filter(function (j) { return j.status === 'pending'; }).length,
-            processing: jobs.filter(function (j) { return j.status === 'processing'; }).length,
-            completed: jobs.filter(function (j) { return j.status === 'completed'; }).length,
-            failed: jobs.filter(function (j) { return j.status === 'failed'; }).length,
-            retrying: jobs.filter(function (j) { return j.status === 'retrying'; }).length,
-        };
-    };
-    /**
-     * Generate a unique job ID
-     */
-    MessageQueue.prototype.generateJobId = function () {
-        return "job-".concat(Date.now(), "-").concat(Math.random().toString(36).substr(2, 9));
-    };
-    /**
-     * Get configuration
-     */
-    MessageQueue.prototype.getConfig = function () {
-        return __assign({}, this.config);
-    };
-    /**
-     * Update configuration
-     */
-    MessageQueue.prototype.updateConfig = function (config) {
-        this.config = __assign(__assign({}, this.config), config);
-    };
-    return MessageQueue;
-}());
-// Export singleton instance
+  }
+
+  getMetrics() {
+    return { ...this.metrics };
+  }
+
+  getConfig() {
+    return { ...this.config };
+  }
+
+  updateConfig(config) {
+    this.config = { ...this.config, ...config };
+    if (config.rateLimits) this.configureRateLimiters(config.rateLimits);
+  }
+
+  generateJobId() {
+    return `job-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+  }
+}
+
+exports.MessageQueue = MessageQueue;
 exports.messageQueue = new MessageQueue();

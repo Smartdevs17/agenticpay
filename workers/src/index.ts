@@ -219,6 +219,22 @@ function getContentType(path: string): string {
   return 'application/octet-stream';
 }
 
+function getStaticAssetRule(path: string) {
+  return STATIC_ASSET_PATTERNS.find((rule) => rule.pattern.test(path));
+}
+
+function staticAssetHeaders(path: string, ttl: number, immutable: boolean, cacheStatus: 'HIT' | 'MISS') {
+  const cacheControl = immutable ? CACHE_CONTROL.staticImmutable : `public, max-age=${ttl}, s-maxage=${ttl}`;
+
+  return {
+    'Content-Type': getContentType(path),
+    'Cache-Control': cacheControl,
+    'X-Cache': cacheStatus,
+    'X-CDN': 'cloudflare',
+    'Access-Control-Allow-Origin': '*',
+  };
+}
+
 // ── Main request handler ──────────────────────────────────────────────────────
 
 async function handleRequest(request: Request, env: Env): Promise<Response> {
@@ -250,24 +266,32 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   // Serve immutable assets (Next.js build output, fonts, images) with long
   // cache lifetimes at the edge. Bypasses backend entirely for cached assets.
   if (method === 'GET') {
-    for (const rule of STATIC_ASSET_PATTERNS) {
-      if (rule.pattern.test(path)) {
-        const cacheKey = `static:${path}`;
-        const cached = await cacheGet(cacheKey, env);
-        if (cached) {
-          const cc = rule.immutable ? CACHE_CONTROL.staticImmutable : `public, max-age=${rule.ttl}, s-maxage=${rule.ttl}`;
-          return new Response(cached, {
-            status: 200,
-            headers: {
-              'Content-Type': getContentType(path),
-              'Cache-Control': cc,
-              'X-Cache': 'HIT',
-              'X-CDN': 'cloudflare',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
-        }
-        break;
+    const rule = getStaticAssetRule(path);
+    if (rule) {
+      const cacheKey = `static:${path}`;
+      const cached = await cacheGet(cacheKey, env);
+      if (cached) {
+        return new Response(cached, {
+          status: 200,
+          headers: staticAssetHeaders(path, rule.ttl, rule.immutable, 'HIT'),
+        });
+      }
+
+      const originResponse = await fetch(`${env.API_BASE_URL}${path}${url.search}`, {
+        headers: {
+          'Accept': request.headers.get('accept') ?? '*/*',
+          'Accept-Encoding': request.headers.get('accept-encoding') ?? 'br, gzip',
+          'X-Route-Key': 'static-asset',
+        },
+      });
+
+      if (originResponse.ok) {
+        const body = await originResponse.text();
+        await cacheSet(cacheKey, body, rule.ttl, env);
+        return new Response(body, {
+          status: originResponse.status,
+          headers: staticAssetHeaders(path, rule.ttl, rule.immutable, 'MISS'),
+        });
       }
     }
   }

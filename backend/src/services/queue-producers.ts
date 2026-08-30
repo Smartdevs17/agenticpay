@@ -5,6 +5,8 @@
 
 import { messageQueue, QueueJob, JobPriority } from './queue.js';
 
+export { messageQueue };
+
 export interface EmailJobData {
   to: string;
   subject: string;

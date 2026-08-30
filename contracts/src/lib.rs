@@ -3,18 +3,18 @@
 #[cfg(test)]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, String, Vec};
 
 pub mod common;
-pub mod escrow;
 pub mod dispute;
-pub mod multisig;
+pub mod escrow;
 pub mod htlc;
+pub mod multisig;
 pub mod storage;
 
 pub use common::*;
 pub use storage::{
-    ApprovalBitmap, LazyKey, LazyValue, ProjectV2, ProjectStatusV2, StorageKey,
+    ApprovalBitmap, LazyKey, LazyValue, PackedProjectHeader, ProjectStatusV2, ProjectV2, StorageKey,
 };
 
 #[contract]
@@ -104,10 +104,8 @@ impl AgenticPayContract {
         // Acquire lock so pause cannot be called re-entrantly.
         Self::_acquire_lock(&env);
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events().publish(
-            (symbol_short!("circuit"), symbol_short!("paused")),
-            true,
-        );
+        env.events()
+            .publish((symbol_short!("circuit"), symbol_short!("paused")), true);
         Self::_release_lock(&env);
     }
 
@@ -119,10 +117,8 @@ impl AgenticPayContract {
         // Acquire lock so unpause cannot be called re-entrantly.
         Self::_acquire_lock(&env);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.events().publish(
-            (symbol_short!("circuit"), symbol_short!("paused")),
-            false,
-        );
+        env.events()
+            .publish((symbol_short!("circuit"), symbol_short!("paused")), false);
         Self::_release_lock(&env);
     }
 
@@ -424,7 +420,9 @@ impl AgenticPayContract {
             timestamp: env.ledger().timestamp(),
         };
 
-        env.storage().persistent().set(&DataKey::Receipt(count), &receipt);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Receipt(count), &receipt);
         env.storage().instance().set(&DataKey::ReceiptCount, &count);
         env.events().publish(
             (symbol_short!("receipt"), symbol_short!("issued")),
@@ -557,10 +555,8 @@ impl AgenticPayContract {
             .persistent()
             .set(&DataKey::Metadata(key.clone()), &value);
 
-        env.events().publish(
-            (symbol_short!("meta"), symbol_short!("set")),
-            (key, value),
-        );
+        env.events()
+            .publish((symbol_short!("meta"), symbol_short!("set")), (key, value));
 
         Self::_release_lock(&env);
     }
@@ -578,12 +574,12 @@ impl AgenticPayContract {
         let stored_admin = Self::get_admin(&env);
         assert!(admin == stored_admin, "Only admin can remove metadata");
 
-        env.storage().persistent().remove(&DataKey::Metadata(key.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Metadata(key.clone()));
 
-        env.events().publish(
-            (symbol_short!("meta"), symbol_short!("del")),
-            key,
-        );
+        env.events()
+            .publish((symbol_short!("meta"), symbol_short!("del")), key);
 
         Self::_release_lock(&env);
     }
@@ -648,20 +644,22 @@ impl AgenticPayContract {
                     freelancer: old.freelancer,
                     amount: old.amount,
                     deposited: old.deposited,
-                    status: match old.status {
-                        crate::ProjectStatus::Created => ProjectStatusV2::Created,
-                        crate::ProjectStatus::Funded => ProjectStatusV2::Funded,
-                        crate::ProjectStatus::InProgress => ProjectStatusV2::InProgress,
-                        crate::ProjectStatus::WorkSubmitted => ProjectStatusV2::WorkSubmitted,
-                        crate::ProjectStatus::Verified => ProjectStatusV2::Verified,
-                        crate::ProjectStatus::Completed => ProjectStatusV2::Completed,
-                        crate::ProjectStatus::Disputed => ProjectStatusV2::Disputed,
-                        crate::ProjectStatus::Cancelled => ProjectStatusV2::Cancelled,
-                    },
+                    header: PackedProjectHeader::new(
+                        match old.status {
+                            crate::ProjectStatus::Created => ProjectStatusV2::Created,
+                            crate::ProjectStatus::Funded => ProjectStatusV2::Funded,
+                            crate::ProjectStatus::InProgress => ProjectStatusV2::InProgress,
+                            crate::ProjectStatus::WorkSubmitted => ProjectStatusV2::WorkSubmitted,
+                            crate::ProjectStatus::Verified => ProjectStatusV2::Verified,
+                            crate::ProjectStatus::Completed => ProjectStatusV2::Completed,
+                            crate::ProjectStatus::Disputed => ProjectStatusV2::Disputed,
+                            crate::ProjectStatus::Cancelled => ProjectStatusV2::Cancelled,
+                        },
+                        old.created_at,
+                        old.deadline,
+                    ),
                     github_repo: old.github_repo,
                     description: old.description,
-                    created_at: old.created_at,
-                    deadline: old.deadline,
                 };
 
                 env.storage()
@@ -713,12 +711,7 @@ impl AgenticPayContract {
     /// Requires the caller to already be a signer (one-of-N consensus is
     /// enforced off-chain via the proposal flow; this entry-point is for
     /// direct admin-level additions authorized by the wallet creator).
-    pub fn add_multisig_signer(
-        env: Env,
-        authorizer: Address,
-        wallet_id: u64,
-        new_signer: Address,
-    ) {
+    pub fn add_multisig_signer(env: Env, authorizer: Address, wallet_id: u64, new_signer: Address) {
         multisig::add_signer(&env, authorizer, wallet_id, new_signer)
     }
 
@@ -845,7 +838,6 @@ impl AgenticPayContract {
     pub fn get_bridge_config(env: Env) -> BridgeConfigData {
         htlc::get_bridge_config(&env)
     }
-
 }
 
 // Bring in the property-based security tests (proptest suite).

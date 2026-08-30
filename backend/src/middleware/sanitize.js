@@ -67,7 +67,7 @@ var InputSanitizer = /** @class */ (function () {
         }
         // XSS Protection
         if (options.xssProtection) {
-            sanitized = (0, xss_1.default)(sanitized);
+            sanitized = (typeof xss_1 === 'function' ? xss_1 : xss_1.default)(sanitized);
         }
         // HTML Sanitization
         if (options.htmlSanitization) {

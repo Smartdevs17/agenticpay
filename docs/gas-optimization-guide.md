@@ -46,6 +46,16 @@ State variables arranged to minimize slot usage:
 - `uint16` for basis points (never exceeds 10,000)
 - `bool` for flags (packed with adjacent variables)
 - `uint256` for timestamps (avoids unnecessary casting)
+- Soroban project metadata packs `status`, flags, `created_at`, and `deadline`
+  into `PackedProjectHeader`. The public `Project` compatibility type remains
+  unchanged, while migrated `ProjectV2` records store small metadata together
+  and keep larger strings at the end of the XDR payload.
+
+**Example - Soroban ProjectV2:**
+```rust
+let header = PackedProjectHeader::new(ProjectStatusV2::Created, created_at, deadline);
+assert!(header.has_deadline());
+```
 
 ### 5. Storage Pointer (Reference) Usage
 

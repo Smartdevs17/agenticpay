@@ -16,6 +16,14 @@ export { slaTrackingMiddleware } from './slaTracking.js';
 export { traceMiddleware, TRACE_ID_HEADER } from './trace.js';
 export { cacheControlNoStore, CACHE_NOSTORE_HEADER, VARY_HEADER } from './cache-control.js';
 export { validate } from './validate.js';
+export {
+  validateAndSanitize,
+  validateRequest as validateRequestWithSanitization,
+  validateBody,
+  commonSchemas,
+  type ValidationOptions,
+  type ValidationSchemas,
+} from './validation.js';
 export { versionMiddleware } from './versioning.js';
 export { verifyWebhook, webhookVerifiers, rawBodyCapture, type WebhookVerificationConfig } from './webhookVerification.js';
 export { composeMiddleware, type MiddlewareFunction, type MiddlewareChain } from './compose.js';

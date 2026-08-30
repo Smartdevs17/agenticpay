@@ -411,6 +411,43 @@ resource "aws_cloudfront_origin_access_control" "default" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_cloudfront_response_headers_policy" "static_assets" {
+  name    = "agenticpay-${var.environment}-static-assets-headers"
+  comment = "Long-lived static asset caching and safe cross-origin loading"
+
+  cors_config {
+    access_control_allow_credentials = false
+
+    access_control_allow_headers {
+      items = ["*"]
+    }
+
+    access_control_allow_methods {
+      items = ["GET", "HEAD", "OPTIONS"]
+    }
+
+    access_control_allow_origins {
+      items = ["*"]
+    }
+
+    origin_override = true
+  }
+
+  custom_headers_config {
+    items {
+      header   = "X-CDN"
+      value    = "cloudfront"
+      override = true
+    }
+  }
+
+  security_headers_config {
+    content_type_options {
+      override = true
+    }
+  }
+}
+
 # Frontend CloudFront distribution with HTTP/3 support
 resource "aws_cloudfront_distribution" "frontend" {
   enabled         = true
@@ -448,6 +485,66 @@ resource "aws_cloudfront_distribution" "frontend" {
     min_ttl                = 0
     default_ttl            = 3600
     max_ttl                = 86400
+  }
+
+  ordered_cache_behavior {
+    path_pattern               = "/_next/static/*"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD", "OPTIONS"]
+    target_origin_id           = "amplify-frontend"
+    compress                   = true
+    viewer_protocol_policy     = "redirect-to-https"
+    min_ttl                    = 86400
+    default_ttl                = 31536000
+    max_ttl                    = 31536000
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.static_assets.id
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+  }
+
+  ordered_cache_behavior {
+    path_pattern               = "/images/*"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD", "OPTIONS"]
+    target_origin_id           = "amplify-frontend"
+    compress                   = true
+    viewer_protocol_policy     = "redirect-to-https"
+    min_ttl                    = 3600
+    default_ttl                = 604800
+    max_ttl                    = 31536000
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.static_assets.id
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+  }
+
+  ordered_cache_behavior {
+    path_pattern               = "/fonts/*"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD", "OPTIONS"]
+    target_origin_id           = "amplify-frontend"
+    compress                   = true
+    viewer_protocol_policy     = "redirect-to-https"
+    min_ttl                    = 86400
+    default_ttl                = 31536000
+    max_ttl                    = 31536000
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.static_assets.id
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
   }
 
   restrictions {
