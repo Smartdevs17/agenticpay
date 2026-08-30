@@ -139,6 +139,30 @@ resource "aws_db_instance" "postgres" {
   }
 }
 
+resource "aws_db_instance" "postgres_read_replica" {
+  count = var.db_read_replica_count
+
+  identifier          = "agenticpay-${var.environment}-ro-${count.index + 1}"
+  replicate_source_db = aws_db_instance.postgres.identifier
+  instance_class      = var.db_read_replica_instance_class
+
+  vpc_security_group_ids = [aws_security_group.rds.id]
+
+  auto_minor_version_upgrade      = true
+  deletion_protection             = var.environment == "prod"
+  skip_final_snapshot             = var.environment != "prod"
+  copy_tags_to_snapshot           = true
+  performance_insights_enabled    = var.environment == "prod"
+  performance_insights_kms_key_id = var.environment == "prod" ? aws_kms_key.data_at_rest.arn : null
+
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+
+  tags = {
+    Name = "agenticpay-${var.environment}-read-replica-${count.index + 1}"
+    Role = "read-replica"
+  }
+}
+
 # RDS Proxy (AWS-managed PgBouncer in transaction mode)
 resource "aws_security_group" "rds_proxy" {
   name   = "agenticpay-${var.environment}-rds-proxy-sg"
@@ -375,8 +399,10 @@ resource "aws_apprunner_service" "backend" {
           STELLAR_NETWORK       = var.stellar_network
           PGBOUNCER_ENABLED     = "true"
           DATABASE_URL          = "postgresql://${var.db_username}:${var.db_password}@${aws_db_proxy.pgbouncer.endpoint}:5432/agenticpay"
-          DB_POOL_MAX           = var.db_proxy_pool_max
-          DB_POOL_MIN           = var.db_proxy_pool_min
+          DB_READ_REPLICA_URLS  = join(",", [for replica in aws_db_instance.postgres_read_replica : "postgresql://${var.db_username}:${var.db_password}@${replica.address}:5432/agenticpay"])
+          DB_REPLICA_MAX_LAG_MS = tostring(var.db_replica_max_lag_ms)
+          DB_POOL_MAX           = tostring(var.db_proxy_pool_max)
+          DB_POOL_MIN           = tostring(var.db_proxy_pool_min)
         }
       }
       image_identifier      = "${aws_ecr_repository.backend.repository_url}:latest"
@@ -753,6 +779,25 @@ resource "aws_cloudwatch_metric_alarm" "db_connection_usage" {
 
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.postgres.identifier
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "db_read_replica_lag" {
+  count = var.db_read_replica_count
+
+  alarm_name          = "agenticpay-db-replica-lag-${var.environment}-${count.index + 1}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "ReplicaLag"
+  namespace           = "AWS/RDS"
+  period              = "60"
+  statistic           = "Average"
+  threshold           = ceil(var.db_replica_max_lag_ms / 1000)
+  alarm_description   = "Alert when PostgreSQL read replica lag exceeds backend routing threshold"
+  alarm_actions       = var.environment == "prod" ? [aws_sns_topic.alerts.arn] : []
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.postgres_read_replica[count.index].identifier
   }
 }
 

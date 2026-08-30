@@ -3,6 +3,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { streamingExportService } from '../services/exports/streaming-export.js';
 import { auditService } from '../services/auditService.js';
 import { pipeStreamToResponse } from '../middleware/stream-cancel.js';
+import { getStreamingMetrics, parseStreamingQuery } from '../middleware/streaming.js';
 import type { ExportFormat } from '../services/exports/streaming-export.js';
 import type { AuditEntry, AuditQuery } from '../services/auditService.js';
 
@@ -13,10 +14,12 @@ export const streamingExportRouter = Router();
  * Stream audit log entries using cursor-based pagination.
  */
 streamingExportRouter.get('/audit/stream', asyncHandler(async (req: Request, res: Response) => {
-  const format = (req.query.format as ExportFormat) || 'csv';
-  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const streamQuery = parseStreamingQuery(req.query);
+  const rawFormat = (req.query.format as ExportFormat | undefined) || 'csv';
+  const format = rawFormat === 'jsonl' ? 'jsonl' : 'csv';
+  const limit = streamQuery.limit;
 
-  if (format !== 'csv' && format !== 'jsonl') {
+  if (rawFormat !== 'csv' && rawFormat !== 'jsonl') {
     res.status(400).json({ error: 'Format must be csv or jsonl' });
     return;
   }
@@ -50,6 +53,7 @@ streamingExportRouter.get('/audit/stream', asyncHandler(async (req: Request, res
     format,
     headers: csvHeaders,
     rowLimit: limit,
+    chunkSize: streamQuery.batchSize,
     fetchPage: async (cursor, chunkLimit) => {
       const offset = cursor ? Number(cursor) : pageOffset;
       const result = await auditService.queryEntries({
@@ -103,10 +107,12 @@ streamingExportRouter.get('/audit/stream', asyncHandler(async (req: Request, res
  * Uses in-memory demo data; in production this would query Prisma.
  */
 streamingExportRouter.get('/payments/stream', asyncHandler(async (req: Request, res: Response) => {
-  const format = (req.query.format as ExportFormat) || 'csv';
-  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const streamQuery = parseStreamingQuery(req.query);
+  const rawFormat = (req.query.format as ExportFormat | undefined) || 'csv';
+  const format = rawFormat === 'jsonl' ? 'jsonl' : 'csv';
+  const limit = streamQuery.limit;
 
-  if (format !== 'csv' && format !== 'jsonl') {
+  if (rawFormat !== 'csv' && rawFormat !== 'jsonl') {
     res.status(400).json({ error: 'Format must be csv or jsonl' });
     return;
   }
@@ -128,6 +134,7 @@ streamingExportRouter.get('/payments/stream', asyncHandler(async (req: Request, 
     format,
     headers: csvHeaders,
     rowLimit: limit,
+    chunkSize: streamQuery.batchSize,
     fetchPage: async (_cursor, _chunkLimit) => {
       // Placeholder: in production, use Prisma cursor-based pagination:
       // const payments = await prisma.payment.findMany({
@@ -163,6 +170,14 @@ streamingExportRouter.get('/payments/stream', asyncHandler(async (req: Request, 
     filename: `payments-export-${Date.now()}.${ext}`,
     contentType,
   });
+}));
+
+/**
+ * GET /metrics
+ * Get in-process streaming response metrics.
+ */
+streamingExportRouter.get('/metrics', asyncHandler(async (_req: Request, res: Response) => {
+  res.status(200).json({ timestamp: new Date().toISOString(), data: getStreamingMetrics() });
 }));
 
 /**

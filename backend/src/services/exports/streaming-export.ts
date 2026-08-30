@@ -111,9 +111,10 @@ export class StreamingExportService extends BaseService {
     headers?: string[];
     rowSerializer: (item: T) => string;
     rowLimit?: number;
+    chunkSize?: number;
   }): Readable {
     const { exportId, fetchPage, format, headers, rowSerializer, rowLimit } = params;
-    const chunkSize = this.config.chunkSize;
+    const chunkSize = params.chunkSize ?? this.config.chunkSize;
     const limit = rowLimit ?? this.config.maxRowLimit;
     const job = this.activeJobs.get(exportId);
     const controller = this.abortControllers.get(exportId);

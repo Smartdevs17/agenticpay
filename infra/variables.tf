@@ -71,6 +71,24 @@ variable "db_max_allocated_storage" {
   default     = 100
 }
 
+variable "db_read_replica_count" {
+  description = "Number of PostgreSQL read replicas to provision for read scaling and failover"
+  type        = number
+  default     = 0
+}
+
+variable "db_read_replica_instance_class" {
+  description = "RDS instance class for PostgreSQL read replicas"
+  type        = string
+  default     = "db.t4g.medium"
+}
+
+variable "db_replica_max_lag_ms" {
+  description = "Maximum tolerated read replica lag before backend read routing falls back to primary"
+  type        = number
+  default     = 5000
+}
+
 # ── RDS Proxy (PgBouncer) Variables ────────────────────────────────────────────
 
 variable "db_proxy_borrow_timeout" {

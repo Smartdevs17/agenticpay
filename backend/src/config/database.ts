@@ -874,6 +874,83 @@ export function isReadQuery(sql: string): boolean {
   return /^\s*(SELECT|WITH\s)/i.test(sql);
 }
 
+export type ReplicaHealth = "healthy" | "lagging" | "unhealthy";
+
+export interface ReadReplicaTarget {
+  url: string;
+  health: ReplicaHealth;
+  lagMs: number;
+  lastCheckedAt: number;
+  failureCount: number;
+}
+
+export interface ReplicaSelection {
+  url: string;
+  source: "primary" | "replica";
+  reason: "write_query" | "no_replicas" | "healthy_replica" | "replica_unavailable";
+}
+
+export class ReadReplicaRouter {
+  private replicas: ReadReplicaTarget[];
+  private nextReplicaIndex = 0;
+
+  constructor(
+    replicaUrls = buildReplicaUrls(),
+    private readonly primaryUrl = process.env.DATABASE_URL ?? "",
+    private readonly maxLagMs = envInt("DB_REPLICA_MAX_LAG_MS", 5000),
+  ) {
+    this.replicas = replicaUrls.map((url) => ({
+      url,
+      health: "healthy",
+      lagMs: 0,
+      lastCheckedAt: 0,
+      failureCount: 0,
+    }));
+  }
+
+  select(sql: string): ReplicaSelection {
+    if (!isReadQuery(sql)) {
+      return { url: this.primaryUrl, source: "primary", reason: "write_query" };
+    }
+
+    const healthyReplicas = this.replicas.filter(
+      (replica) => replica.health === "healthy" && replica.lagMs <= this.maxLagMs,
+    );
+
+    if (this.replicas.length === 0) {
+      return { url: this.primaryUrl, source: "primary", reason: "no_replicas" };
+    }
+
+    if (healthyReplicas.length === 0) {
+      return { url: this.primaryUrl, source: "primary", reason: "replica_unavailable" };
+    }
+
+    const replica = healthyReplicas[this.nextReplicaIndex % healthyReplicas.length];
+    this.nextReplicaIndex = (this.nextReplicaIndex + 1) % healthyReplicas.length;
+    return { url: replica.url, source: "replica", reason: "healthy_replica" };
+  }
+
+  updateHealth(url: string, params: { healthy: boolean; lagMs?: number; checkedAt?: number }): void {
+    const replica = this.replicas.find((candidate) => candidate.url === url);
+    if (!replica) return;
+
+    replica.lagMs = params.lagMs ?? replica.lagMs;
+    replica.lastCheckedAt = params.checkedAt ?? Date.now();
+    replica.health = !params.healthy
+      ? "unhealthy"
+      : replica.lagMs > this.maxLagMs
+        ? "lagging"
+        : "healthy";
+    replica.failureCount = replica.health === "healthy" ? 0 : replica.failureCount + 1;
+  }
+
+  snapshot(): ReadReplicaTarget[] {
+    return this.replicas.map((replica) => ({ ...replica }));
+  }
+}
+
+export const readReplicaRouter = new ReadReplicaRouter();
+
 // ── Query Profiler ────────────────────────────────────────────────────────────
 
 export interface QueryProfile {

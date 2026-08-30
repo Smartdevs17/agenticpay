@@ -65,13 +65,12 @@ Reduces payload size by 60-80% on average, improving:
 
 ### Compression Methods
 
-1. **Brotli** (preferred): 20-30% smaller than gzip
-   - Quality level: 5 (balanced speed/compression)
-   - Mode: Text optimization
+AgenticPay uses the maintained Express `compression` middleware with streaming
+backpressure support, negotiated encodings, and route-level filters.
 
-2. **Gzip** (fallback): Universal support
-   - Compression level: 6
-   - Minimum size threshold: 1KB
+- Compression level: 6
+- Minimum size threshold: 1KB by default
+- Skips images, audio, video, archives, and already-compressed content
 
 ### Implementation
 
@@ -79,8 +78,7 @@ Located in: `backend/src/middleware/compression.ts`
 
 ```typescript
 app.use(compressionMiddleware({
-  brotliLevel: 5,
-  gzipLevel: 6,
+  level: 6,
   minSizeBytes: 1024,
 }));
 ```
@@ -90,7 +88,7 @@ app.use(compressionMiddleware({
 Access compression metrics via:
 
 ```
-GET /api/v1/monitoring/pool/compression
+GET /api/v1/monitoring/compression
 ```
 
 Returns:
@@ -105,6 +103,35 @@ Returns:
   "gzipRequests": 350
 }
 ```
+
+---
+
+## API Response Streaming
+
+Large exports are streamed with chunked transfer encoding instead of being buffered in memory.
+
+Endpoints:
+
+```bash
+GET /api/v1/exports/audit/stream?format=csv&limit=100000
+GET /api/v1/exports/audit/stream?format=jsonl&batchSize=1000
+GET /api/v1/exports/payments/stream?format=csv
+```
+
+Reusable helpers live in `backend/src/middleware/streaming.ts`:
+
+```typescript
+const query = parseStreamingQuery(req.query);
+await streamDataset({
+  req,
+  res,
+  items: takeStreamItems(fetchRows(), query.limit),
+  format: query.format,
+});
+```
+
+The streaming helpers set `Transfer-Encoding: chunked`, disable proxy buffering with
+`X-Accel-Buffering: no`, honor HTTP backpressure, and track completed, aborted, and failed streams.
 
 ---
 
@@ -198,6 +225,40 @@ GET /api/v1/payments -H "If-None-Match: abc123def456"
 
 Optimized connection pooling with PgBouncer for efficient resource utilization:
 
+### Read Replicas and Failover
+
+Read replica routing is configured with:
+
+```bash
+DB_READ_REPLICA_URLS=postgresql://user:pass@replica-a:5432/agenticpay,postgresql://user:pass@replica-b:5432/agenticpay
+DB_REPLICA_MAX_LAG_MS=5000
+DB_REPLICA_HEALTH_CHECK_INTERVAL_MS=30000
+DB_REPLICA_FAILOVER_COOLDOWN_MS=15000
+```
+
+`backend/src/config/database.ts` exposes `ReadReplicaRouter`, which routes `SELECT` and `WITH`
+queries across healthy replicas and falls back to `DATABASE_URL` when no replica is available or
+replica lag exceeds the configured threshold. Terraform can provision replicas with
+`db_read_replica_count` and wires `DB_READ_REPLICA_URLS` into the backend service.
+
+### WebSocket Pooling
+
+WebSocket connections are managed by `backend/src/websocket/pool.ts`. The pool enforces capacity,
+tracks active and queued connections, batches outbound messages through `ManagedConnection`, and
+supports clean shutdown. Tune batching with:
+
+```typescript
+attachWebSocketServer({
+  server,
+  options: {
+    maxConnections: 250,
+    maxQueueSizePerConnection: 500,
+    flushIntervalMs: 25,
+    maxBatchSize: 50,
+  },
+});
+```
+
 **Benefits:**
 - Prevents connection exhaustion
 - Detects and prevents connection leaks
@@ -239,7 +300,7 @@ Located in: `backend/src/config/database.ts`
 Access pool health via:
 
 ```
-GET /api/v1/monitoring/pool/health
+GET /api/v1/monitoring/health
 ```
 
 Returns:
@@ -261,7 +322,7 @@ Returns:
 Automatic detection of connection leaks:
 
 ```
-GET /api/v1/monitoring/pool/leaks
+GET /api/v1/monitoring/leaks
 ```
 
 - Monitors connection acquisition/release
@@ -271,7 +332,7 @@ GET /api/v1/monitoring/pool/leaks
 ### Metrics Endpoint
 
 ```
-GET /api/v1/monitoring/pool/metrics
+GET /api/v1/monitoring/metrics
 ```
 
 Returns comprehensive pool statistics including:
@@ -358,7 +419,7 @@ cache.registerWarmer('dashboard:overview',
 ### Metrics Endpoint
 
 ```
-GET /api/v1/monitoring/pool/cache
+GET /api/v1/monitoring/cache
 ```
 
 Returns:
@@ -383,7 +444,7 @@ Returns:
 Comprehensive view of all performance metrics:
 
 ```
-GET /api/v1/monitoring/pool/performance
+GET /api/v1/monitoring/performance
 ```
 
 Returns combined metrics:

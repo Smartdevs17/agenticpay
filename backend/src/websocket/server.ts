@@ -1,7 +1,6 @@
 import type http from 'node:http';
 import { WebSocketServer } from 'ws';
 import type WebSocket from 'ws';
-import { ManagedConnection } from './managedConnection.js';
 import type {
   WebSocketChannel,
   WebSocketClientMessage,
@@ -10,6 +9,7 @@ import type {
   WebSocketServerOptions,
 } from './types.js';
 import type { WebSocketScalingAdapter } from './scaling.js';
+import { WebSocketConnectionPool } from './pool.js';
 
 export type AgenticPayWebSocketServer = {
   wss: WebSocketServer;
@@ -72,7 +72,7 @@ export function attachWebSocketServer(params: {
 
   const metrics = createMetrics();
   const wss = new WebSocketServer({ noServer: true });
-  const connections = new Map<WebSocket, ManagedConnection>();
+  const pool = new WebSocketConnectionPool(metrics, options);
   const lastPongAt = new Map<WebSocket, number>();
   let unsubscribeScaling: (() => void) | undefined;
 
@@ -81,7 +81,7 @@ export function attachWebSocketServer(params: {
       const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
       if (url.pathname !== options.path) return;
 
-      if (metrics.activeConnections >= options.maxConnections) {
+      if (!pool.canAccept()) {
         metrics.rejectedConnections += 1;
         metrics.lastOverloadAtMs = Date.now();
         socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
@@ -98,22 +98,14 @@ export function attachWebSocketServer(params: {
   });
 
   wss.on('connection', (ws: WebSocket, req) => {
-    metrics.activeConnections += 1;
-    metrics.acceptedConnections += 1;
     const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
 
-    const managed = new ManagedConnection({
+    const managed = pool.addConnection({
       ws,
-      metrics,
-      maxQueueSize: options.maxQueueSizePerConnection,
-      maxBufferedAmountBytes: options.maxBufferedAmountBytes,
-      maxBatchSize: options.maxBatchSize,
-      defaultChannels: options.defaultChannels,
       authExpiresAtMs: parseAuthExpiry(url.searchParams.get('expiresAt'), options.maxAuthAgeMs),
       useBinary: options.enableBinaryProtocol && url.searchParams.get('proto') === '1',
     });
 
-    connections.set(ws, managed);
     lastPongAt.set(ws, Date.now());
 
     ws.on('pong', () => lastPongAt.set(ws, Date.now()));
@@ -137,30 +129,25 @@ export function attachWebSocketServer(params: {
     });
 
     ws.on('close', () => {
-      managed.close();
-      connections.delete(ws);
+      pool.removeConnection(ws);
       lastPongAt.delete(ws);
-      metrics.activeConnections = Math.max(0, metrics.activeConnections - 1);
-      metrics.closedConnections += 1;
     });
   });
 
   const flushTimer = setInterval(() => {
-    for (const managed of connections.values()) {
-      managed.flush();
-    }
+    pool.flushAll();
   }, options.flushIntervalMs);
 
   const pingTimer = setInterval(() => {
     const now = Date.now();
-    for (const ws of connections.keys()) {
+    for (const ws of pool.sockets()) {
       if (ws.readyState !== ws.OPEN) continue;
       const lastPong = lastPongAt.get(ws) ?? 0;
       if (now - lastPong > options.pingIntervalMs + options.pongTimeoutMs) {
         ws.terminate();
         continue;
       }
-      const managed = connections.get(ws);
+      const managed = pool.getConnection(ws);
       if (managed?.isAuthExpired(now)) {
         managed.enqueue({ type: 'auth.expired', priority: 'high' });
         ws.close(4001, 'Auth token expired');
@@ -171,9 +158,7 @@ export function attachWebSocketServer(params: {
   }, options.pingIntervalMs);
 
   const broadcastLocal = (message: WebSocketOutboundMessage) => {
-    for (const managed of connections.values()) {
-      managed.enqueue(message);
-    }
+    pool.broadcast(message);
   };
 
   const broadcast = (message: WebSocketOutboundMessage) => {
@@ -200,6 +185,7 @@ export function attachWebSocketServer(params: {
     clearInterval(flushTimer);
     clearInterval(pingTimer);
     unsubscribeScaling?.();
+    pool.closeAll();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
   };
 
