@@ -6,6 +6,7 @@ import { etag } from '../../middleware/etag.js';
 import { cacheControl } from '../../middleware/cache.js';
 import { createCorsMiddleware } from '../../middleware/cors.js';
 import { WebhookKeyRegistry } from '../../services/webhookKeys.js';
+import { CircuitBreaker as BenchmarkCircuitBreaker } from '../../services/circuitBreaker.js';
 
 const escrows: Array<Record<string, unknown>> = [];
 const payments = new Map<string, Record<string, unknown>>();
@@ -42,8 +43,34 @@ export function createBenchmarkApp(): express.Application {
     res.status(201).json(escrow);
   });
 
-  api.get('/circuit-breaker', (_req, res) => {
-    res.json({ circuits: [], status: 'closed' });
+  // ── Circuit breaker benchmarks ────────────────────────────────────────────
+  // Guard a realistic logical "upstream" call with the breaker. The closed
+  // route exercises the per-request overhead (permit check + outcome record);
+  // the rejected route exercises the fast-fail 503 path while the circuit is
+  // open. A dedicated local breaker keeps the benchmark independent of the
+  // shared registry used by other suites.
+  const benchCircuit = new BenchmarkCircuitBreaker('benchmark', {
+    failureThreshold: 100,
+    waitDurationInOpenState: 30_000,
+    requestTimeoutMs: 0,
+  });
+  const benchOpenCircuit = new BenchmarkCircuitBreaker('benchmark-open', {
+    failureThreshold: 1,
+    waitDurationInOpenState: 30_000,
+    requestTimeoutMs: 0,
+  });
+  benchOpenCircuit.recordFailure(new Error('bench-open'));
+  api.get('/circuit-breaker', async (_req, res) => {
+    await benchCircuit.protect(async () => {});
+    res.json({ state: 'closed', status: 'ok' });
+  });
+  api.get('/circuit-breaker/rejected', async (_req, res) => {
+    const allowed = benchOpenCircuit.isCallPermitted();
+    if (!allowed) {
+      res.status(503).json({ error: { code: 'CIRCUIT_OPEN', status: 503 } });
+      return;
+    }
+    res.json({ state: 'closed', status: 'ok' });
   });
 
   api.get('/compression/metrics', (_req, res) => {

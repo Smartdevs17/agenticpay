@@ -53,6 +53,7 @@ export const BENCHMARK_ENDPOINTS: BenchmarkEndpoint[] = [
     }),
   },
   { name: 'circuit_breaker', method: 'GET', path: '/api/v1/circuit-breaker' },
+  { name: 'circuit_breaker_rejected', method: 'GET', path: '/api/v1/circuit-breaker/rejected' },
   {
     name: 'cache_plain',
     method: 'GET',

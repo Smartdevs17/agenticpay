@@ -149,6 +149,12 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
 # Inbound custom webhooks are verified with versioned, rotating HMAC keys.
 # See backend/docs/WEBHOOK_KEY_ROTATION.md for the key lifecycle and rotation API.
 
+# Circuit Breaker
+# External service calls (Stripe, Stellar/Horizon, RPC, webhooks, Vault) are
+# guarded by a fast-failing, self-recovering circuit breaker with per-service
+# isolation. See backend/docs/CIRCUIT_BREAKER.md for the state machine, config,
+# and management API.
+
 # Stellar Configuration
 STELLAR_NETWORK=testnet
 
