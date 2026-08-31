@@ -54,21 +54,6 @@ module "vpc" {
 }
 
 # ------------------------------------------------------------------------------
-# ENCRYPTION AT REST (customer-managed KMS key for sensitive data fields)
-# ------------------------------------------------------------------------------
-
-resource "aws_kms_key" "data_at_rest" {
-  description             = "Customer-managed key for agenticpay-${var.environment} encryption at rest (RDS, Secrets Manager, backups)"
-  deletion_window_in_days = 30
-  enable_key_rotation     = true
-}
-
-resource "aws_kms_alias" "data_at_rest" {
-  name          = "alias/agenticpay-${var.environment}-data-at-rest"
-  target_key_id = aws_kms_key.data_at_rest.key_id
-}
-
-# ------------------------------------------------------------------------------
 # DATABASE RESOURCES (PostgreSQL + PgBouncer via RDS Proxy)
 # ------------------------------------------------------------------------------
 
@@ -116,7 +101,6 @@ resource "aws_db_instance" "postgres" {
   max_allocated_storage = var.db_max_allocated_storage
   storage_type          = "gp3"
   storage_encrypted     = true
-  kms_key_id            = aws_kms_key.data_at_rest.arn
 
   backup_retention_period = var.environment == "prod" ? 30 : 7
   backup_window          = "03:00-04:00"
@@ -126,40 +110,14 @@ resource "aws_db_instance" "postgres" {
   deletion_protection        = var.environment == "prod"
   skip_final_snapshot        = var.environment != "prod"
   copy_tags_to_snapshot      = true
-  multi_az                   = var.environment == "prod"
 
   performance_insights_enabled          = var.environment == "prod"
   performance_insights_retention_period = var.environment == "prod" ? 7 : 0
-  performance_insights_kms_key_id       = var.environment == "prod" ? aws_kms_key.data_at_rest.arn : null
 
   enabled_cloudwatch_logs_exports = ["postgresql"]
 
   tags = {
     Name = "agenticpay-${var.environment}"
-  }
-}
-
-resource "aws_db_instance" "postgres_read_replica" {
-  count = var.db_read_replica_count
-
-  identifier          = "agenticpay-${var.environment}-ro-${count.index + 1}"
-  replicate_source_db = aws_db_instance.postgres.identifier
-  instance_class      = var.db_read_replica_instance_class
-
-  vpc_security_group_ids = [aws_security_group.rds.id]
-
-  auto_minor_version_upgrade      = true
-  deletion_protection             = var.environment == "prod"
-  skip_final_snapshot             = var.environment != "prod"
-  copy_tags_to_snapshot           = true
-  performance_insights_enabled    = var.environment == "prod"
-  performance_insights_kms_key_id = var.environment == "prod" ? aws_kms_key.data_at_rest.arn : null
-
-  enabled_cloudwatch_logs_exports = ["postgresql"]
-
-  tags = {
-    Name = "agenticpay-${var.environment}-read-replica-${count.index + 1}"
-    Role = "read-replica"
   }
 }
 
@@ -236,35 +194,7 @@ resource "aws_db_proxy_target" "main" {
 
 # Secrets Manager for database credentials
 resource "aws_secretsmanager_secret" "db_credentials" {
-  name       = "agenticpay-${var.environment}-db-credentials"
-  kms_key_id = aws_kms_key.data_at_rest.arn
-}
-
-# Secrets Manager for application-level secrets (Stripe, OpenAI, VAPID keys, etc).
-# Loaded at runtime by backend/src/config/environments/secrets-manager.ts when
-# AWS_SECRETS_MANAGER_ENABLED=true. Not managed for dev — dev uses local env vars.
-resource "aws_secretsmanager_secret" "app_secrets" {
-  count = var.environment == "dev" ? 0 : 1
-
-  name       = "agenticpay-${var.environment}-app-secrets"
-  kms_key_id = aws_kms_key.data_at_rest.arn
-}
-
-resource "aws_iam_policy" "app_secrets_read" {
-  count = var.environment == "dev" ? 0 : 1
-
-  name = "agenticpay-${var.environment}-app-secrets-read-policy"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action   = "secretsmanager:GetSecretValue"
-        Effect   = "Allow"
-        Resource = aws_secretsmanager_secret.app_secrets[0].arn
-      }
-    ]
-  })
+  name = "agenticpay-${var.environment}-db-credentials"
 }
 
 resource "aws_secretsmanager_secret_version" "db_credentials" {
@@ -314,68 +244,6 @@ resource "aws_iam_role_policy" "rds_proxy_secrets" {
 }
 
 # ------------------------------------------------------------------------------
-# AUTOMATED BACKUP & DISASTER RECOVERY (AWS Backup for PITR)
-# ------------------------------------------------------------------------------
-
-resource "aws_backup_vault" "db_backup_vault" {
-  name        = "agenticpay-${var.environment}-db-backup-vault"
-  kms_key_arn = aws_kms_key.data_at_rest.arn
-}
-
-resource "aws_backup_plan" "db_backup_plan" {
-  name = "agenticpay-${var.environment}-db-backup-plan"
-
-  rule {
-    rule_name         = "agenticpay-continuous-backup-rule"
-    target_vault_name = aws_backup_vault.db_backup_vault.name
-    schedule          = "cron(0 12 * * ? *)" # Daily at 12:00 UTC
-
-    enable_continuous_backup = true
-
-    lifecycle {
-      delete_after = var.environment == "prod" ? 35 : 7
-    }
-  }
-}
-
-resource "aws_backup_selection" "db_backup_selection" {
-  iam_role_arn = aws_iam_role.backup_role.arn
-  name         = "agenticpay-${var.environment}-db-backup-selection"
-  plan_id      = aws_backup_plan.db_backup_plan.id
-
-  resources = [
-    aws_db_instance.postgres.arn
-  ]
-}
-
-resource "aws_iam_role" "backup_role" {
-  name = "agenticpay-${var.environment}-backup-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "backup.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "backup_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
-  role       = aws_iam_role.backup_role.name
-}
-
-resource "aws_iam_role_policy_attachment" "restore_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
-  role       = aws_iam_role.backup_role.name
-}
-
-# ------------------------------------------------------------------------------
 # BACKEND RESOURCES (Express.js API)
 # ------------------------------------------------------------------------------
 resource "aws_ecr_repository" "backend" {
@@ -399,10 +267,8 @@ resource "aws_apprunner_service" "backend" {
           STELLAR_NETWORK       = var.stellar_network
           PGBOUNCER_ENABLED     = "true"
           DATABASE_URL          = "postgresql://${var.db_username}:${var.db_password}@${aws_db_proxy.pgbouncer.endpoint}:5432/agenticpay"
-          DB_READ_REPLICA_URLS  = join(",", [for replica in aws_db_instance.postgres_read_replica : "postgresql://${var.db_username}:${var.db_password}@${replica.address}:5432/agenticpay"])
-          DB_REPLICA_MAX_LAG_MS = tostring(var.db_replica_max_lag_ms)
-          DB_POOL_MAX           = tostring(var.db_proxy_pool_max)
-          DB_POOL_MIN           = tostring(var.db_proxy_pool_min)
+          DB_POOL_MAX           = var.db_proxy_pool_max
+          DB_POOL_MIN           = var.db_proxy_pool_min
         }
       }
       image_identifier      = "${aws_ecr_repository.backend.repository_url}:latest"
@@ -426,230 +292,16 @@ resource "aws_apprunner_vpc_connector" "connector" {
 }
 
 # ------------------------------------------------------------------------------
-# HTTP/3 (QUIC) CONFIGURATION
-# ------------------------------------------------------------------------------
-
-resource "aws_cloudfront_origin_access_control" "default" {
-  name                              = "agenticpay-${var.environment}-oac"
-  description                       = "OAC for AgenticPay ${var.environment}"
-  origin_access_control_origin_type = "mediapackagev2"
-  signing_behavior                  = "always"
-  signing_protocol                  = "sigv4"
-}
-
-resource "aws_cloudfront_response_headers_policy" "static_assets" {
-  name    = "agenticpay-${var.environment}-static-assets-headers"
-  comment = "Long-lived static asset caching and safe cross-origin loading"
-
-  cors_config {
-    access_control_allow_credentials = false
-
-    access_control_allow_headers {
-      items = ["*"]
-    }
-
-    access_control_allow_methods {
-      items = ["GET", "HEAD", "OPTIONS"]
-    }
-
-    access_control_allow_origins {
-      items = ["*"]
-    }
-
-    origin_override = true
-  }
-
-  custom_headers_config {
-    items {
-      header   = "X-CDN"
-      value    = "cloudfront"
-      override = true
-    }
-  }
-
-  security_headers_config {
-    content_type_options {
-      override = true
-    }
-  }
-}
-
-# Frontend CloudFront distribution with HTTP/3 support
-resource "aws_cloudfront_distribution" "frontend" {
-  enabled         = true
-  is_ipv6_enabled = true
-  http_version    = var.enable_http3 ? "http3" : "http2"
-  price_class     = "PriceClass_100"
-  aliases         = var.domain_aliases
-
-  origin {
-    domain_name = aws_amplify_app.frontend.default_domain
-    origin_id   = "amplify-frontend"
-
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "https-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
-    }
-  }
-
-  default_cache_behavior {
-    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "amplify-frontend"
-    compress         = true
-
-    forwarded_values {
-      query_string = true
-      cookies {
-        forward = "none"
-      }
-    }
-
-    viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
-  }
-
-  ordered_cache_behavior {
-    path_pattern               = "/_next/static/*"
-    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
-    cached_methods             = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id           = "amplify-frontend"
-    compress                   = true
-    viewer_protocol_policy     = "redirect-to-https"
-    min_ttl                    = 86400
-    default_ttl                = 31536000
-    max_ttl                    = 31536000
-    response_headers_policy_id = aws_cloudfront_response_headers_policy.static_assets.id
-
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-  }
-
-  ordered_cache_behavior {
-    path_pattern               = "/images/*"
-    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
-    cached_methods             = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id           = "amplify-frontend"
-    compress                   = true
-    viewer_protocol_policy     = "redirect-to-https"
-    min_ttl                    = 3600
-    default_ttl                = 604800
-    max_ttl                    = 31536000
-    response_headers_policy_id = aws_cloudfront_response_headers_policy.static_assets.id
-
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-  }
-
-  ordered_cache_behavior {
-    path_pattern               = "/fonts/*"
-    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
-    cached_methods             = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id           = "amplify-frontend"
-    compress                   = true
-    viewer_protocol_policy     = "redirect-to-https"
-    min_ttl                    = 86400
-    default_ttl                = 31536000
-    max_ttl                    = 31536000
-    response_headers_policy_id = aws_cloudfront_response_headers_policy.static_assets.id
-
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-  }
-
-  restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
-  }
-
-  viewer_certificate {
-    cloudfront_default_certificate = true
-    minimum_protocol_version       = "TLSv1.2_2021"
-  }
-
-  tags = {
-    Name = "agenticpay-${var.environment}-frontend-cf"
-  }
-}
-
-# Backend API CloudFront distribution with HTTP/3 support
-resource "aws_cloudfront_distribution" "backend" {
-  enabled         = true
-  is_ipv6_enabled = true
-  http_version    = var.enable_http3 ? "http3" : "http2"
-  price_class     = "PriceClass_100"
-
-  origin {
-    domain_name = aws_apprunner_service.backend.service_url
-    origin_id   = "apprunner-backend"
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "https-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
-    }
-  }
-
-  default_cache_behavior {
-    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "apprunner-backend"
-    compress         = true
-
-    forwarded_values {
-      query_string = true
-      cookies {
-        forward = "all"
-      }
-      headers = ["Authorization", "Content-Type", "X-API-Key", "X-HMAC-Signature"]
-    }
-
-    viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 60
-    max_ttl                = 3600
-  }
-
-  restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
-  }
-
-  viewer_certificate {
-    cloudfront_default_certificate = true
-    minimum_protocol_version       = "TLSv1.2_2021"
-  }
-
-  tags = {
-    Name = "agenticpay-${var.environment}-backend-cf"
-  }
-}
-
-# ------------------------------------------------------------------------------
 # FRONTEND RESOURCES (Next.js)
 # ------------------------------------------------------------------------------
 resource "aws_amplify_app" "frontend" {
   name       = "agenticpay-frontend-${var.environment}"
   repository = "https://github.com/Smartdevs17/agenticpay"
 
+  # HTTP/2 is enabled by default on AWS Amplify (ALPN negotiation via CloudFront).
+  # custom_headers propagates Link preload hints so CloudFront can issue
+  # HTTP/2 PUSH_PROMISE frames for critical fonts and CSS before the HTML
+  # has been parsed by the browser.
   custom_headers = <<-EOT
     customHeaders:
       - pattern: '**'
@@ -658,8 +310,6 @@ resource "aws_amplify_app" "frontend" {
             value: 'SAMEORIGIN'
           - key: 'Link'
             value: '</fonts/inter-var.woff2>; rel=preload; as=font; type="font/woff2"; crossorigin=anonymous'
-          - key: 'Alt-Svc'
-            value: 'h3=":443"; ma=86400'
   EOT
 
   build_spec = <<-EOT
@@ -683,229 +333,7 @@ resource "aws_amplify_app" "frontend" {
   EOT
 
   environment_variables = {
-    NEXT_PUBLIC_API_URL = "https://${aws_cloudfront_distribution.backend.domain_name}/api/v1"
+    NEXT_PUBLIC_API_URL = "https://${aws_apprunner_service.backend.service_url}/api/v1"
     NODE_ENV            = var.environment
   }
-}
-
-# ------------------------------------------------------------------------------
-# GAS METRICS MONITORING
-# ------------------------------------------------------------------------------
-
-# CloudWatch Log Group for Gas Estimation Service
-resource "aws_cloudwatch_log_group" "gas_metrics" {
-  name              = "/aws/agenticpay/gas-metrics-${var.environment}"
-  retention_in_days = var.environment == "prod" ? 30 : 7
-
-  tags = {
-    Name = "agenticpay-gas-metrics-${var.environment}"
-  }
-}
-
-# CloudWatch Dashboard for Gas Metrics
-resource "aws_cloudwatch_dashboard" "gas_metrics" {
-  dashboard_name = "agenticpay-gas-metrics-${var.environment}"
-
-  dashboard_body = jsonencode({
-    widgets = [
-      {
-        type   = "metric"
-        x      = 0
-        y      = 0
-        width  = 12
-        height = 6
-
-        properties = {
-          metrics = [
-            ["AWS/AppRunner", "CPUUtilization", "ServiceName", aws_apprunner_service.backend.service_name],
-            [".", "MemoryUtilization", ".", "."],
-          ]
-          period = 300
-          stat   = "Average"
-          region = var.aws_region
-          title  = "Backend Resource Utilization"
-          view   = "timeSeries"
-        }
-      },
-      {
-        type   = "log"
-        x      = 0
-        y      = 6
-        width  = 24
-        height = 6
-
-        properties = {
-          logGroupName  = aws_cloudwatch_log_group.gas_metrics.name
-          query        = "fields @timestamp, @message | filter @message like /GAS_ESTIMATE/ | stats count() by @timestamp"
-          region       = var.aws_region
-          title        = "Gas Estimate Requests"
-          view         = "table"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 12
-        y      = 0
-        width  = 12
-        height = 6
-
-        properties = {
-          metrics = [
-            ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", aws_db_instance.postgres.identifier],
-            [".", "DatabaseConnections", ".", "."],
-          ]
-          period = 300
-          stat   = "Average"
-          region = var.aws_region
-          title  = "Database Performance"
-          view   = "timeSeries"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 0
-        y      = 12
-        width  = 12
-        height = 6
-
-        properties = {
-          metrics = [
-            ["AWS/ApiGateway", "Count", "ApiName", "agenticpay-backend-${var.environment}"],
-            [".", "Latency", ".", "."],
-            [".", "5XXError", ".", "."],
-            [".", "4XXError", ".", "."],
-          ]
-          period = 300
-          stat   = "Sum"
-          region = var.aws_region
-          title  = "API Gateway Metrics"
-          view   = "timeSeries"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 12
-        y      = 12
-        width  = 12
-        height = 6
-
-        properties = {
-          metrics = [
-            ["AWS/CloudFront", "Requests", "DistributionId", aws_cloudfront_distribution.backend.id],
-            [".", "Latency", ".", "."],
-          ]
-          period = 300
-          stat   = "Sum"
-          region = var.aws_region
-          title  = "CloudFront Backend Metrics"
-          view   = "timeSeries"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 0
-        y      = 18
-        width  = 12
-        height = 6
-
-        properties = {
-          metrics = [
-            ["AWS/CloudFront", "Requests", "DistributionId", aws_cloudfront_distribution.frontend.id, { stat: "Sum" }],
-            [".", "TotalErrorRate", ".", ".", { stat: "Average" }],
-          ]
-          period = 300
-          stat   = "Sum"
-          region = var.aws_region
-          title  = "Frontend CDN — Request Volume & Error Rate"
-          view   = "timeSeries"
-        }
-      },
-      {
-        type   = "metric"
-        x      = 12
-        y      = 18
-        width  = 12
-        height = 6
-
-        properties = {
-          metrics = [
-            ["AWS/CloudFront", "CacheHitRate", "DistributionId", aws_cloudfront_distribution.frontend.id, { stat: "Average" }],
-            [".", "OriginLatency", ".", ".", { stat: "p95" }],
-          ]
-          period = 300
-          stat   = "Average"
-          region = var.aws_region
-          title  = "Frontend CDN — Cache Hit Rate & Origin Latency (p95)"
-          view   = "timeSeries"
-        }
-      },
-    ]
-  })
-}
-
-# CloudWatch Alarm for High Gas Estimation Error Rate
-resource "aws_cloudwatch_metric_alarm" "gas_estimation_error_rate" {
-  alarm_name          = "agenticpay-gas-estimation-error-rate-${var.environment}"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "5XXError"
-  namespace           = "AWS/AppRunner"
-  period              = "300"
-  statistic           = "Sum"
-  threshold           = var.environment == "prod" ? "10" : "50"
-  alarm_description   = "Alert when gas estimation error rate exceeds threshold"
-  alarm_actions       = var.environment == "prod" ? [aws_sns_topic.alerts.arn] : []
-
-  dimensions = {
-    ServiceName = aws_apprunner_service.backend.service_name
-  }
-}
-
-# CloudWatch Alarm for High Database Connection Usage
-resource "aws_cloudwatch_metric_alarm" "db_connection_usage" {
-  alarm_name          = "agenticpay-db-connection-usage-${var.environment}"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "DatabaseConnections"
-  namespace           = "AWS/RDS"
-  period              = "300"
-  statistic           = "Average"
-  threshold           = var.db_proxy_max_connections_percent
-  alarm_description   = "Alert when database connection usage exceeds threshold"
-  alarm_actions       = var.environment == "prod" ? [aws_sns_topic.alerts.arn] : []
-
-  dimensions = {
-    DBInstanceIdentifier = aws_db_instance.postgres.identifier
-  }
-}
-
-resource "aws_cloudwatch_metric_alarm" "db_read_replica_lag" {
-  count = var.db_read_replica_count
-
-  alarm_name          = "agenticpay-db-replica-lag-${var.environment}-${count.index + 1}"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "ReplicaLag"
-  namespace           = "AWS/RDS"
-  period              = "60"
-  statistic           = "Average"
-  threshold           = ceil(var.db_replica_max_lag_ms / 1000)
-  alarm_description   = "Alert when PostgreSQL read replica lag exceeds backend routing threshold"
-  alarm_actions       = var.environment == "prod" ? [aws_sns_topic.alerts.arn] : []
-
-  dimensions = {
-    DBInstanceIdentifier = aws_db_instance.postgres_read_replica[count.index].identifier
-  }
-}
-
-# SNS Topic for Alerts
-resource "aws_sns_topic" "alerts" {
-  name = "agenticpay-alerts-${var.environment}"
-}
-
-resource "aws_sns_topic_subscription" "email_alerts" {
-  count     = var.environment == "prod" && var.alert_email != "" ? 1 : 0
-  topic_arn = aws_sns_topic.alerts.arn
-  protocol  = "email"
-  endpoint  = var.alert_email
 }

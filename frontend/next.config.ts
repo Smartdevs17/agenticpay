@@ -1,20 +1,13 @@
 import type { NextConfig } from "next";
 import withBundleAnalyzer from "@next/bundle-analyzer";
 import { withSentryConfig } from "@sentry/nextjs";
-import createNextIntlPlugin from "next-intl/plugin";
-
-const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 const bundleAnalyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
 });
 
 const nextConfig: NextConfig = {
-  assetPrefix: process.env.NEXT_PUBLIC_CDN_URL || undefined,
-  productionBrowserSourceMaps: false,
   experimental: {
-    instrumentationHook: true,
-    webVitalsAttribution: ['CLS', 'LCP', 'FID', 'FCP', 'TTFB'],
     optimizePackageImports: [
       "lucide-react",
       "@radix-ui/react-dialog",
@@ -39,87 +32,15 @@ const nextConfig: NextConfig = {
       };
     }
 
-    // Enhanced route-based code splitting with named chunks
     config.optimization = {
       ...config.optimization,
       splitChunks: {
         chunks: "all",
         minSize: 20000,
-        maxSize: 50000, // Target <50KB per chunk
+        maxSize: 244000,
         cacheGroups: {
           default: false,
           vendors: false,
-          // Route-specific chunks
-          dashboard: {
-            name: "route-dashboard",
-            chunks: "async",
-            test: /[\\/]app[\\/](\[locale\][\\/])?dashboard[\\/]/,
-            priority: 60,
-            enforce: true,
-          },
-          auth: {
-            name: "route-auth",
-            chunks: "async",
-            test: /[\\/]app[\\/](\[locale\][\\/])?auth[\\/]/,
-            priority: 60,
-            enforce: true,
-          },
-          forms: {
-            name: "route-forms",
-            chunks: "async",
-            test: /[\\/]app[\\/](\[locale\][\\/])?forms[\\/]/,
-            priority: 60,
-            enforce: true,
-          },
-          admin: {
-            name: "route-admin",
-            chunks: "async",
-            test: /[\\/]app[\\/]admin[\\/]/,
-            priority: 60,
-            enforce: true,
-          },
-          payments: {
-            name: "route-payments",
-            chunks: "async",
-            test: /[\\/]app[\\/](\[locale\][\\/])?payments[\\/]/,
-            priority: 60,
-            enforce: true,
-          },
-          security: {
-            name: "route-security",
-            chunks: "async",
-            test: /[\\/]app[\\/](\[locale\][\\/])?security[\\/]/,
-            priority: 60,
-            enforce: true,
-          },
-          onboarding: {
-            name: "route-onboarding",
-            chunks: "async",
-            test: /[\\/]app[\\/](\[locale\][\\/])?onboarding[\\/]/,
-            priority: 60,
-            enforce: true,
-          },
-          logs: {
-            name: "route-logs",
-            chunks: "async",
-            test: /[\\/]app[\\/](\[locale\][\\/])?logs[\\/]/,
-            priority: 60,
-            enforce: true,
-          },
-          accessibility: {
-            name: "route-accessibility",
-            chunks: "async",
-            test: /[\\/]app[\\/](\[locale\][\\/])?accessibility[\\/]/,
-            priority: 60,
-            enforce: true,
-          },
-          abi: {
-            name: "abi",
-            chunks: "async",
-            test: /[\\/]lib[\\/]abi[\\/]/,
-            priority: 50,
-            enforce: true,
-          },
           framework: {
             name: "framework",
             chunks: "all",
@@ -171,28 +92,6 @@ const nextConfig: NextConfig = {
       };
     }
 
-    if (process.env.SIZE_LIMIT === "true" && !isServer) {
-      config.plugins = config.plugins || [];
-      config.plugins.push({
-        apply(compiler: any) {
-          compiler.hooks.done.tap("SizeLimitStats", (stats: any) => {
-            const fs = require("fs");
-            const path = require("path");
-            const out = stats.toJson({
-              all: false,
-              assets: true,
-              chunks: true,
-              chunkGroups: true,
-            });
-            fs.writeFileSync(
-              path.join(process.cwd(), ".next", "size-limit-stats.json"),
-              JSON.stringify(out),
-            );
-          });
-        },
-      } as any);
-    }
-
     return config;
   },
   images: {
@@ -215,64 +114,17 @@ const nextConfig: NextConfig = {
   headers: async () => {
     return [
       {
+        // HTTP/2 server push hints for critical assets on every page load
         source: "/(.*)",
         headers: [
           {
             key: "Link",
             value: [
-              '</fonts/inter-var.woff2>; rel=preload; as=font; type="font/woff2"; crossorigin=anonymous; fetchpriority=high',
+              // Critical fonts — pushed before HTML is parsed
+              "</fonts/inter-var.woff2>; rel=preload; as=font; type=\"font/woff2\"; crossorigin=anonymous",
+              // Critical CSS — pushed alongside the document
               "</_next/static/css/app/layout.css>; rel=preload; as=style",
             ].join(", "),
-          },
-          {
-            key: "Critical-CH",
-            value: "sec-ch-prefers-color-scheme, sec-ch-viewport-width",
-          },
-          {
-            key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://vercel.live",
-              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-              "font-src 'self' https://fonts.gstatic.com",
-              "img-src 'self' data: https: blob:",
-              "connect-src 'self' https://api.stellar.org https://horizon-testnet.stellar.org",
-              "frame-src 'none'",
-              "object-src 'none'",
-              "base-uri 'self'",
-              "form-action 'self'",
-              "frame-ancestors 'none'",
-              "upgrade-insecure-requests",
-            ].join("; "),
-          },
-          {
-            key: "X-Content-Type-Options",
-            value: "nosniff",
-          },
-          {
-            key: "X-Frame-Options",
-            value: "DENY",
-          },
-          {
-            key: "Referrer-Policy",
-            value: "strict-origin-when-cross-origin",
-          },
-          {
-            key: "Permissions-Policy",
-            value: "geolocation=(), microphone=(), camera=()",
-          },
-        ],
-      },
-      {
-        source: "/fonts/(.*)",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
-          {
-            key: "X-Content-Type-Options",
-            value: "nosniff",
           },
         ],
       },
@@ -312,59 +164,12 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      {
-        source: "/:path*.png",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
-        ],
-      },
-      {
-        source: "/:path*.jpg",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
-        ],
-      },
-      {
-        source: "/:path*.svg",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
-        ],
-      },
-      {
-        source: "/manifest.webmanifest",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=86400",
-          },
-        ],
-      },
     ];
   },
 };
 
-export default withSentryConfig(bundleAnalyzer(withNextIntl(nextConfig)), {
+export default withSentryConfig(bundleAnalyzer(nextConfig), {
   silent: true,
   org: process.env.SENTRY_ORG || "agenticpay",
   project: process.env.SENTRY_PROJECT || "agenticpay-frontend",
 });
-
-
-/**
- * #725: Frontend Lazy Loading with Code Splitting Enhancement
- * Already implemented via webpack splitChunks configuration above.
- * Route-based code splitting is active for: dashboard, auth, forms, admin,
- * payments, security, onboarding, logs, accessibility routes.
- * 
- * To use lazy loading in components, import using dynamic():
- * const Component = dynamic(() => import('./Component'), { loading: () => <Spinner /> })
- */
