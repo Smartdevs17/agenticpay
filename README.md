@@ -142,6 +142,18 @@ NODE_ENV=development
 
 # CORS Configuration
 CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
+# CORS is a dynamic, runtime-mutable whitelist.
+# See backend/docs/CORS_GUIDE.md for patterns, the management API, and security.
+
+# Webhook Signature Verification
+# Inbound custom webhooks are verified with versioned, rotating HMAC keys.
+# See backend/docs/WEBHOOK_KEY_ROTATION.md for the key lifecycle and rotation API.
+
+# Circuit Breaker
+# External service calls (Stripe, Stellar/Horizon, RPC, webhooks, Vault) are
+# guarded by a fast-failing, self-recovering circuit breaker with per-service
+# isolation. See backend/docs/CIRCUIT_BREAKER.md for the state machine, config,
+# and management API.
 
 # Stellar Configuration
 STELLAR_NETWORK=testnet
@@ -159,7 +171,7 @@ JOBS_ENABLED=true
 |---|---|---|---|
 | `PORT` | `3001` | Server port | No |
 | `NODE_ENV` | `development` | Environment (development/production) | No |
-| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated list of allowed origins | No |
+| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated list of allowed origins (runtime-mutable; see `backend/docs/CORS_GUIDE.md`) | No |
 | `STELLAR_NETWORK` | `testnet` | Stellar network (testnet/public) | No |
 | `OPENAI_API_KEY` | - | OpenAI API key for AI verification/invoicing | **Yes** |
 | `JOBS_ENABLED` | `true` | Enable background job scheduler | No |

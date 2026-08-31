@@ -9,8 +9,9 @@ This guide explains the comprehensive performance monitoring and optimization sy
 3. [Cursor-Based Pagination](#cursor-based-pagination)
 4. [Database Connection Pooling](#database-connection-pooling)
 5. [Redis Caching Layer](#redis-caching-layer)
-6. [Monitoring Dashboard](#monitoring-dashboard)
-7. [Performance Budgets](#performance-budgets)
+6. [API Response Caching with ETags](#api-response-caching-with-etags)
+7. [Monitoring Dashboard](#monitoring-dashboard)
+8. [Performance Budgets](#performance-budgets)
 
 ---
 
@@ -434,6 +435,63 @@ Returns:
   "avgSizeBytes": 2048
 }
 ```
+
+---
+
+## API Response Caching with ETags
+
+### Overview
+
+Two middleware layers cut repeated work for read-heavy endpoints:
+
+1. **`etag()`** — hashes the response body and answers matching
+   `If-None-Match` headers with a `304 Not Modified`, so clients and CDNs can
+   skip re-downloading unchanged payloads.
+2. **`cacheControl()`** — emits cache headers and, with `inMemory: true`,
+   stores the body so subsequent requests are served straight from memory
+   without re-running the handler. Error responses are never cached, and
+   stale content can be served briefly behind a re-fetch
+   (`stale-while-revalidate`).
+
+### Implementation
+
+Located in: `backend/src/middleware/etag.ts` and `backend/src/middleware/cache.ts`
+
+```ts
+import { etag } from '@/middleware/etag';
+import { cacheControl, CacheTTL } from '@/middleware/cache';
+
+// Bandwidth savings without storage
+router.get('/api/v1/payments/:id', etag(), handler);
+
+// Serve stable catalog data from memory (Cache-Control + ETag + X-Cache)
+router.get('/api/v1/catalog', cacheControl({
+  maxAge: CacheTTL.STATIC,
+  inMemory: true,
+  staleWhileRevalidate: 60,
+}), handler);
+```
+
+### Response Semantics
+
+- `X-Cache: MISS/HIT/STALE` indicates whether the handler ran or a stored body
+  was served.
+- `If-None-Match` matches produce `304 Not Modified` (weak comparison).
+- `statusCode >= 400` responses always emit `Cache-Control: no-store` and are
+  never stored or tagged.
+- Mutations (POST/PUT/PATCH/DELETE) pass straight through without caching.
+
+### Warming & Invalidation
+
+`warmCache()` pre-loads hot keys on startup; `invalidateCache()` clears entries
+matching a glob against the internal `agenticpay:cache:` prefix.
+
+### Further Reading
+
+See [backend/docs/RESPONSE_CACHING.md](backend/docs/RESPONSE_CACHING.md) for the
+full API reference, `CacheTTL` presets, composition guidance, and benchmark
+results for the `cache_plain`, `cache_header_only`, `cache_memory_hit`, and
+`cache_etag_304` endpoints.
 
 ---
 

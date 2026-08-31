@@ -1,77 +1,286 @@
 {
-  "generatedAt": "2026-05-30T08:13:11.739Z",
+  "generatedAt": "2026-08-31T11:48:01.791Z",
   "port": 3099,
-  "note": "Auto-established with 2.5x headroom",
   "endpoints": [
     {
       "name": "health",
       "path": "/health",
+      "requests": 5599,
+      "throughput": 627072,
       "latency": {
-        "p99": 1625
-      }
+        "average": 4.85,
+        "p50": 4,
+        "p99": 16,
+        "max": 88
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "ready",
       "path": "/ready",
+      "requests": 6186,
+      "throughput": 602026.67,
       "latency": {
-        "p99": 598
-      }
+        "average": 4.31,
+        "p50": 4,
+        "p99": 12,
+        "max": 29
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "sandbox_status",
       "path": "/api/v1/sandbox/status",
+      "requests": 6906,
+      "throughput": 697429.34,
       "latency": {
-        "p99": 1195
-      }
+        "average": 3.79,
+        "p50": 3,
+        "p99": 11,
+        "max": 24
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "escrow_list",
       "path": "/api/v1/escrow",
+      "requests": 7747,
+      "throughput": 606805.34,
       "latency": {
-        "p99": 2340
-      }
+        "average": 3.34,
+        "p50": 3,
+        "p99": 9,
+        "max": 13
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "flags",
       "path": "/api/v1/flags",
+      "requests": 7709,
+      "throughput": 675754.67,
       "latency": {
-        "p99": 0
-      }
+        "average": 3.38,
+        "p50": 3,
+        "p99": 9,
+        "max": 13
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "compression_metrics",
       "path": "/api/v1/compression/metrics",
+      "requests": 7514,
+      "throughput": 661248,
       "latency": {
-        "p99": 0
-      }
+        "average": 3.44,
+        "p50": 3,
+        "p99": 9,
+        "max": 15
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "pool_metrics",
       "path": "/api/v1/pool/metrics",
+      "requests": 8064,
+      "throughput": 720298.67,
       "latency": {
-        "p99": 1070
-      }
+        "average": 3.18,
+        "p50": 3,
+        "p99": 8,
+        "max": 12
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "sandbox_payment_process",
       "path": "/api/v1/sandbox/payments/process",
+      "requests": 4586,
+      "throughput": 814677.34,
       "latency": {
-        "p99": 1628
-      }
+        "average": 6.01,
+        "p50": 5,
+        "p99": 16,
+        "max": 81
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "escrow_create",
       "path": "/api/v1/escrow",
+      "requests": 4974,
+      "throughput": 805802.67,
       "latency": {
-        "p99": 2420
-      }
+        "average": 5.51,
+        "p50": 5,
+        "p99": 13,
+        "max": 20
+      },
+      "errors": 0,
+      "non2xx": 0
     },
     {
       "name": "circuit_breaker",
       "path": "/api/v1/circuit-breaker",
+      "requests": 7030,
+      "throughput": 625578.67,
       "latency": {
-        "p99": 1585
-      }
+        "average": 3.73,
+        "p50": 4,
+        "p99": 9,
+        "max": 18
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "circuit_breaker_rejected",
+      "path": "/api/v1/circuit-breaker/rejected",
+      "requests": 7567,
+      "throughput": 751701.34,
+      "latency": {
+        "average": 3.4,
+        "p50": 3,
+        "p99": 8,
+        "max": 14
+      },
+      "errors": 0,
+      "non2xx": 7564
+    },
+    {
+      "name": "cache_plain",
+      "path": "/api/v1/cache/plain",
+      "requests": 7477,
+      "throughput": 690432,
+      "latency": {
+        "average": 3.46,
+        "p50": 3,
+        "p99": 9,
+        "max": 17
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cache_header_only",
+      "path": "/api/v1/cache/header",
+      "requests": 6494,
+      "throughput": 647082.67,
+      "latency": {
+        "average": 4.1,
+        "p50": 4,
+        "p99": 10,
+        "max": 17
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cache_memory_hit",
+      "path": "/api/v1/cache/memory",
+      "requests": 7823,
+      "throughput": 816213.34,
+      "latency": {
+        "average": 3.29,
+        "p50": 3,
+        "p99": 8,
+        "max": 13
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cache_etag_304",
+      "path": "/api/v1/cache/etag-304",
+      "requests": 8865,
+      "throughput": 525952,
+      "latency": {
+        "average": 2.94,
+        "p50": 3,
+        "p99": 7,
+        "max": 13
+      },
+      "errors": 0,
+      "non2xx": 8865
+    },
+    {
+      "name": "cors_allowed",
+      "path": "/api/v1/cors/allowed",
+      "requests": 6283,
+      "throughput": 810410.67,
+      "latency": {
+        "average": 4.29,
+        "p50": 4,
+        "p99": 10,
+        "max": 21
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cors_wildcard",
+      "path": "/api/v1/cors/allowed",
+      "requests": 6107,
+      "throughput": 802048,
+      "latency": {
+        "average": 4.42,
+        "p50": 4,
+        "p99": 11,
+        "max": 17
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "cors_preflight",
+      "path": "/api/v1/cors/allowed",
+      "requests": 8742,
+      "throughput": 990720,
+      "latency": {
+        "average": 2.96,
+        "p50": 3,
+        "p99": 8,
+        "max": 13
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "webhook_verify_valid",
+      "path": "/api/v1/webhook/verify",
+      "requests": 4455,
+      "throughput": 374229.34,
+      "latency": {
+        "average": 6.23,
+        "p50": 6,
+        "p99": 15,
+        "max": 33
+      },
+      "errors": 0,
+      "non2xx": 0
+    },
+    {
+      "name": "webhook_verify_invalid",
+      "path": "/api/v1/webhook/verify-invalid",
+      "requests": 4170,
+      "throughput": 365610.67,
+      "latency": {
+        "average": 6.7,
+        "p50": 6,
+        "p99": 17,
+        "max": 37
+      },
+      "errors": 0,
+      "non2xx": 4170
     }
   ]
 }
