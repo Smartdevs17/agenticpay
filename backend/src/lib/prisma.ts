@@ -2,16 +2,18 @@
 // Single shared instance with query logging and slow-query detection.
 
 import { PrismaClient } from '@prisma/client';
-import { SLOW_QUERY_THRESHOLD_MS, VERY_SLOW_QUERY_THRESHOLD_MS } from '../config/database.js';
+import { applyPrismaPoolConfig, SLOW_QUERY_THRESHOLD_MS, VERY_SLOW_QUERY_THRESHOLD_MS } from '../config/database.js';
 import { createPrismaQueryListener } from '../middleware/queryLogger.js';
 import { withTenantIsolationGuard } from '../security/tenant-isolation/guard.js';
 import { withEncryptionMiddleware } from '../encryption/index.js';
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+const prismaDatabaseUrl = applyPrismaPoolConfig(process.env.DATABASE_URL);
 
 const basePrismaClient =
   globalForPrisma.prisma ??
   new PrismaClient({
+    ...(prismaDatabaseUrl ? { datasources: { db: { url: prismaDatabaseUrl } } } : {}),
     log: [
       { emit: 'event', level: 'query' },
       { emit: 'stdout', level: 'warn' },

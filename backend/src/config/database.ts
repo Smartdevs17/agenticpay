@@ -55,6 +55,21 @@ export function buildPoolConfig(env = process.env.NODE_ENV): PoolConfig {
   }
 }
 
+/** Apply the supported Prisma PostgreSQL pool settings to a connection URL. */
+export function applyPrismaPoolConfig(
+  databaseUrl: string | undefined,
+  env = process.env.NODE_ENV,
+): string | undefined {
+  if (!databaseUrl) return undefined;
+
+  const url = new URL(databaseUrl);
+  const pool = buildPoolConfig(env);
+  url.searchParams.set('connection_limit', String(pool.max));
+  url.searchParams.set('pool_timeout', String(Math.max(1, Math.ceil(pool.acquireTimeoutMs / 1000))));
+  url.searchParams.set('connect_timeout', String(Math.max(1, Math.ceil(pool.createTimeoutMs / 1000))));
+  return url.toString();
+}
+
 // ── PgBouncer Integration ─────────────────────────────────────────────────────
 
 export interface PgBouncerConfig {
