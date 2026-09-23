@@ -7,6 +7,8 @@ import { EmailChannel } from "./channels/email-channel";
 import { SlackChannel } from "./channels/slack-channel";
 import { InAppChannel } from "./channels/in-app-channel";
 import { WebhookChannel } from "./channels/webhook-channel";
+import { PagerDutyChannel } from "./channels/pagerduty-channel";
+import { DatadogChannel } from "./channels/datadog-channel";
 
 export class ChannelRegistry {
   private channels = new Map<string, NotificationChannel>();
@@ -59,6 +61,29 @@ export class ChannelRegistry {
         timeout: 10000,
       });
       this.register(webhookChannel);
+    }
+
+    // PagerDuty channel
+    if (process.env.PAGERDUTY_ROUTING_KEY) {
+      const pagerDutyChannel = new PagerDutyChannel({
+        routingKey: process.env.PAGERDUTY_ROUTING_KEY,
+        apiUrl: process.env.PAGERDUTY_API_URL,
+        maxPerHour: 30,
+        maxPerDay: 200,
+      });
+      this.register(pagerDutyChannel);
+    }
+
+    // Datadog channel
+    if (process.env.DATADOG_API_KEY) {
+      const datadogChannel = new DatadogChannel({
+        apiKey: process.env.DATADOG_API_KEY,
+        site: process.env.DATADOG_SITE,
+        service: process.env.DATADOG_SERVICE_NAME,
+        maxPerHour: 100,
+        maxPerDay: 1000,
+      });
+      this.register(datadogChannel);
     }
   }
 
