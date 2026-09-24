@@ -194,6 +194,120 @@ export function verifyCustomProviderWebhook(req: Request, rawBody: string): Prov
   };
 }
 
+export function verifyZapierProviderWebhook(req: Request, rawBody: string): ProviderVerificationResult {
+  const sig = (req.headers['x-zapier-signature'] || req.headers['x-signature']) as string | undefined;
+  const ts = (req.headers['x-zapier-timestamp'] || req.headers['x-timestamp']) as string | undefined;
+  const eventId =
+    (req.headers['x-zapier-event-id'] as string) ||
+    (req.headers['x-webhook-id'] as string) ||
+    `zapier_${Date.now()}`;
+
+  if (!sig || !ts) {
+    return {
+      isValid: false,
+      provider: 'zapier',
+      eventId,
+      timestamp: new Date(),
+      body: rawBody,
+      error: 'Missing x-zapier-signature or x-zapier-timestamp header',
+    };
+  }
+
+  const keyId = (req.headers['x-zapier-key-id'] || req.headers['x-webhook-key-id']) as string | undefined;
+  const result = verifyWebhookSignature({
+    signature: sig.replace(/^sha256=/, ''),
+    timestamp: ts,
+    body: rawBody,
+    provider: 'zapier',
+    keyId,
+  });
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    payload = rawBody;
+  }
+
+  return {
+    isValid: result.isValid,
+    provider: 'zapier',
+    eventId,
+    timestamp: result.timestamp,
+    body: rawBody,
+    error: result.error,
+    payload,
+  };
+}
+
+export function verifyIntercomProviderWebhook(req: Request, rawBody: string): ProviderVerificationResult {
+  const signature = (req.headers['x-hub-signature'] || req.headers['x-signature']) as string | undefined;
+  const eventId =
+    (req.headers['x-intercom-event-id'] as string) ||
+    (req.headers['x-webhook-id'] as string) ||
+    `intercom_${Date.now()}`;
+
+  if (!signature) {
+    return {
+      isValid: false,
+      provider: 'intercom',
+      eventId,
+      timestamp: new Date(),
+      body: rawBody,
+      error: 'Missing x-hub-signature header',
+    };
+  }
+
+  const secrets = getActiveSecretsForProvider('intercom');
+  const secretValues = secrets.map((s) => s.secret);
+  if (process.env.INTERCOM_CLIENT_SECRET && !secretValues.includes(process.env.INTERCOM_CLIENT_SECRET)) {
+    secretValues.push(process.env.INTERCOM_CLIENT_SECRET);
+  }
+
+  if (secretValues.length === 0) {
+    return {
+      isValid: false,
+      provider: 'intercom',
+      eventId,
+      timestamp: new Date(),
+      body: rawBody,
+      error: 'No active webhook secrets found for Intercom',
+    };
+  }
+
+  const provided = signature.startsWith('sha1=') ? signature.slice('sha1='.length) : signature;
+
+  for (const secret of secretValues) {
+    const expected = createHmac('sha1', secret).update(rawBody).digest('hex');
+    if (safeEqualHex(expected, provided)) {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(rawBody);
+      } catch {
+        payload = rawBody;
+      }
+
+      return {
+        isValid: true,
+        provider: 'intercom',
+        eventId,
+        timestamp: new Date(),
+        body: rawBody,
+        payload,
+      };
+    }
+  }
+
+  return {
+    isValid: false,
+    provider: 'intercom',
+    eventId,
+    timestamp: new Date(),
+    body: rawBody,
+    error: 'Intercom signature verification failed',
+  };
+}
+
 /** Dev/test helper: sign outbound webhooks with AgenticPay format */
 export function signTestWebhook(payload: string, secret: string, timestamp: string): string {
   return generateWebhookSignature(payload, secret, timestamp);

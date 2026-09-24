@@ -58,6 +58,8 @@ import { refundsRouter } from './routes/refunds.js';
 import { databaseRouter } from './routes/database.js';
 import { archiveRouter } from './routes/archive.js';
 import { searchRouter } from './routes/search.js';
+import { zapierRouter } from './routes/zapier.js';
+import { intercomRouter } from './routes/intercom.js';
 import { getPrismaReplicaClient } from './db/PrismaReplicaClient.js';
 
 dotenv.config();
@@ -305,6 +307,10 @@ apiV1Router.use('/database', databaseRouter);
 apiV1Router.use('/archive', archiveRouter);
 // Full-text search — Issue #885
 apiV1Router.use('/search', searchRouter);
+// Zapier webhook integration & actions
+apiV1Router.use('/zapier', zapierRouter);
+// Intercom support integration & webhooks
+apiV1Router.use('/intercom', intercomRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);

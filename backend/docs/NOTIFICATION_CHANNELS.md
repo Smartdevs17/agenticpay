@@ -10,6 +10,8 @@ The notification system uses a channel-based plugin architecture that allows dyn
 - **Email**: SMTP-based email notifications
 - **Slack**: Slack webhook notifications with rich formatting
 - **Webhook**: Generic webhook for custom integrations
+- **Zapier**: Zapier REST Hook integration with HMAC-SHA256 signatures
+- **Intercom**: Customer support conversation notifications with contact sync
 
 ## Creating a Custom Channel
 
@@ -93,4 +95,14 @@ SLACK_BOT_TOKEN=xoxb-your-token
 # Webhook Channel
 NOTIFICATION_WEBHOOK_URL=https://your-webhook-endpoint.com/notify
 NOTIFICATION_WEBHOOK_SECRET=your-webhook-secret
+
+# Zapier Channel
+ZAPIER_WEBHOOK_URL=https://hooks.zapier.com/hooks/catch/YOUR_ID/YOUR_HOOK
+ZAPIER_WEBHOOK_SECRET=your-zapier-webhook-secret
+
+# Intercom Channel
+INTERCOM_ACCESS_TOKEN=your-intercom-access-token
+INTERCOM_APP_ID=your-intercom-app-id
+INTERCOM_ADMIN_ID=your-intercom-admin-id
+INTERCOM_CLIENT_SECRET=your-intercom-client-secret
 ```

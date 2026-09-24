@@ -9,6 +9,8 @@ import { InAppChannel } from "./channels/in-app-channel";
 import { WebhookChannel } from "./channels/webhook-channel";
 import { PagerDutyChannel } from "./channels/pagerduty-channel";
 import { DatadogChannel } from "./channels/datadog-channel";
+import { ZapierChannel } from "./channels/zapier-channel.js";
+import { IntercomChannel } from "./channels/intercom-channel.js";
 
 export class ChannelRegistry {
   private channels = new Map<string, NotificationChannel>();
@@ -84,6 +86,30 @@ export class ChannelRegistry {
         maxPerDay: 1000,
       });
       this.register(datadogChannel);
+    }
+
+    // Zapier channel
+    if (process.env.ZAPIER_WEBHOOK_URL) {
+      const zapierChannel = new ZapierChannel({
+        webhookUrl: process.env.ZAPIER_WEBHOOK_URL,
+        secret: process.env.ZAPIER_WEBHOOK_SECRET,
+        maxPerHour: 100,
+        maxPerDay: 1000,
+      });
+      this.register(zapierChannel);
+    }
+
+    // Intercom channel
+    if (process.env.INTERCOM_ACCESS_TOKEN) {
+      const intercomChannel = new IntercomChannel({
+        accessToken: process.env.INTERCOM_ACCESS_TOKEN,
+        appId: process.env.INTERCOM_APP_ID,
+        adminId: process.env.INTERCOM_ADMIN_ID,
+        apiUrl: process.env.INTERCOM_API_URL,
+        maxPerHour: 50,
+        maxPerDay: 500,
+      });
+      this.register(intercomChannel);
     }
   }
 

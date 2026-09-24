@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { z } from 'zod';
 import { AppError } from '../../middleware/errorHandler.js';
 
-export const webhookProviderSchema = z.enum(['stripe', 'paypal', 'github', 'custom']);
+export const webhookProviderSchema = z.enum(['stripe', 'paypal', 'github', 'custom', 'zapier', 'intercom']);
 
 export const webhookSecretSchema = z.object({
   id: z.string(),

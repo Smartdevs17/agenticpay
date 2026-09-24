@@ -48,7 +48,7 @@ const webhookEventSchema = z.object({
 
 // Schemas for signature verification
 const createSecretSchema = z.object({
-  provider: z.enum(['stripe', 'paypal', 'github', 'custom']),
+  provider: z.enum(['stripe', 'paypal', 'github', 'custom', 'zapier', 'intercom']),
   secret: z.string().min(32, 'Secret must be at least 32 characters'),
   keyId: z.string().optional(),
   expiresAt: z.string().optional(),

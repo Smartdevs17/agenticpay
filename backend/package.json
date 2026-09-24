@@ -83,9 +83,12 @@
     "seed": "tsx migrations/seed.ts"
   },
   "devDependencies": {
+    "@esbuild/win32-x64": "^0.28.2",
     "@eslint/js": "^9.0.0",
     "@faker-js/faker": "^9.9.0",
     "@openapitools/openapi-generator-cli": "^2.40.1",
+    "@stryker-mutator/core": "^9.4.0",
+    "@stryker-mutator/vitest-runner": "^9.4.0",
     "@tsoa/runtime": "^7.0.0-alpha.0",
     "@types/circomlibjs": "^0.1.6",
     "@types/compression": "^1.7.5",
@@ -115,8 +118,6 @@
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
     "vitest": "^4.1.1"
-    ,"@stryker-mutator/core": "^9.4.0"
-    ,"@stryker-mutator/vitest-runner": "^9.4.0"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.62.2"

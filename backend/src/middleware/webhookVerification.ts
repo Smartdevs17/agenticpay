@@ -9,6 +9,8 @@ import {
   verifyGithubProviderWebhook,
   verifyPaypalProviderWebhook,
   verifyCustomProviderWebhook,
+  verifyZapierProviderWebhook,
+  verifyIntercomProviderWebhook,
   type ProviderVerificationResult,
 } from '../services/webhooks/providers.js';
 import { getWebhookKeyRegistry } from '../services/webhookKeys.js';
@@ -123,6 +125,8 @@ const providerVerifiers: Record<WebhookProvider, ProviderVerifier> = {
   paypal: verifyPaypalProviderWebhook,
   github: verifyGithubProviderWebhook,
   custom: verifyCustomProviderWebhookWithKeys,
+  zapier: verifyZapierProviderWebhook,
+  intercom: verifyIntercomProviderWebhook,
 };
 
 export function verifyWebhookProvider(provider: WebhookProvider) {
@@ -138,6 +142,8 @@ export function verifyWebhookProvider(provider: WebhookProvider) {
         payload: result.payload ?? req.body,
         signature: (req.headers['stripe-signature'] ||
           req.headers['x-hub-signature-256'] ||
+          req.headers['x-hub-signature'] ||
+          req.headers['x-zapier-signature'] ||
           req.headers['x-signature'] ||
           '') as string,
         verified: result.isValid,
@@ -192,4 +198,5 @@ export const webhookVerifiers = {
   paypal: verifyWebhookProvider('paypal'),
   github: verifyWebhookProvider('github'),
   custom: verifyWebhookProvider('custom'),
+  zapier: verifyWebhookProvider('zapier'),
 };
