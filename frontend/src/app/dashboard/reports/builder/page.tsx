@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect } from 'react';
-import { useReportBuilderStore } from '../../../store/report-builder-store';
+import { useReportBuilderStore } from '../../../../store/report-builder-store';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,7 +51,7 @@ export default function ReportBuilderPage() {
     isSaving, isLoading, error,
     setStep, nextStep, prevStep, updateConfig,
     setMetric, removeMetric, setDimension, removeDimension,
-    setChartType, setDateRange,
+    setChartType, setDateRange, setFilter,
     reset, loadReports, saveReport, loadTemplates,
   } = useReportBuilderStore();
 
@@ -131,6 +131,37 @@ export default function ReportBuilderPage() {
                         </button>
                       );
                     })}
+                  </div>
+                  <div className="mt-6 border-t pt-5">
+                    <Label className="mb-3 block">Optional filters</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label htmlFor="report-status" className="text-xs">Payment status</Label>
+                        <select
+                          id="report-status"
+                          value={String(config.filters.status ?? '')}
+                          onChange={(event) => setFilter('status', event.target.value)}
+                          className="mt-1 h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm"
+                        >
+                          <option value="">All statuses</option>
+                          <option value="completed">Completed</option>
+                          <option value="failed">Failed</option>
+                          <option value="pending">Pending</option>
+                        </select>
+                      </div>
+                      {(['network', 'currency', 'merchant'] as const).map((filter) => (
+                        <div key={filter}>
+                          <Label htmlFor={`report-${filter}`} className="text-xs capitalize">{filter}</Label>
+                          <Input
+                            id={`report-${filter}`}
+                            value={String(config.filters[filter] ?? '')}
+                            onChange={(event) => setFilter(filter, event.target.value)}
+                            placeholder={`All ${filter}s`}
+                            className="mt-1"
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </CardContent>
               </Card>

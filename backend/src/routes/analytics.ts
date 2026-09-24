@@ -176,6 +176,7 @@ export function createAnalyticsRouter(wsServer: AgenticPayWebSocketServer) {
     // Broadcast updated snapshot to all WebSocket subscribers
     wsServer.broadcast({
       type: 'analytics:update',
+      channel: 'analytics.updates',
       payload: analyticsService.snapshot(),
     });
 

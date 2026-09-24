@@ -32,6 +32,7 @@ import {
   WifiOff,
   BarChart3,
 } from 'lucide-react';
+import { parseAnalyticsUpdates, reconnectDelay } from '@/lib/analytics/realtime';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -164,33 +165,37 @@ export default function AnalyticsPage() {
   useEffect(() => {
     let ws: WebSocket;
     let reconnectTimeout: ReturnType<typeof setTimeout>;
+    let reconnectAttempt = 0;
+    let stopped = false;
 
     function connect() {
+      if (stopped) return;
       try {
         ws = new WebSocket(WS_URL);
-        ws.onopen = () => setWsConnected(true);
+        ws.onopen = () => {
+          reconnectAttempt = 0;
+          setWsConnected(true);
+          ws.send(JSON.stringify({ type: 'subscribe', channels: ['analytics.updates'] }));
+        };
         ws.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data as string);
-            if (msg.type === 'analytics:update' && msg.payload) {
-              applySnapshot(msg.payload as AnalyticsSnapshot);
-            }
-          } catch {
-            // ignore malformed frames
-          }
+          const snapshots = parseAnalyticsUpdates<AnalyticsSnapshot>(String(event.data));
+          if (snapshots.length > 0) applySnapshot(snapshots[snapshots.length - 1]);
         };
         ws.onclose = () => {
           setWsConnected(false);
-          reconnectTimeout = setTimeout(connect, 5000);
+          if (!stopped) {
+            reconnectTimeout = setTimeout(connect, reconnectDelay(reconnectAttempt++));
+          }
         };
         ws.onerror = () => ws.close();
       } catch {
-        reconnectTimeout = setTimeout(connect, 5000);
+        reconnectTimeout = setTimeout(connect, reconnectDelay(reconnectAttempt++));
       }
     }
 
     connect();
     return () => {
+      stopped = true;
       clearTimeout(reconnectTimeout);
       ws?.close();
     };
