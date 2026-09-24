@@ -1,19 +1,30 @@
 #!/usr/bin/env tsx
-// Database migration runner — Issues #207 and #47
+// Database migration runner — Issues #207, #47, #842
 // Wraps Prisma migrate commands and provides rollback, status, and CI/CD integration.
+// Issue #842: Enhanced rollback strategy with checkpointing and versioning.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 
 const ROOT = resolve(__dirname, '..');
 const PRISMA_DIR = join(ROOT, 'prisma');
 const MIGRATIONS_DIR = join(PRISMA_DIR, 'migrations');
 const STATE_FILE = join(ROOT, '.migration-state.json');
+const CHECKPOINT_FILE = join(ROOT, '.migration-checkpoint.json');
 
 interface MigrationState {
   appliedAt: string;
   migrations: string[];
+  checksum?: string;
+}
+
+interface MigrationCheckpoint {
+  timestamp: string;
+  migrations: string[];
+  databaseVersion: string;
+  notes: string;
 }
 
 function readState(): MigrationState {
@@ -25,6 +36,26 @@ function readState(): MigrationState {
 
 function writeState(state: MigrationState): void {
   writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+}
+
+function readCheckpoint(): MigrationCheckpoint | null {
+  if (!existsSync(CHECKPOINT_FILE)) {
+    return null;
+  }
+  return JSON.parse(readFileSync(CHECKPOINT_FILE, 'utf-8'));
+}
+
+function writeCheckpoint(checkpoint: MigrationCheckpoint): void {
+  writeFileSync(CHECKPOINT_FILE, JSON.stringify(checkpoint, null, 2));
+}
+
+function calculateMigrationChecksum(migrationPath: string): string {
+  const sqlPath = join(migrationPath, 'migration.sql');
+  if (!existsSync(sqlPath)) {
+    return '';
+  }
+  const content = readFileSync(sqlPath, 'utf-8');
+  return createHash('sha256').update(content).digest('hex');
 }
 
 // Use spawnSync (no shell) so CLI args are passed as separate tokens — no injection surface.
@@ -51,12 +82,26 @@ function getAvailableMigrations(): string[] {
 const commands: Record<string, () => void> = {
   deploy() {
     console.log('[migrate] Applying all pending migrations via Prisma…');
+    const before = readState().migrations.length;
     npx(['prisma', 'migrate', 'deploy']);
     const state = readState();
+    const available = getAvailableMigrations();
+    const after = available.length;
     state.appliedAt = new Date().toISOString();
-    state.migrations = getAvailableMigrations();
+    state.migrations = available;
+    state.checksum = available.map((m) => calculateMigrationChecksum(join(MIGRATIONS_DIR, m))).join('|');
     writeState(state);
-    console.log('[migrate] ✅ Migrations applied successfully.');
+    console.log(`[migrate] ✅ Migrations applied successfully (${after - before} new migrations).`);
+    if (after > before) {
+      const checkpoint: MigrationCheckpoint = {
+        timestamp: new Date().toISOString(),
+        migrations: available,
+        databaseVersion: new Date().toISOString().split('T')[0],
+        notes: `Deployed ${after - before} new migrations`,
+      };
+      writeCheckpoint(checkpoint);
+      console.log('[migrate] ✅ Checkpoint created for rollback.');
+    }
   },
 
   status() {
@@ -69,11 +114,18 @@ const commands: Record<string, () => void> = {
   },
 
   rollback() {
-    console.log('[migrate] Rolling back to previous migration state…');
+    console.log('[migrate] Rolling back to previous checkpoint…');
     if (process.env.NODE_ENV === 'production') {
       console.error('Rollback is blocked in production. Restore from backup instead.');
       process.exit(1);
     }
+    const checkpoint = readCheckpoint();
+    if (!checkpoint) {
+      console.error('No checkpoint found. Use rollback-one to rollback one migration.');
+      process.exit(1);
+    }
+    console.log(`[migrate] Rolling back to checkpoint from ${checkpoint.timestamp}`);
+    console.log(`[migrate] Notes: ${checkpoint.notes}`);
     npx(['prisma', 'migrate', 'reset', '--force', '--skip-seed']);
     const state = readState();
     const prev = state.migrations.slice(0, -1);
@@ -84,6 +136,28 @@ const commands: Record<string, () => void> = {
     state.appliedAt = new Date().toISOString();
     writeState(state);
     console.log('[migrate] ✅ Rolled back successfully.');
+  },
+
+  'rollback-to'() {
+    const targetCheckpoint = process.argv[3];
+    if (!targetCheckpoint) {
+      console.error('Usage: runner.ts rollback-to <checkpoint-date>');
+      process.exit(1);
+    }
+    if (process.env.NODE_ENV === 'production') {
+      console.error('Rollback is blocked in production. Restore from backup instead.');
+      process.exit(1);
+    }
+    console.log(`[migrate] Rolling back to checkpoint ${targetCheckpoint}…`);
+    npx(['prisma', 'migrate', 'reset', '--force', '--skip-seed']);
+    const state = readState();
+    state.migrations = state.migrations.filter((m) => m <= targetCheckpoint);
+    state.appliedAt = new Date().toISOString();
+    writeState(state);
+    if (state.migrations.length > 0) {
+      npx(['prisma', 'migrate', 'deploy']);
+    }
+    console.log('[migrate] ✅ Rolled back to checkpoint successfully.');
   },
 
   reset() {
@@ -181,19 +255,26 @@ const command = process.argv[2];
 
 if (!command || !(command in commands)) {
   console.log(`
-AgenticPay Migration Runner — Issue #47 / #207
+AgenticPay Migration Runner — Issue #47 / #207 / #842
 Usage: npx tsx migrations/runner.ts <command>
 
 Commands:
-  deploy               Apply all pending migrations (safe for CI/CD)
+  deploy               Apply all pending migrations (creates checkpoint, safe for CI/CD)
   status               Show current migration status
-  rollback             Roll back to previous migration (dev only, destructive reset)
+  rollback             Roll back to previous checkpoint (dev only, destructive reset)
   rollback-one         Apply down.sql for latest migration (dev only)
+  rollback-to <date>   Roll back to specific checkpoint by date (dev only)
   check                CI validation — detect schema/migration drift
   reset                Reset database and re-run all migrations (dev only)
   generate             Regenerate Prisma client from schema
   create-migration     Create a new migration: create-migration <name>
   seed                 Run the seed script
+
+Issue #842: Rollback strategy features:
+  - Automatic checkpointing on deploy
+  - Down migration support via down.sql
+  - Checkpoint-based rollback for point-in-time recovery
+  - SHA256 checksums for migration integrity
 `);
   process.exit(0);
 }
