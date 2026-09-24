@@ -59,6 +59,10 @@ import { databaseRouter } from './routes/database.js';
 import { archiveRouter } from './routes/archive.js';
 import { searchRouter } from './routes/search.js';
 import { getPrismaReplicaClient } from './db/PrismaReplicaClient.js';
+import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
+import { churnPredictionRouter } from './routes/churn-prediction.js';
+import { slackRouter } from './routes/slack.js';
+import { githubIntegrationRouter } from './routes/github-integration.js';
 
 dotenv.config();
 
@@ -305,6 +309,10 @@ apiV1Router.use('/database', databaseRouter);
 apiV1Router.use('/archive', archiveRouter);
 // Full-text search — Issue #885
 apiV1Router.use('/search', searchRouter);
+apiV1Router.use('/analytics/cohorts', cohortAnalyticsRouter);
+apiV1Router.use('/analytics/churn', churnPredictionRouter);
+apiV1Router.use('/integrations/slack', slackRouter);
+apiV1Router.use('/integrations/github', githubIntegrationRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);
