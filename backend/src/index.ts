@@ -61,6 +61,10 @@ import { searchRouter } from './routes/search.js';
 import { zapierRouter } from './routes/zapier.js';
 import { intercomRouter } from './routes/intercom.js';
 import { getPrismaReplicaClient } from './db/PrismaReplicaClient.js';
+import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
+import { churnPredictionRouter } from './routes/churn-prediction.js';
+import { slackRouter } from './routes/slack.js';
+import { githubIntegrationRouter } from './routes/github-integration.js';
 
 dotenv.config();
 
@@ -307,10 +311,10 @@ apiV1Router.use('/database', databaseRouter);
 apiV1Router.use('/archive', archiveRouter);
 // Full-text search — Issue #885
 apiV1Router.use('/search', searchRouter);
-// Zapier webhook integration & actions
-apiV1Router.use('/zapier', zapierRouter);
-// Intercom support integration & webhooks
-apiV1Router.use('/intercom', intercomRouter);
+apiV1Router.use('/analytics/cohorts', cohortAnalyticsRouter);
+apiV1Router.use('/analytics/churn', churnPredictionRouter);
+apiV1Router.use('/integrations/slack', slackRouter);
+apiV1Router.use('/integrations/github', githubIntegrationRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);
