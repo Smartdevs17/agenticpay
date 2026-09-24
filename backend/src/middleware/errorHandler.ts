@@ -1,6 +1,7 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { ERROR_CODE_REGISTRY, resolveErrorCode } from '@agenticpay/error-codes';
 import { AppError, PaymentError, AuthError, ProjectError, DisputeError, ValidationError, NotFoundError } from '../types/errors';
+import metrics from '../observability/datadog.js';
 
 type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<unknown>;
 
@@ -41,6 +42,17 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     ...(!isProduction && !isAppError && err instanceof Error && err.stack ? { stack: err.stack } : {}),
   };
   logMethod(`[${code}] ${message}`, logContext);
+
+  const endpoint = req.route?.path || req.path;
+  const tags = {
+    endpoint,
+    error_code: code,
+    status_code: String(registered.httpStatus || statusCode),
+  };
+  metrics.increment('errors.total', 1, tags);
+  if (registered.httpStatus >= 500) {
+    metrics.increment('errors.critical', 1, tags);
+  }
 
   if (registered.deprecated && registered.sunsetAt) {
     res.setHeader('Sunset', registered.sunsetAt);
