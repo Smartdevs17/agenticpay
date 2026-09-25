@@ -172,6 +172,7 @@ model Payment {
   project   Project?   @relation(fields: [projectId], references: [id])
   milestone Milestone? @relation(fields: [milestoneId], references: [id])
   transactionReorgs TransactionReorg[]
+  disputes  Dispute[]
 
   @@index([tenantId, createdAt])
   @@index([status], map: "payments_active_status_idx")
@@ -180,6 +181,77 @@ model Payment {
   @@index([providerId])
   @@index([deletedAt], map: "payments_deleted_at_idx")
   @@map("payments")
+}
+
+// ─── Payment dispute management (Issue #816) ───────────────────────────────
+//
+// A payer files a dispute against a Payment; the respondent (payee) has
+// RESPONSE_HOURS to reply before the dispute auto-escalates
+// (ESCALATION_HOURS after filing — see backend/disputes/disputeService.ts
+// and the "dispute-escalation" scheduled task). An arbitrator then resolves
+// it. Evidence and messages are append-only sub-records with no independent
+// query needs of their own, so they're modeled as JSON columns (matching
+// Payment.metadata's own convention) rather than separate join tables.
+
+enum DisputeStatus {
+  pending
+  awaiting_response
+  under_review
+  resolved
+  escalated
+  dismissed
+}
+
+enum DisputeReason {
+  service_not_delivered
+  partial_delivery
+  quality_issue
+  unauthorized_charge
+  duplicate_charge
+  other
+}
+
+enum DisputeResolutionOutcome {
+  full_refund
+  partial_refund
+  release_to_payee
+  dismissed
+  pending
+}
+
+model Dispute {
+  id                 String                   @id @default(uuid())
+  tenantId            String                   @map("tenant_id")
+  paymentId           String                   @map("payment_id")
+  projectId           String?                  @map("project_id")
+  invoiceId           String?                  @map("invoice_id")
+  filedBy             String                   @map("filed_by")
+  respondentId        String                   @map("respondent_id")
+  arbitratorId        String?                  @map("arbitrator_id")
+  status              DisputeStatus            @default(awaiting_response)
+  reason              DisputeReason
+  amount              Decimal                  @db.Decimal(20, 8)
+  currency            String
+  description         String
+  /// Array of { id, submittedBy, fileUrl, fileName, fileType, fileSize, description, timestamp, hash } — see disputeModel.ts's Evidence type.
+  evidence            Json                     @default("[]")
+  /// Array of { id, senderId, senderRole, content, timestamp } — see disputeModel.ts's DisputeMessage type.
+  messages            Json                     @default("[]")
+  resolution          DisputeResolutionOutcome @default(pending)
+  resolutionNote      String?                  @map("resolution_note")
+  refundAmount        Decimal?                 @map("refund_amount") @db.Decimal(20, 8)
+  responseDeadline    DateTime                 @map("response_deadline")
+  escalationDeadline  DateTime                 @map("escalation_deadline")
+  createdAt           DateTime                 @default(now()) @map("created_at")
+  updatedAt           DateTime                 @updatedAt @map("updated_at")
+  resolvedAt          DateTime?                @map("resolved_at")
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([paymentId])
+  @@index([status, responseDeadline], map: "disputes_pending_escalation_idx")
+  @@map("disputes")
 }
 
 model Project {
