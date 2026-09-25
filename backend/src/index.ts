@@ -86,6 +86,8 @@ import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
 import { cacheRouter } from './routes/cache.js';
 // Rate limiting: tier configs, quota overrides, and analytics — Issue #820
 import { rateLimitQuotasRouter } from './routes/rate-limit-quotas.js';
+// Request/response compression — Issue #821
+import { compressionRouter } from './routes/compression.js';
 
 dotenv.config();
 
@@ -226,6 +228,9 @@ app.use(express.json());
 
 app.use(compressionMiddleware({ minSizeBytes: config.compression.threshold }));
 
+// Decompress gzip/brotli request bodies before body parsers run — Issue #821
+app.use(requestDecompressionMiddleware());
+
 app.use(requestIdMiddleware);
 app.use(auditMiddleware());
 
@@ -355,6 +360,8 @@ apiV1Router.use('/cache', authMiddleware, cacheRouter);
 apiV1Router.use('/fiat-payments', authMiddleware, fiatPaymentsRouter);
 // Rate limiting: tier configs, quota overrides, and analytics — Issue #820
 apiV1Router.use('/rate-limit', rateLimitQuotasRouter);
+// Compression metrics and per-endpoint config — Issue #821
+apiV1Router.use('/compression', compressionRouter);
 
 // Explicit URL-based mounting
 // Per-key usage metrics for the analytics dashboard — Issue #826.
