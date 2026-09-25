@@ -63,6 +63,8 @@ import { intercomRouter } from './routes/intercom.js';
 import { getPrismaReplicaClient } from './db/PrismaReplicaClient.js';
 import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { churnPredictionRouter } from './routes/churn-prediction.js';
+import { createAnalyticsRouter } from './routes/analytics.js';
+import { apiUsageTracker } from './middleware/api-usage-tracker.js';
 import { slackRouter } from './routes/slack.js';
 import { githubIntegrationRouter } from './routes/github-integration.js';
 // ACH/wire fiat payments (bank verification, initiation, wire instructions,
@@ -333,6 +335,8 @@ apiV1Router.use('/archive', archiveRouter);
 apiV1Router.use('/search', searchRouter);
 apiV1Router.use('/analytics/cohorts', cohortAnalyticsRouter);
 apiV1Router.use('/analytics/churn', churnPredictionRouter);
+// Core analytics: usage snapshot, funnel, revenue, anomalies, event ingest — Issue #826
+apiV1Router.use('/analytics', createAnalyticsRouter());
 apiV1Router.use('/integrations/slack', slackRouter);
 apiV1Router.use('/integrations/github', githubIntegrationRouter);
 // Payment dispute management (filing, response, evidence, arbitration) — Issue #816
@@ -343,6 +347,9 @@ apiV1Router.use('/cache', authMiddleware, cacheRouter);
 apiV1Router.use('/fiat-payments', authMiddleware, fiatPaymentsRouter);
 
 // Explicit URL-based mounting
+// Per-key usage metrics for the analytics dashboard — Issue #826.
+// Mounted ahead of the routers so every API-key-authenticated call is recorded.
+app.use('/api/v1', apiUsageTracker);
 app.use('/api/v1', apiV1Router);
 
 // Milestone dependency management

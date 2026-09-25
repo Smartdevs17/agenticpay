@@ -1660,6 +1660,10 @@ model ApiKey {
   expiresAt     DateTime? @map("expires_at")
   revokedAt     DateTime? @map("revoked_at")
 
+  // Issue #824: granular permissions. Entries are validated against the
+  // vocabulary in src/lib/api-key-scopes.ts before they are written.
+  scopes String[] @default(["*"])
+
   // Issue #756: rotation with grace period. When a key is rotated, the
   // predecessor stays active until gracePeriodEndsAt so in-flight clients
   // have time to switch to the new key before the old one stops working.

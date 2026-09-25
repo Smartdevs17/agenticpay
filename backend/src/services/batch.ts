@@ -44,22 +44,100 @@ export interface BatchRecord {
 
 const batchStore = new Map<string, BatchRecord>();
 
+/**
+ * Split a single CSV record into fields, honouring RFC 4180 quoting.
+ *
+ * A quoted field may contain commas, and a literal quote inside a quoted field
+ * is escaped by doubling it (`""`). The previous implementation used a bare
+ * `split(',')`, so a memo such as `"Invoice 12, net 30"` was torn into two
+ * columns and every field after it shifted left.
+ */
+function parseCsvRecord(line: string): string[] {
+  const fields: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let fieldStarted = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (line[i + 1] === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === '"' && !fieldStarted) {
+      inQuotes = true;
+      fieldStarted = true;
+      continue;
+    }
+
+    if (char === ',') {
+      fields.push(current.trim());
+      current = '';
+      fieldStarted = false;
+      continue;
+    }
+
+    fieldStarted = true;
+    current += char;
+  }
+
+  fields.push(current.trim());
+  return fields;
+}
+
+/** Canonical field names, mapped onto whatever order the header declares. */
+const CSV_FIELDS = ['recipient', 'amount', 'asset', 'memo'] as const;
+
 export function parseCSV(csv: string): {
   rows: BatchPaymentItem[];
   errors: Array<{ line: number; error: string }>;
 } {
-  const lines = csv.trim().split('\n');
+  // Normalise CRLF/CR line endings so a spreadsheet export on Windows does not
+  // leave a trailing \r inside the last field of every row.
+  const lines = csv.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n');
   const rows: BatchPaymentItem[] = [];
   const errors: Array<{ line: number; error: string }> = [];
 
-  const dataLines = lines[0]?.toLowerCase().includes('recipient') ? lines.slice(1) : lines;
+  // Map columns by header name when a header row is present. Reading columns
+  // purely by position meant a file without an `asset` column had its memo
+  // consumed as the asset ticker.
+  let header: Partial<Record<(typeof CSV_FIELDS)[number], number>> | undefined;
+  const firstCells = lines[0] ? parseCsvRecord(lines[0]).map((c) => c.toLowerCase()) : [];
+  if (firstCells.includes('recipient') || firstCells.includes('amount')) {
+    header = {};
+    for (const field of CSV_FIELDS) {
+      const index = firstCells.indexOf(field);
+      if (index !== -1) header[field] = index;
+    }
+  }
+
+  const dataLines = header ? lines.slice(1) : lines;
 
   for (let i = 0; i < dataLines.length; i++) {
     const line = dataLines[i].trim();
     if (!line) continue;
 
-    const cols = line.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
-    const [recipient, amount, asset = 'XLM', memo] = cols;
+    const cols = parseCsvRecord(line);
+    const at = (field: (typeof CSV_FIELDS)[number], position: number): string | undefined => {
+      const index = header ? header[field] : position;
+      return index === undefined ? undefined : cols[index];
+    };
+
+    const recipient = at('recipient', 0) ?? '';
+    const amount = at('amount', 1) ?? '';
+    const asset = at('asset', 2) || 'XLM';
+    const memo = at('memo', 3);
 
     if (!recipient) {
       errors.push({ line: i + 2, error: 'Missing recipient' });
@@ -249,17 +327,40 @@ export function generateCSVTemplate(): string {
 
 export interface BatchEstimate {
   totalPayments: number;
-  totalAmount: string;
+  /** Totals broken down by asset. Amounts in different assets are not
+   *  comparable, so they are never combined into one figure. */
   byAsset: Record<string, string>;
+  /**
+   * Combined total. Only meaningful when every payment uses the same asset;
+   * `null` for a mixed-asset batch. Read `byAsset` for those.
+   */
+  totalAmount: string | null;
   estimatedGasUnits: number;
   duplicateCount: number;
   invalidAddressCount: number;
   estimatedDurationMs: number;
 }
 
+/** Stellar amounts carry at most 7 decimal places. */
+const AMOUNT_DECIMALS = 7;
+const AMOUNT_SCALE = 10 ** AMOUNT_DECIMALS;
+
+/**
+ * Parse a decimal amount string into integer minor units.
+ * Avoids binary floating point drift when many rows are summed.
+ */
+function toMinorUnits(amount: string): number {
+  const [whole = '0', fraction = ''] = amount.split('.');
+  const padded = fraction.padEnd(AMOUNT_DECIMALS, '0').slice(0, AMOUNT_DECIMALS);
+  return Number(whole) * AMOUNT_SCALE + Number(padded || '0');
+}
+
+function fromMinorUnits(minor: number): string {
+  return (minor / AMOUNT_SCALE).toFixed(AMOUNT_DECIMALS);
+}
+
 export function estimateBatch(payments: BatchPaymentItem[]): BatchEstimate {
-  const byAsset: Record<string, number> = {};
-  let totalAmount = 0;
+  const byAssetMinor: Record<string, number> = {};
   let invalidCount = 0;
 
   for (const p of payments) {
@@ -267,21 +368,25 @@ export function estimateBatch(payments: BatchPaymentItem[]): BatchEstimate {
       invalidCount++;
       continue;
     }
-    const amount = parseFloat(p.amount) || 0;
-    totalAmount += amount;
-    byAsset[p.asset] = (byAsset[p.asset] ?? 0) + amount;
+    const minor = toMinorUnits(p.amount);
+    byAssetMinor[p.asset] = (byAssetMinor[p.asset] ?? 0) + minor;
   }
 
   const duplicateIndices = detectDuplicates(payments);
-  const byAssetStrings: Record<string, string> = {};
-  for (const [k, v] of Object.entries(byAsset)) {
-    byAssetStrings[k] = v.toFixed(7);
+  const byAsset: Record<string, string> = {};
+  for (const [asset, minor] of Object.entries(byAssetMinor)) {
+    byAsset[asset] = fromMinorUnits(minor);
   }
+
+  // Only combine when the batch is single-asset; otherwise a total would add
+  // incomparable units together.
+  const assets = Object.keys(byAssetMinor);
+  const totalAmount = assets.length === 1 ? byAsset[assets[0]] : null;
 
   return {
     totalPayments: payments.length,
-    totalAmount: totalAmount.toFixed(7),
-    byAsset: byAssetStrings,
+    totalAmount,
+    byAsset,
     estimatedGasUnits: payments.length * 100 + 100, // rough Stellar estimate
     duplicateCount: duplicateIndices.length,
     invalidAddressCount: invalidCount,
