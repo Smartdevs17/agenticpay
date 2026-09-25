@@ -15,7 +15,13 @@ import {
 } from '../services/analytics.js';
 import type { AgenticPayWebSocketServer } from '../websocket/server.js';
 
-export function createAnalyticsRouter(wsServer: AgenticPayWebSocketServer) {
+/**
+ * @param wsServer Optional WebSocket server used to push live updates to
+ *   subscribers on the `analytics.updates` channel. The HTTP routes do not
+ *   depend on the socket layer, so the router can be mounted without one; when
+ *   it is absent the broadcast is skipped and `/track` still records the event.
+ */
+export function createAnalyticsRouter(wsServer?: AgenticPayWebSocketServer) {
   const router = Router();
 
   function parseSince(req: Request): Date | undefined {
@@ -174,7 +180,7 @@ export function createAnalyticsRouter(wsServer: AgenticPayWebSocketServer) {
     analyticsService.trackPayment({ id, amount, currency, network, status: status as 'initiated' | 'confirmed' | 'completed' | 'failed' });
 
     // Broadcast updated snapshot to all WebSocket subscribers
-    wsServer.broadcast({
+    wsServer?.broadcast({
       type: 'analytics:update',
       channel: 'analytics.updates',
       payload: analyticsService.snapshot(),
