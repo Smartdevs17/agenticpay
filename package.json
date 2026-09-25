@@ -20,6 +20,8 @@
     "test:integration": "docker compose -f docker-compose.integration.yml run --rm integration-tests",
     "test:integration:down": "docker compose -f docker-compose.integration.yml down -v",
     "test:smoke": "node scripts/smoke/production.mjs",
+    "load:k6": "k6 run tests/load/k6/payment-flow.js",
+    "load:k6:smoke": "k6 run tests/load/k6/smoke.js",
     "test:mutation": "npm --workspace backend run test:mutation",
     "sandbox:faucet": "node scripts/sandbox/faucet.js",
     "dev:contracts": "bash scripts/dev/watch-contracts.sh",

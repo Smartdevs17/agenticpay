@@ -78,6 +78,13 @@ cohortAnalyticsRouter.get(
 );
 
 cohortAnalyticsRouter.get(
+  '/retention',
+  asyncHandler(async (_req, res) => {
+    res.json({ data: cohortAnalyticsService.getRetentionMatrix() });
+  }),
+);
+
+cohortAnalyticsRouter.get(
   '/:cohortMonth/retention',
   asyncHandler(async (req, res) => {
     const cohortMonth = requireCohortMonth(req);
