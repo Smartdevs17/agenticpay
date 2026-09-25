@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
+import http from 'node:http';
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
@@ -67,6 +68,11 @@ import { createAnalyticsRouter } from './routes/analytics.js';
 import { apiUsageTracker } from './middleware/api-usage-tracker.js';
 import { slackRouter } from './routes/slack.js';
 import { githubIntegrationRouter } from './routes/github-integration.js';
+// Issue #823 — Real-time WebSocket API for live updates
+import { attachWebSocketServer } from './websocket/server.js';
+import { ConnectionManager } from './websocket/connection-manager.js';
+import { registerWebSocketServer } from './websocket/live-broadcast.js';
+import { createWebSocketRouter } from './routes/websocket.js';
 // ACH/wire fiat payments (bank verification, initiation, wire instructions,
 // reconciliation) — Issue #817. Fully implemented in fiat-payments.ts/
 // providers/fiat.ts already but the router was never mounted.
@@ -389,8 +395,24 @@ if (config.queue.enabled) {
 
 registerDefaultPaymentProviders();
 
-const server = app.listen(config.server.port, () => {
+// ---------------------------------------------------------------------------
+// Issue #823 — Real-time WebSocket API
+// Attach the WebSocket server to the raw HTTP server so we can handle the
+// WS upgrade handshake.  The REST management routes are mounted on /api/v1/ws.
+// ---------------------------------------------------------------------------
+const httpServer = http.createServer(app);
+
+const wsServer = attachWebSocketServer({ server: httpServer });
+const connectionManager = new ConnectionManager(wsServer);
+registerWebSocketServer(wsServer);
+
+// Mount WebSocket REST management routes AFTER wsServer is created so
+// createWebSocketRouter can capture the reference.
+apiV1Router.use('/ws', createWebSocketRouter(wsServer, connectionManager));
+
+const server = httpServer.listen(config.server.port, () => {
   console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
+  console.log(`WebSocket endpoint: ws://localhost:${config.server.port}/ws`);
 });
 
 // Graceful shutdown
@@ -399,6 +421,10 @@ const shutdown = (signal: string) => {
 
   server.close(() => {
     console.log('HTTP server closed.');
+
+    void wsServer.close().then(() => {
+      console.log('WebSocket server closed.');
+    });
 
     try {
       const scheduler = getJobScheduler();
