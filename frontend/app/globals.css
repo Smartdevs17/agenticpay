@@ -1,4 +1,22 @@
 @import "tailwindcss";
+
+@media print {
+  nav,
+  aside,
+  header,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  * {
+    color: #111827 !important;
+    box-shadow: none !important;
+  }
+}
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));

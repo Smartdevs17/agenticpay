@@ -23,7 +23,7 @@ jobs:
           path: node_modules
           key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - run: npx turbo run lint --filter=agenticpay-backend
+      - run: npx turbo run lint --filter=agenticpay-backend --filter=agenticpay-frontend
 
   test:
     name: Tests
@@ -38,4 +38,16 @@ jobs:
           path: node_modules
           key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - run: npx turbo run test --filter=agenticpay-backend
+      - run: npx turbo run test --filter=agenticpay-backend --filter=agenticpay-frontend
+
+  build:
+    name: Production builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+      - run: npm run build --workspace=agenticpay-backend
+      - run: npm run build --workspace=agenticpay-frontend

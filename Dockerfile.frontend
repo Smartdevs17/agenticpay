@@ -1,0 +1,21 @@
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+COPY packages ./packages
+RUN npm ci
+
+FROM deps AS builder
+COPY frontend ./frontend
+WORKDIR /app/frontend
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+COPY --from=builder /app/frontend/public ./frontend/public
+COPY --from=builder /app/frontend/.next/standalone ./
+COPY --from=builder /app/frontend/.next/static ./frontend/.next/static
+EXPOSE 3000
+CMD ["node", "frontend/server.js"]
