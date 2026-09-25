@@ -11,10 +11,13 @@ WORKDIR /app/backend
 RUN npm run build
 
 FROM node:20-alpine AS runner
+RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app/backend
 ENV NODE_ENV=production
 COPY --from=builder /app/backend/package.json ./
 COPY --from=builder /app/backend/dist ./dist
 COPY --from=deps /app/node_modules /app/node_modules
+RUN chown -R app:app /app
+USER app
 EXPOSE 4000
 CMD ["node", "dist/index.js"]
