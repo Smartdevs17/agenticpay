@@ -1,6 +1,6 @@
 # Subscription Cohort Retention Analytics
 
-Issue #629. In-memory, event-sourced cohort analytics for on-chain-managed
+Issues #629 and #851. In-memory, event-sourced cohort analytics for on-chain-managed
 subscriptions (see `backend/src/jobs/subscription.service.ts`). There is no
 Prisma-persisted subscription/customer table in this codebase — subscriptions
 are managed on-chain — so this service, like `backend/src/services/analytics.ts`
@@ -195,6 +195,12 @@ List all cohort months present with their size.
 }
 ```
 
+### `GET /api/v1/analytics/cohorts/retention`
+
+Returns every cohort as an aligned retention matrix suitable for a heatmap.
+Offsets without enough observed history are `null`, not zero, so future months
+are not misclassified as complete churn.
+
 ### `GET /api/v1/analytics/cohorts/:cohortMonth/retention`
 
 `cohortMonth` must match `YYYY-MM`.
@@ -285,8 +291,7 @@ cohortMonth,monthOffset,activeCustomers,retentionPct
 
 ## Mounting
 
-This route module is not wired into `src/index.ts` by this change (per task
-scope — index.ts is owned by another workstream). To enable it, mount:
+The route is mounted in `src/index.ts` at:
 
 ```ts
 import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
