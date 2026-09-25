@@ -1,4 +1,29 @@
-import { Request, Response, NextFunction } from "express";
+/**
+ * Issue #822 — API Versioning with Deprecation Headers
+ *
+ * Middleware and registry for multi-version API management.
+ *
+ * Standards:
+ *   - RFC 8594  (Sunset header)
+ *   - Draft "The Deprecation HTTP Header Field" (IETF)
+ *   - RFC 7234  (Warning header — 299 Miscellaneous Persistent Warning)
+ *
+ * Header behaviour on deprecated versions:
+ *   Deprecation: <HTTP-date>          — date the version was deprecated
+ *   Sunset:      <HTTP-date>          — date the version will stop working
+ *   Warning:     299 - "<message>"    — human-readable warning per RFC 7234
+ *   Link:        </api/vN>; rel="successor-version"   — migration target
+ *   X-API-Version: vN                 — version that handled the request
+ *
+ * On sunset (sun has already set):
+ *   HTTP 410 Gone with JSON error body
+ */
+
+import { Request, Response, NextFunction } from 'express';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export interface ApiVersion {
   version: string;
@@ -6,119 +31,200 @@ export interface ApiVersion {
   deprecationDate?: Date;
   sunsetDate?: Date;
   alternativeVersion?: string;
+  description?: string;
+  changelogUrl?: string;
 }
 
 export interface VersioningConfig {
   defaultVersion: string;
   supportedVersions: ApiVersion[];
+  /** Header name for explicit version selection (default: 'api-version') */
   headerName?: string;
+  /** Query param for version selection (default: 'version') */
   queryParamName?: string;
 }
 
-const DEPRECATION_WARNING_DAYS = 90;
+// ---------------------------------------------------------------------------
+// In-memory version registry (runtime-mutable)
+// ---------------------------------------------------------------------------
 
-function parseVersion(versionString: string): number {
-  const match = versionString.match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
-  if (!match) return 0;
+const registry = new Map<string, ApiVersion>();
+let defaultVersion = 'v1';
 
-  const major = parseInt(match[1] || "0", 10);
-  const minor = parseInt(match[2] || "0", 10);
-  const patch = parseInt(match[3] || "0", 10);
-
-  return major * 10000 + minor * 100 + patch;
+/** Seed the registry with an initial configuration */
+export function initVersionRegistry(config: VersioningConfig): void {
+  registry.clear();
+  defaultVersion = config.defaultVersion;
+  for (const v of config.supportedVersions) {
+    registry.set(v.version, { ...v });
+  }
 }
 
-function findVersion(
-  requestedVersion: string,
-  supportedVersions: ApiVersion[],
-): ApiVersion | null {
-  return supportedVersions.find((v) => v.version === requestedVersion) || null;
+/** Register or upsert a version entry */
+export function registerVersion(version: ApiVersion): void {
+  registry.set(version.version, { ...version });
 }
 
-function extractVersionFromPath(path: string): string | null {
-  const match = path.match(/^\/api\/v(\d+)/);
-  return match ? `v${match[1]}` : null;
+/** Mark a version as deprecated */
+export function deprecateVersion(version: string, sunsetDate: Date, alternativeVersion?: string): void {
+  const existing = registry.get(version);
+  if (!existing) throw new Error(`Version '${version}' is not registered`);
+  registry.set(version, {
+    ...existing,
+    deprecated: true,
+    deprecationDate: new Date(),
+    sunsetDate,
+    alternativeVersion: alternativeVersion ?? existing.alternativeVersion,
+  });
 }
+
+/** List all registered versions */
+export function listVersions(): ApiVersion[] {
+  return Array.from(registry.values());
+}
+
+/** Get a single version entry */
+export function getVersion(version: string): ApiVersion | undefined {
+  return registry.get(version);
+}
+
+// Bootstrap with v1 active
+registry.set('v1', { version: 'v1', description: 'Current stable version' });
+
+// ---------------------------------------------------------------------------
+// Header helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a Date as an HTTP-date string per RFC 7231 §7.1.1.
+ * e.g. "Fri, 25 Sep 2026 21:00:00 GMT"
+ */
+function toHttpDate(date: Date): string {
+  return date.toUTCString();
+}
+
+function applyDeprecationHeaders(res: Response, info: ApiVersion): void {
+  // Deprecation: <HTTP-date> — when the deprecation was announced
+  if (info.deprecationDate) {
+    res.setHeader('Deprecation', toHttpDate(info.deprecationDate));
+  } else {
+    res.setHeader('Deprecation', 'true');
+  }
+
+  // Sunset: <HTTP-date> — when the version will stop working
+  if (info.sunsetDate) {
+    res.setHeader('Sunset', toHttpDate(info.sunsetDate));
+  }
+
+  // Warning: 299 — human-readable advisory per RFC 7234 §5.5
+  const days = info.sunsetDate
+    ? Math.ceil((info.sunsetDate.getTime() - Date.now()) / 86_400_000)
+    : null;
+
+  const migrateTo = info.alternativeVersion ? ` Migrate to ${info.alternativeVersion}.` : '';
+  const daysNote = days !== null ? ` Sunset in ${days} day(s).` : '';
+  res.setHeader('Warning', `299 - "API version ${info.version} is deprecated.${daysNote}${migrateTo}"`);
+
+  // Link: successor-version
+  const successor = info.alternativeVersion ?? defaultVersion;
+  res.setHeader('Link', `</api/${successor}>; rel="successor-version"`);
+}
+
+// ---------------------------------------------------------------------------
+// Version extraction
+// ---------------------------------------------------------------------------
+
+function normalise(raw: string): string {
+  const v = raw.trim().replace(/^v/i, '');
+  return `v${v}`;
+}
+
+function extractVersionFromRequest(req: Request, headerName: string, queryParam: string): string | null {
+  // 1. URL path: /api/v1/... or /api/v2/...
+  const pathMatch = (req.originalUrl ?? req.path ?? '').match(/^\/api\/(v\d+)/i);
+  if (pathMatch) return normalise(pathMatch[1]);
+
+  // 2. Explicit version headers
+  for (const h of [headerName, 'x-api-version', 'accept-version']) {
+    const val = req.headers[h];
+    if (val) return normalise(Array.isArray(val) ? val[0] : val);
+  }
+
+  // 3. Content-Type media-type versioning
+  //    e.g. application/vnd.agenticpay.v1+json  or  application/json; version=1
+  const ct = req.headers['content-type'] ?? '';
+  const vendorMatch = ct.match(/vnd\.[^.]+\.v(\d+)/i);
+  if (vendorMatch) return `v${vendorMatch[1]}`;
+  const paramMatch = ct.match(/;\s*version=(\d+)/i);
+  if (paramMatch) return `v${paramMatch[1]}`;
+
+  // 4. Query param
+  const qv = req.query?.[queryParam];
+  if (qv) return normalise(String(qv));
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Configurable middleware factory
+// ---------------------------------------------------------------------------
 
 export function apiVersioning(config: VersioningConfig) {
-  const {
-    defaultVersion,
-    supportedVersions,
-    headerName = "api-version",
-    queryParamName = "version",
-  } = config;
+  initVersionRegistry(config);
+  const hdr = config.headerName ?? 'api-version';
+  const qp  = config.queryParamName ?? 'version';
 
+  return buildVersionMiddleware(hdr, qp);
+}
+
+function buildVersionMiddleware(headerName = 'api-version', queryParam = 'version') {
   return (req: Request, res: Response, next: NextFunction): void => {
-    let requestedVersion: string | null = null;
+    const extracted = extractVersionFromRequest(req, headerName, queryParam);
+    const version = extracted ?? defaultVersion;
 
-    requestedVersion = extractVersionFromPath(req.path);
+    const info = registry.get(version);
 
-    if (!requestedVersion) {
-      requestedVersion = req.headers[headerName] as string;
-    }
-
-    if (!requestedVersion) {
-      requestedVersion = req.query[queryParamName] as string;
-    }
-
-    const version = requestedVersion || defaultVersion;
-    const versionInfo = findVersion(version, supportedVersions);
-
-    if (!versionInfo) {
+    if (!info) {
       res.status(400).json({
-        error: "Unsupported API version",
-        message: `API version '${version}' is not supported`,
-        supportedVersions: supportedVersions.map((v) => v.version),
+        error: 'Unsupported API version',
+        message: `API version '${version}' is not supported.`,
+        supportedVersions: Array.from(registry.keys()),
+        current: defaultVersion,
+      });
+      return;
+    }
+
+    // Check if version has already reached sunset
+    if (info.deprecated && info.sunsetDate && info.sunsetDate <= new Date()) {
+      res.status(410).json({
+        error: 'API version sunset',
+        message: `API version '${version}' has been sunset and is no longer available.`,
+        alternativeVersion: info.alternativeVersion ?? defaultVersion,
+        sunsetDate: info.sunsetDate.toISOString(),
       });
       return;
     }
 
     req.apiVersion = version;
-    res.setHeader("X-API-Version", version);
+    res.setHeader('X-API-Version', version);
 
-    if (versionInfo.deprecated) {
-      const now = new Date();
-      let deprecationMessage = `API version ${version} is deprecated`;
-
-      if (versionInfo.sunsetDate) {
-        const daysUntilSunset = Math.ceil(
-          (versionInfo.sunsetDate.getTime() - now.getTime()) /
-            (1000 * 60 * 60 * 24),
-        );
-
-        if (daysUntilSunset <= 0) {
-          res.status(410).json({
-            error: "API version sunset",
-            message: `API version ${version} has been sunset and is no longer available`,
-            alternativeVersion:
-              versionInfo.alternativeVersion || defaultVersion,
-          });
-          return;
-        }
-
-        deprecationMessage += `. It will be sunset on ${versionInfo.sunsetDate.toISOString()}`;
-
-        if (daysUntilSunset <= DEPRECATION_WARNING_DAYS) {
-          deprecationMessage += ` (${daysUntilSunset} days remaining)`;
-        }
-      }
-
-      if (versionInfo.alternativeVersion) {
-        deprecationMessage += `. Please migrate to version ${versionInfo.alternativeVersion}`;
-      }
-
-      res.setHeader("Deprecation", "true");
-      res.setHeader("Sunset", versionInfo.sunsetDate?.toUTCString() || "");
-      res.setHeader(
-        "Link",
-        `</api/${versionInfo.alternativeVersion || defaultVersion}>; rel="successor-version"`,
-      );
-      res.setHeader("X-API-Deprecation-Info", deprecationMessage);
+    if (info.deprecated) {
+      applyDeprecationHeaders(res, info);
     }
 
     next();
   };
 }
+
+// ---------------------------------------------------------------------------
+// Simple drop-in middleware (used by default in index.ts)
+// ---------------------------------------------------------------------------
+
+export const versionMiddleware = buildVersionMiddleware();
+
+// ---------------------------------------------------------------------------
+// Additional helpers (used in tests / routes)
+// ---------------------------------------------------------------------------
 
 export function versionedRoute(
   version: string,
@@ -132,14 +238,12 @@ export function versionedRoute(
   };
 }
 
-export function getApiVersionInfo(req: Request): {
-  version: string;
-  deprecated: boolean;
-  sunsetDate?: Date;
-} {
+export function getApiVersionInfo(req: Request): { version: string; deprecated: boolean; sunsetDate?: Date } {
+  const info = registry.get(req.apiVersion ?? defaultVersion);
   return {
-    version: req.apiVersion || "v1",
-    deprecated: false,
+    version: req.apiVersion ?? defaultVersion,
+    deprecated: info?.deprecated ?? false,
+    sunsetDate: info?.sunsetDate,
   };
 }
 
