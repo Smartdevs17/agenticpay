@@ -84,6 +84,8 @@ import { authMiddleware } from './middleware/auth.js';
 import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
 // Admin cache stats/clear/evict endpoints — Issue #818
 import { cacheRouter } from './routes/cache.js';
+// Rate limiting: tier configs, quota overrides, and analytics — Issue #820
+import { rateLimitQuotasRouter } from './routes/rate-limit-quotas.js';
 
 dotenv.config();
 
@@ -351,6 +353,8 @@ apiV1Router.use('/disputes', authMiddleware, disputeRoutes);
 apiV1Router.use('/cache', authMiddleware, cacheRouter);
 // ACH/wire fiat payments — Issue #817
 apiV1Router.use('/fiat-payments', authMiddleware, fiatPaymentsRouter);
+// Rate limiting: tier configs, quota overrides, and analytics — Issue #820
+apiV1Router.use('/rate-limit', rateLimitQuotasRouter);
 
 // Explicit URL-based mounting
 // Per-key usage metrics for the analytics dashboard — Issue #826.

@@ -6,7 +6,7 @@ export { idempotency, clearIdempotencyCache } from './idempotency.js';
 export { initIpAllowlist, addBypassCode, removeBypassCode, ipAllowlistMiddleware, adminIpAllowlistMiddleware, apiIpAllowlistMiddleware, config as ipAllowlistConfig } from './ip-allowlist.js';
 export { logger, httpLogger } from './logger.js';
 export { type Role, type Action, type AbacContext, roleAtLeast, PermissionEngine, permissionEngine, requirePermission, attachAbacCtx } from './permissions.js';
-export { tokenBucketRateLimit, resolveUserTier, resolveClientKey, getAnalyticsSummary, type UserTier, type TokenBucketConfig, type RateLimitOptions, DEFAULT_TIER_CONFIGS, SANDBOX_TIER_CONFIGS, ENDPOINT_CONFIGS } from './rate-limit.js';
+export { tokenBucketRateLimit, rateLimit, resolveUserTier, resolveClientKey, getAnalyticsSummary, setQuotaOverride, removeQuotaOverride, listQuotaOverrides, type UserTier, type TokenBucketConfig, type RateLimitOptions, type QuotaOverride, DEFAULT_TIER_CONFIGS, SANDBOX_TIER_CONFIGS, ENDPOINT_CONFIGS } from './rate-limit.js';
 export { requestIdMiddleware, REQUEST_ID_HEADER } from './requestId.js';
 export { requireFlag } from './requireFlag.js';
 export { sanitizeInput, contentSecurityPolicy, validateInput, InputSanitizer, createSecurityRateLimit, type SanitizeOptions } from './sanitize.js';
