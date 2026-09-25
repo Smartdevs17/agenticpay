@@ -65,6 +65,17 @@ import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { churnPredictionRouter } from './routes/churn-prediction.js';
 import { slackRouter } from './routes/slack.js';
 import { githubIntegrationRouter } from './routes/github-integration.js';
+// ACH/wire fiat payments (bank verification, initiation, wire instructions,
+// reconciliation) — Issue #817. Fully implemented in fiat-payments.ts/
+// providers/fiat.ts already but the router was never mounted.
+import { fiatPaymentsRouter } from './routes/fiat-payments.js';
+// Payment dispute management — Issue #816
+import disputeRoutes from '../disputes/disputeRoutes.js';
+import { authMiddleware } from './middleware/auth.js';
+// GraphQL API alongside REST — Issue #819
+import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
+// Admin cache stats/clear/evict endpoints — Issue #818
+import { cacheRouter } from './routes/cache.js';
 
 dotenv.config();
 
@@ -245,6 +256,15 @@ app.use(healthRouter);
 // Interactive API documentation & playground — Issue #758
 app.use('/docs', docsRouter);
 
+// GraphQL API alongside REST — Issue #819. Mounted ahead of the REST
+// versioning/rate-limit block below (which only applies under '/api/') so
+// it isn't swept into the REST version-fallback 404. graphQLRouter/
+// graphQLWsRouter don't thread req.user into resolver context yet (see
+// PR notes) — authMiddleware here at least keeps the endpoint from being
+// fully anonymous until that's addressed.
+app.use('/graphql', authMiddleware, graphQLRouter);
+app.use('/graphql/ws', authMiddleware, graphQLWsRouter);
+
 import { versionMiddleware } from './middleware/versioning.js';
 
 // Apply tiered limiter to all API routes
@@ -315,6 +335,12 @@ apiV1Router.use('/analytics/cohorts', cohortAnalyticsRouter);
 apiV1Router.use('/analytics/churn', churnPredictionRouter);
 apiV1Router.use('/integrations/slack', slackRouter);
 apiV1Router.use('/integrations/github', githubIntegrationRouter);
+// Payment dispute management (filing, response, evidence, arbitration) — Issue #816
+apiV1Router.use('/disputes', authMiddleware, disputeRoutes);
+// Admin cache stats/clear/evict — Issue #818
+apiV1Router.use('/cache', authMiddleware, cacheRouter);
+// ACH/wire fiat payments — Issue #817
+apiV1Router.use('/fiat-payments', authMiddleware, fiatPaymentsRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);
