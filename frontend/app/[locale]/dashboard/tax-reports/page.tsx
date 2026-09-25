@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Download, Filter, Loader2, BarChart3, FileText } from 'lucide-react';
+import { Download, Filter, Loader2, BarChart3, FileText, Printer } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { EmptyState } from '@/components/empty/EmptyState';
@@ -108,8 +108,16 @@ export default function TaxReportsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Tax Reports</h1>
-        <p className="text-gray-600 mt-1">Track and download your tax compliance reports</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Tax Reports</h1>
+            <p className="text-gray-600 mt-1">Track and download your tax compliance reports</p>
+          </div>
+          <Button type="button" variant="outline" onClick={() => window.print()} className="print:hidden">
+            <Printer className="h-4 w-4 mr-2" />
+            Print report
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(280px,320px)_1fr]">
