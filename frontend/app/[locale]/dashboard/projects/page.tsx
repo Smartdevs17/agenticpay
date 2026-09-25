@@ -9,6 +9,8 @@ import { motion } from 'framer-motion';
 import { ProjectCardSkeleton } from '@/components/ui/loading-skeletons';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/empty/EmptyState';
+import { SortableList } from '@/src/components/sortable-list';
+import { PROJECT_ORDER_STORAGE_KEY } from '@/src/lib/project-order';
 import { useRouter } from 'next/navigation';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
@@ -19,7 +21,7 @@ const FILTER_PRESETS_KEY = 'agenticpay-project-filter-presets';
 const STATUS_OPTIONS = ['active', 'completed', 'cancelled'] as const;
 
 type StatusOption = (typeof STATUS_OPTIONS)[number];
-type SortField = 'date' | 'amount' | 'status';
+type SortField = 'date' | 'amount' | 'status' | 'manual';
 type SortDirection = 'asc' | 'desc';
 
 type FilterPreset = {
@@ -111,6 +113,10 @@ export default function ProjectsPage() {
   }, [projects, statusFilter, startDate, endDate, minAmount, maxAmount]);
 
   const sortedProjects = useMemo(() => {
+    // 'manual' defers to the order the user arranged by dragging, which the
+    // SortableList layers on top of this list. Sorting here would fight it.
+    if (sortField === 'manual') return [...filteredProjects];
+
     return [...filteredProjects].sort((a, b) => {
       let comparison = 0;
       if (sortField === 'date') {
@@ -368,6 +374,18 @@ export default function ProjectsPage() {
             >
               Status <SortIcon field="status" sortField={sortField} sortDirection={sortDirection} />
             </button>
+            <button
+              onClick={() => setSortField('manual')}
+              aria-pressed={sortField === 'manual'}
+              className={[
+                'px-3 py-2 text-sm font-medium rounded-md border transition-colors flex items-center gap-2 cursor-pointer select-none',
+                sortField === 'manual'
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800',
+              ].join(' ')}
+            >
+              Custom order
+            </button>
           </div>
 
           {filteredProjects.length === 0 && (
@@ -391,77 +409,86 @@ export default function ProjectsPage() {
             </Card>
           )}
 
-          {sortedProjects.map((project, index) => {
-            const completedMilestones = project.milestones.filter(
-              (m) => m.status === 'completed',
-            ).length;
-            const totalMilestones = project.milestones.length;
-            const progressPercent =
-              totalMilestones > 0 ? (completedMilestones / totalMilestones) * 100 : 0;
+          <SortableList
+            items={sortedProjects}
+            getId={(project) => project.id}
+            label="Project"
+            storageKey={PROJECT_ORDER_STORAGE_KEY}
+            // Dragging only makes sense in manual mode; the first drag switches
+            // the view over to it so the stored order is what is on screen.
+            enabled={sortField === 'manual'}
+            onOrderChange={() => setSortField('manual')}
+            renderItem={(project, index) => {
+              const completedMilestones = project.milestones.filter(
+                (m) => m.status === 'completed',
+              ).length;
+              const totalMilestones = project.milestones.length;
+              const progressPercent =
+                totalMilestones > 0 ? (completedMilestones / totalMilestones) * 100 : 0;
 
-            return (
-              <motion.div
-                key={project.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
-              >
-                <Card className="hover:shadow-lg transition-all duration-200 border border-gray-200 dark:border-gray-700">
-                  <CardHeader>
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <CardTitle className="text-xl mb-1">{project.title}</CardTitle>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          Client: {project.client.address.slice(0, 6)}…{project.client.address.slice(-4)}
-                        </p>
-                      </div>
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(project.status)}`}
-                      >
-                        {project.status}
-                      </span>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600 dark:text-gray-400">Total Value</span>
-                        <span className="font-semibold text-gray-900 dark:text-white">
-                          {project.totalAmount} {project.currency}
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                >
+                  <Card className="hover:shadow-lg transition-all duration-200 border border-gray-200 dark:border-gray-700">
+                    <CardHeader>
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <CardTitle className="text-xl mb-1">{project.title}</CardTitle>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            Client: {project.client.address.slice(0, 6)}…{project.client.address.slice(-4)}
+                          </p>
+                        </div>
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(project.status)}`}
+                        >
+                          {project.status}
                         </span>
                       </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs text-gray-500">
-                          <span>Progress</span>
-                          <span>
-                            {completedMilestones}/{totalMilestones} milestones
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600 dark:text-gray-400">Total Value</span>
+                          <span className="font-semibold text-gray-900 dark:text-white">
+                            {project.totalAmount} {project.currency}
                           </span>
                         </div>
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                          <div
-                            className="bg-gradient-to-r from-blue-600 to-purple-600 h-2 rounded-full transition-all"
-                            style={{ width: `${progressPercent}%` }}
-                          />
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span>Progress</span>
+                            <span>
+                              {completedMilestones}/{totalMilestones} milestones
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                            <div
+                              className="bg-gradient-to-r from-blue-600 to-purple-600 h-2 rounded-full transition-all"
+                              style={{ width: `${progressPercent}%` }}
+                            />
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <Clock className="h-3 w-3" />
-                      <span>Created {formatDateInTimeZone(project.createdAt, timezone)}</span>
-                    </div>
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <Clock className="h-3 w-3" />
+                        <span>Created {formatDateInTimeZone(project.createdAt, timezone)}</span>
+                      </div>
 
-                    <Link href={`/dashboard/projects/${project.id}`}>
-                      <Button variant="outline" className="w-full">
-                        View Details
-                        <ExternalLink className="h-4 w-4 ml-2" />
-                      </Button>
-                    </Link>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            );
-          })}
+                      <Link href={`/dashboard/projects/${project.id}`}>
+                        <Button variant="outline" className="w-full">
+                          View Details
+                          <ExternalLink className="h-4 w-4 ml-2" />
+                        </Button>
+                      </Link>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              );
+            }}
+          />
         </div>
       </div>
     </div>

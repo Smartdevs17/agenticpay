@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useThemeStore, ThemeMode } from '@/store/useThemeStore';
-import { Clock, Sun, SunMoon, MapPin, Loader2 } from 'lucide-react';
+import { Clock, Sun, SunMoon, Monitor, MapPin, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ThemeSettingsModalProps {
@@ -88,6 +88,12 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps) {
       label: 'Manual',
       icon: <SunMoon className="h-4 w-4" />,
       desc: 'Toggle dark mode with the toolbar button',
+    },
+    {
+      value: 'system',
+      label: 'System',
+      icon: <Monitor className="h-4 w-4" />,
+      desc: 'Follow your operating system light or dark setting',
     },
     {
       value: 'scheduled',
