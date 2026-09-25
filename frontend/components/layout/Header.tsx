@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useRouter, usePathname } from "next/navigation";
-import { useThemeStore } from "@/store/useThemeStore";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,8 +18,6 @@ import {
   LogOut,
   User,
   Settings,
-  Sun,
-  Moon,
   Clock,
   Menu,
   Search,
@@ -39,10 +36,13 @@ import {
 } from "@/components/ui/breadcrumb";
 import { getDashboardBreadcrumbs } from "@/lib/breadcrumbs";
 import { ThemeSettingsModal } from "@/components/theme/ThemeSettingsModal";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { KeyboardShortcutsButton } from "@/src/components/keyboard-shortcuts-dialog";
 import { TimezoneSettingsModal } from "@/components/settings/TimezoneSettingsModal";
 import { getBrowserTimeZone, isValidTimeZone } from "@/lib/utils";
 import { CommandMenu } from "./CommandMenu";
 import { useCommandStore } from "@/store/useCommandStore";
+import { useShortcutsStore } from "@/store/useShortcutsStore";
 import { useOfflineStatus } from "@/components/offline/OfflineProvider";
 import { LocaleSwitcher } from "@/components/common/locale-switcher";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -79,8 +79,8 @@ const NetworkIndicator = () => {
 
 export function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const { name, address, timezone, logout, setTimezone, email } = useAuthStore();
-  const { isDark, mode, setIsDark } = useThemeStore();
   const { open: openSearch } = useCommandStore();
+  const { open: openShortcuts } = useShortcutsStore();
   const { disconnect } = useDisconnect();
   const { isOnline, queueLength, isSyncing } = useOfflineStatus();
   const router = useRouter();
@@ -104,12 +104,6 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
     logout();
     toast.success("Logged out successfully");
     router.push("/auth");
-  };
-
-  const handleManualToggle = () => {
-    const next = !isDark;
-    setIsDark(next);
-    document.documentElement.classList.toggle("dark", next);
   };
 
   const initials =
@@ -176,6 +170,10 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
               <CommandMenu />
             </div>
 
+            <div className="hidden md:block">
+              <KeyboardShortcutsButton onClick={openShortcuts} />
+            </div>
+
             <Button variant="ghost" size="icon" className="sm:hidden" onClick={openSearch}>
               <Search className="h-4 w-4 text-gray-500" />
             </Button>
@@ -185,30 +183,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
               <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
             </Button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative flex h-9 w-9"
-              onClick={mode === "manual" ? handleManualToggle : undefined}
-              title={
-                mode === "manual"
-                  ? isDark
-                    ? "Switch to light mode"
-                    : "Switch to dark mode"
-                  : `Auto: ${mode} mode`
-              }
-            >
-              {isDark ? (
-                <Moon className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-              ) : (
-                <Sun className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-              )}
-              {mode !== "manual" && (
-                <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-primary">
-                  <Clock className="h-2 w-2 text-primary-foreground" />
-                </span>
-              )}
-            </Button>
+            <ThemeToggle />
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

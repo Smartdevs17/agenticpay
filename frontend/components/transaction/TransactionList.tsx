@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { VirtualList, type VirtualListItem } from '@/src/components/virtual-list';
+import { InfiniteScrollSentinel } from '@/src/components/infinite-scroll-sentinel';
 import { TransactionRow } from '@/components/transaction/TransactionRow';
 import { useRowMeasurementCache } from '@/src/hooks/use-row-measurement-cache';
 import type { Payment } from '@/lib/types';
@@ -15,6 +16,18 @@ export interface TransactionListProps {
   /** Viewport height in px for the scroll container. */
   height?: number;
   className?: string;
+  /**
+   * Whether more transactions remain to be revealed. Supplying this together
+   * with `onLoadMore` turns on incremental (infinite-scroll) loading.
+   */
+  hasMore?: boolean;
+  /** Reveals the next page of transactions. */
+  onLoadMore?: () => void;
+  /** True while the next page is being fetched. */
+  isLoadingMore?: boolean;
+  /** Text for the end-of-list affordance. */
+  endLabel?: string;
+  loadMoreLabel?: string;
 }
 
 const DEFAULT_ROW_HEIGHT = 160;
@@ -26,6 +39,11 @@ export function TransactionList({
   formatDateTime,
   height = 640,
   className = '',
+  hasMore = false,
+  onLoadMore,
+  isLoadingMore = false,
+  endLabel = 'You have reached the end of your payment history',
+  loadMoreLabel = 'Load more transactions',
 }: TransactionListProps) {
   const { getHeight, setHeight } = useRowMeasurementCache(DEFAULT_ROW_HEIGHT);
   const [, bump] = useState(0);
@@ -47,6 +65,26 @@ export function TransactionList({
     [getHeight]
   );
 
+  const handleLoadMore = useCallback(() => {
+    onLoadMore?.();
+  }, [onLoadMore]);
+
+  // The list scrolls inside its own container and `VirtualList` already fires
+  // `onLoadMore` near the bottom, so the sentinel renders the accessible
+  // button and end-of-list message without attaching a second observer.
+  const footer =
+    hasMore || isLoadingMore ? (
+      <InfiniteScrollSentinel
+        hasMore={hasMore}
+        isLoading={isLoadingMore}
+        onLoadMore={handleLoadMore}
+        autoLoad={false}
+        loadMoreLabel={loadMoreLabel}
+        endLabel={endLabel}
+        loadingLabel="Loading more transactions"
+      />
+    ) : null;
+
   return (
     <VirtualList
       items={items}
@@ -57,6 +95,9 @@ export function TransactionList({
       onItemHeightChange={handleHeightChange}
       scrollKey="dashboard-payments"
       className={className}
+      onLoadMore={onLoadMore}
+      isLoading={isLoadingMore}
+      footer={footer}
       header={
         <div className="grid grid-cols-3 gap-4 px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           <span>Transaction</span>

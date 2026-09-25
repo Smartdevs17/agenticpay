@@ -3,17 +3,18 @@
 import { useEffect, useRef } from 'react';
 import { useThemeStore } from '@/store/useThemeStore';
 import { getSunTimes } from '@/lib/theme/sunriseSunset';
+import { getSystemPrefersDark, watchSystemPrefersDark } from '@/src/lib/theme/system-preference';
 
 /** Duration (ms) to pre-enable CSS transition before toggling the class. */
 //const TRANSITION_PREP_MS = 50;
 
-function applyDark(isDark: boolean) {
+/**
+ * Single place where the resolved `dark` flag is mirrored onto <html>.
+ * The store owns the value; the DOM is only ever a reflection of it.
+ */
+export function applyDark(isDark: boolean) {
   const root = document.documentElement;
-  if (isDark) {
-    root.classList.add('dark');
-  } else {
-    root.classList.remove('dark');
-  }
+  root.classList.toggle('dark', isDark);
 }
 
 /**
@@ -48,11 +49,36 @@ export function useScheduledTheme() {
     applyDark(isDark);
   }, [isDark]);
 
+  /**
+   * System mode — mirror the OS colour-scheme preference and keep following it
+   * while the user is on this mode. The listener is torn down on mode change.
+   */
+  useEffect(() => {
+    if (mode !== 'system') return;
+
+    const sync = (prefersDark: boolean) => {
+      const { systemPrefersDark, setSystemPrefersDark, isDark: current, setIsDark } =
+        useThemeStore.getState();
+      if (systemPrefersDark !== prefersDark) setSystemPrefersDark(prefersDark);
+      if (current !== prefersDark) setIsDark(prefersDark);
+    };
+
+    // Apply immediately so a first-time visit is not stuck in the wrong theme.
+    // The store value may be stale after a reload, so read the live preference
+    // instead of trusting the persisted one.
+    const unsubscribe = watchSystemPrefersDark(sync);
+    sync(getSystemPrefersDark());
+
+    return unsubscribe;
+  }, [mode]);
+
   /** Scheduler logic — re-runs whenever mode/schedule/location changes. */
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
-    if (mode === 'manual') return;
+    // 'manual' is a direct user choice and 'system' is handled by the
+    // media-query listener above; neither needs a polling interval.
+    if (mode === 'manual' || mode === 'system') return;
 
     const evaluate = async () => {
       const now = new Date();
