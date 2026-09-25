@@ -24,6 +24,7 @@ import { getArchivalService } from '../services/archival/index.js';
 import { getBridgeMonitorService } from '../services/bridge-monitor/bridge-monitor.js';
 import { runScheduledReconciliation } from '../services/payment-reconciliation/index.js';
 import { runEscalationEvaluation } from '../jobs/escalation.job.js';
+import { disputeService } from '../../disputes/disputeService.js';
 import { runProjectArchivalSweep } from '../services/project-archival/index.js';
 import { ethers } from 'ethers';
 import {
@@ -274,6 +275,21 @@ const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: strin
     timeoutMs: 10 * 60 * 1000,
     priority: 'high',
     handler: runEscalationEvaluation,
+  },
+  {
+    id: 'dispute-escalation',
+    name: 'Payment Dispute Auto-Escalation',
+    description:
+      'Escalates disputes whose respondent missed the 72-hour response deadline — Issue #816.',
+    defaultSchedule: '0 * * * *', // Hourly
+    timeoutMs: 5 * 60 * 1000,
+    priority: 'normal',
+    handler: async () => {
+      const count = await disputeService.processEscalations();
+      if (count > 0) {
+        console.log(`[disputes] Escalated ${count} overdue dispute(s)`);
+      }
+    },
   },
   // ── Compliance Automation (Issue #590 enhancements) ─────────────────────
   {
