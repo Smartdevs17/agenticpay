@@ -11,14 +11,19 @@ WORKDIR /app/frontend
 RUN npm run build
 
 FROM node:20-alpine AS runner
+ feat/print-onboarding-docker-ci-issues-836-837-839-838
 RUN addgroup -S app && adduser -S app -G app
+
+ main
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 COPY --from=builder /app/frontend/public ./frontend/public
 COPY --from=builder /app/frontend/.next/standalone ./
 COPY --from=builder /app/frontend/.next/static ./frontend/.next/static
+ feat/print-onboarding-docker-ci-issues-836-837-839-838
 RUN chown -R app:app /app
 USER app
+ main
 EXPOSE 3000
 CMD ["node", "frontend/server.js"]

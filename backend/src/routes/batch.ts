@@ -84,12 +84,20 @@ batchRouter.post(
     const { payments, label } = req.body;
 
     const duplicates = detectDuplicates(payments);
-    if (duplicates.length > 0) {
-      // Warn but don't block — caller can use /parse to preview first
-    }
 
     const record = executeBatch(payments, label);
-    res.status(201).json(record);
+    res.status(201).json({
+      ...record,
+      // Warn but don't block — caller can use /parse to preview first.
+      ...(duplicates.length > 0
+        ? {
+            warnings: [
+              `${duplicates.length} duplicate recipient/asset ${duplicates.length === 1 ? 'pair' : 'pairs'} detected`,
+            ],
+            duplicateIndices: duplicates,
+          }
+        : {}),
+    });
   })
 );
 

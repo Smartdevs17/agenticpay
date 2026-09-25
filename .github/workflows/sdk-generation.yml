@@ -10,6 +10,7 @@ on:
       - 'backend/src/controllers/**'
       - 'backend/tsoa.json'
       - 'backend/openapi-generator.config.json'
+      - 'backend/docs/api/openapi/**'
   pull_request:
     branches:
       - main
@@ -19,6 +20,7 @@ on:
       - 'backend/src/controllers/**'
       - 'backend/tsoa.json'
       - 'backend/openapi-generator.config.json'
+      - 'backend/docs/api/openapi/**'
   workflow_dispatch:
     inputs:
       language:
@@ -55,11 +57,18 @@ jobs:
         working-directory: backend
         run: npm run openapi:generate
 
+      # Issue #825: the SDKs are generated from docs/api/openapi/openapi.json, so
+      # that document is validated before it is uploaded. A malformed or
+      # downgraded spec previously reached the generators unnoticed.
+      - name: Validate OpenAPI spec
+        working-directory: backend
+        run: npm run openapi:validate
+
       - name: Upload OpenAPI spec
         uses: actions/upload-artifact@v4
         with:
           name: openapi-spec
-          path: backend/docs/api/openapi/swagger.json
+          path: backend/docs/api/openapi/openapi.json
           retention-days: 7
 
   breaking-change-detection:
@@ -82,17 +91,17 @@ jobs:
       - name: Fetch previous OpenAPI spec
         run: |
           git fetch origin main
-          git checkout origin/main -- backend/docs/api/openapi/swagger.json || echo "No previous spec found"
+          git checkout origin/main -- backend/docs/api/openapi/openapi.json || echo "No previous spec found"
 
       - name: Compare OpenAPI specs
         id: diff
         run: |
-          if [ -f "backend/docs/api/openapi/swagger.json" ]; then
-            mv backend/docs/api/openapi/swagger.json backend/docs/api/openapi/swagger.new.json
-            git checkout origin/main -- backend/docs/api/openapi/swagger.json || echo "No previous spec"
+          if [ -f "backend/docs/api/openapi/openapi.json" ]; then
+            mv backend/docs/api/openapi/openapi.json backend/docs/api/openapi/openapi.new.json
+            git checkout origin/main -- backend/docs/api/openapi/openapi.json || echo "No previous spec"
             
-            if [ -f "backend/docs/api/openapi/swagger.json" ]; then
-              oasdiff backend/docs/api/openapi/swagger.json backend/docs/api/openapi/swagger.new.json --format json > diff-output.json || true
+            if [ -f "backend/docs/api/openapi/openapi.json" ]; then
+              oasdiff backend/docs/api/openapi/openapi.json backend/docs/api/openapi/openapi.new.json --format json > diff-output.json || true
               
               if [ -s diff-output.json ]; then
                 echo "Breaking changes detected"

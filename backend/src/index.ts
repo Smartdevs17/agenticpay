@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
+import http from 'node:http';
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
@@ -63,8 +64,30 @@ import { intercomRouter } from './routes/intercom.js';
 import { getPrismaReplicaClient } from './db/PrismaReplicaClient.js';
 import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { churnPredictionRouter } from './routes/churn-prediction.js';
+import { createAnalyticsRouter } from './routes/analytics.js';
+import { apiUsageTracker } from './middleware/api-usage-tracker.js';
 import { slackRouter } from './routes/slack.js';
 import { githubIntegrationRouter } from './routes/github-integration.js';
+// Issue #823 — Real-time WebSocket API for live updates
+import { attachWebSocketServer } from './websocket/server.js';
+import { ConnectionManager } from './websocket/connection-manager.js';
+import { registerWebSocketServer } from './websocket/live-broadcast.js';
+import { createWebSocketRouter } from './routes/websocket.js';
+// ACH/wire fiat payments (bank verification, initiation, wire instructions,
+// reconciliation) — Issue #817. Fully implemented in fiat-payments.ts/
+// providers/fiat.ts already but the router was never mounted.
+import { fiatPaymentsRouter } from './routes/fiat-payments.js';
+// Payment dispute management — Issue #816
+import disputeRoutes from '../disputes/disputeRoutes.js';
+import { authMiddleware } from './middleware/auth.js';
+// GraphQL API alongside REST — Issue #819
+import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
+// Admin cache stats/clear/evict endpoints — Issue #818
+import { cacheRouter } from './routes/cache.js';
+// Rate limiting: tier configs, quota overrides, and analytics — Issue #820
+import { rateLimitQuotasRouter } from './routes/rate-limit-quotas.js';
+// Request/response compression — Issue #821
+import { compressionRouter } from './routes/compression.js';
 
 dotenv.config();
 
@@ -205,6 +228,9 @@ app.use(express.json());
 
 app.use(compressionMiddleware({ minSizeBytes: config.compression.threshold }));
 
+// Decompress gzip/brotli request bodies before body parsers run — Issue #821
+app.use(requestDecompressionMiddleware());
+
 app.use(requestIdMiddleware);
 app.use(auditMiddleware());
 
@@ -244,6 +270,15 @@ app.use(healthRouter);
 
 // Interactive API documentation & playground — Issue #758
 app.use('/docs', docsRouter);
+
+// GraphQL API alongside REST — Issue #819. Mounted ahead of the REST
+// versioning/rate-limit block below (which only applies under '/api/') so
+// it isn't swept into the REST version-fallback 404. graphQLRouter/
+// graphQLWsRouter don't thread req.user into resolver context yet (see
+// PR notes) — authMiddleware here at least keeps the endpoint from being
+// fully anonymous until that's addressed.
+app.use('/graphql', authMiddleware, graphQLRouter);
+app.use('/graphql/ws', authMiddleware, graphQLWsRouter);
 
 import { versionMiddleware } from './middleware/versioning.js';
 
@@ -313,10 +348,25 @@ apiV1Router.use('/archive', archiveRouter);
 apiV1Router.use('/search', searchRouter);
 apiV1Router.use('/analytics/cohorts', cohortAnalyticsRouter);
 apiV1Router.use('/analytics/churn', churnPredictionRouter);
+// Core analytics: usage snapshot, funnel, revenue, anomalies, event ingest — Issue #826
+apiV1Router.use('/analytics', createAnalyticsRouter());
 apiV1Router.use('/integrations/slack', slackRouter);
 apiV1Router.use('/integrations/github', githubIntegrationRouter);
+// Payment dispute management (filing, response, evidence, arbitration) — Issue #816
+apiV1Router.use('/disputes', authMiddleware, disputeRoutes);
+// Admin cache stats/clear/evict — Issue #818
+apiV1Router.use('/cache', authMiddleware, cacheRouter);
+// ACH/wire fiat payments — Issue #817
+apiV1Router.use('/fiat-payments', authMiddleware, fiatPaymentsRouter);
+// Rate limiting: tier configs, quota overrides, and analytics — Issue #820
+apiV1Router.use('/rate-limit', rateLimitQuotasRouter);
+// Compression metrics and per-endpoint config — Issue #821
+apiV1Router.use('/compression', compressionRouter);
 
 // Explicit URL-based mounting
+// Per-key usage metrics for the analytics dashboard — Issue #826.
+// Mounted ahead of the routers so every API-key-authenticated call is recorded.
+app.use('/api/v1', apiUsageTracker);
 app.use('/api/v1', apiV1Router);
 
 // Milestone dependency management
@@ -356,8 +406,24 @@ if (config.queue.enabled) {
 
 registerDefaultPaymentProviders();
 
-const server = app.listen(config.server.port, () => {
+// ---------------------------------------------------------------------------
+// Issue #823 — Real-time WebSocket API
+// Attach the WebSocket server to the raw HTTP server so we can handle the
+// WS upgrade handshake.  The REST management routes are mounted on /api/v1/ws.
+// ---------------------------------------------------------------------------
+const httpServer = http.createServer(app);
+
+const wsServer = attachWebSocketServer({ server: httpServer });
+const connectionManager = new ConnectionManager(wsServer);
+registerWebSocketServer(wsServer);
+
+// Mount WebSocket REST management routes AFTER wsServer is created so
+// createWebSocketRouter can capture the reference.
+apiV1Router.use('/ws', createWebSocketRouter(wsServer, connectionManager));
+
+const server = httpServer.listen(config.server.port, () => {
   console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
+  console.log(`WebSocket endpoint: ws://localhost:${config.server.port}/ws`);
 });
 
 // Graceful shutdown
@@ -366,6 +432,10 @@ const shutdown = (signal: string) => {
 
   server.close(() => {
     console.log('HTTP server closed.');
+
+    void wsServer.close().then(() => {
+      console.log('WebSocket server closed.');
+    });
 
     try {
       const scheduler = getJobScheduler();

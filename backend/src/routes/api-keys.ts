@@ -4,6 +4,8 @@ import { AppError } from '../middleware/errorHandler.js';
 import { quotaManagerService } from '../services/keys/quota-manager.js';
 import { rotateApiKeyWithGracePeriod, settleGracePeriod } from '../services/keys/rotation.js';
 import { APIKeyRepository } from '../repositories/APIKeyRepository.js';
+import { prisma } from '../lib/prisma.js';
+import { validateScopes, ALL_SCOPES, type ApiKeyScope } from '../lib/api-key-scopes.js';
 
 export const apiKeysRouter = Router();
 
@@ -13,9 +15,23 @@ function resolveTenant(req: any): string {
   return (req.headers['x-tenant-id'] as string) ?? 'default';
 }
 
+/** Validate caller-supplied scopes, turning a bad vocabulary into a 400. */
+function parseScopes(input: unknown): ApiKeyScope[] {
+  try {
+    return validateScopes(input);
+  } catch (err) {
+    throw new AppError(400, (err as Error).message, 'INVALID_SCOPE');
+  }
+}
+
 apiKeysRouter.post('/', asyncHandler(async (req, res) => {
   const tenantId = resolveTenant(req);
-  const { description, expiresAt } = req.body as { description?: string; expiresAt?: string };
+  const { description, expiresAt, scopes } = req.body as {
+    description?: string;
+    expiresAt?: string;
+    scopes?: string[];
+  };
+  const parsedScopes = parseScopes(scopes);
   const keyId = `ak_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
   const key = await apiKeyRepository.create({
@@ -26,8 +42,9 @@ apiKeysRouter.post('/', asyncHandler(async (req, res) => {
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
+    scopes: parsedScopes,
   } as any);
-  res.status(201).json({ keyId: key.keyId, description: key.description });
+  res.status(201).json({ keyId: key.keyId, description: key.description, scopes: parsedScopes });
 }));
 
 apiKeysRouter.get('/', asyncHandler(async (req, res) => {
@@ -36,6 +53,13 @@ apiKeysRouter.get('/', asyncHandler(async (req, res) => {
   const settled = await Promise.all(keys.map((key) => settleGracePeriod(key as any)));
   res.json({ keys: settled });
 }));
+
+// Issue #824: the vocabulary callers may assign to a key.
+// Registered before the `/:keyId` catch-all below so the literal path is not
+// swallowed as a key ID.
+apiKeysRouter.get('/scopes', (_req, res) => {
+  res.json({ scopes: ALL_SCOPES });
+});
 
 apiKeysRouter.get('/:keyId', asyncHandler(async (req, res) => {
   const tenantId = resolveTenant(req);
@@ -94,6 +118,17 @@ apiKeysRouter.get('/analytics/summary', asyncHandler(async (req, res) => {
   const tenantId = resolveTenant(req);
   const summary = await quotaManagerService.getTenantUsageSummary(tenantId);
   res.json(summary);
+}));
+
+// Issue #824: narrow or widen an existing key without rotating it.
+apiKeysRouter.put('/:keyId/scopes', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const keyId = Array.isArray(req.params.keyId) ? req.params.keyId[0] : req.params.keyId;
+  const key = await apiKeyRepository.findByKeyId(keyId);
+  if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
+  const parsedScopes = parseScopes((req.body as { scopes?: string[] }).scopes);
+  await prisma.apiKey.update({ where: { keyId }, data: { scopes: parsedScopes } });
+  res.json({ keyId, scopes: parsedScopes });
 }));
 
 apiKeysRouter.post('/:keyId/rotate', asyncHandler(async (req, res) => {
