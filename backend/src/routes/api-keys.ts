@@ -61,6 +61,12 @@ apiKeysRouter.get('/scopes', (_req, res) => {
   res.json({ scopes: ALL_SCOPES });
 });
 
+apiKeysRouter.get('/analytics/summary', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenant(req);
+  const summary = await quotaManagerService.getTenantUsageSummary(tenantId);
+  res.json(summary);
+}));
+
 apiKeysRouter.get('/:keyId', asyncHandler(async (req, res) => {
   const tenantId = resolveTenant(req);
   const key = await apiKeyRepository.findByKeyId(req.params.keyId);
@@ -112,12 +118,6 @@ apiKeysRouter.put('/:keyId/quota', asyncHandler(async (req, res) => {
   if (!key || key.tenantId !== tenantId) throw new AppError(404, 'API key not found', 'KEY_NOT_FOUND');
   const quota = await quotaManagerService.updateQuota(req.params.keyId, req.body);
   res.json(quota);
-}));
-
-apiKeysRouter.get('/analytics/summary', asyncHandler(async (req, res) => {
-  const tenantId = resolveTenant(req);
-  const summary = await quotaManagerService.getTenantUsageSummary(tenantId);
-  res.json(summary);
 }));
 
 // Issue #824: narrow or widen an existing key without rotating it.

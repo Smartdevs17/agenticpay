@@ -3,12 +3,14 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
 export interface IpAllowlistConfig {
   enabled: boolean;
   allowedIps: string[];
+  adminAllowedIps: Map<string, string[]>;
   bypassCodes: Map<string, { expiresAt: number }>;
 }
 
 export const config: IpAllowlistConfig = {
   enabled: false,
   allowedIps: [],
+  adminAllowedIps: new Map(),
   bypassCodes: new Map(),
 };
 
@@ -23,6 +25,14 @@ export function addBypassCode(code: string, expiresInMs: number): void {
 
 export function removeBypassCode(code: string): void {
   config.bypassCodes.delete(code);
+}
+
+export function setAdminIpAllowlist(adminId: string, allowedIps: string[]): void {
+  config.adminAllowedIps.set(adminId, allowedIps);
+}
+
+export function clearAdminIpAllowlist(adminId: string): void {
+  config.adminAllowedIps.delete(adminId);
 }
 
 interface IpRange {
@@ -98,7 +108,11 @@ function isIpInCidr(ip: string, cidr: string): boolean {
 }
 
 function isIpAllowed(ip: string): boolean {
-  for (const allowedCidr of config.allowedIps) {
+  return isIpAllowedByList(ip, config.allowedIps);
+}
+
+function isIpAllowedByList(ip: string, allowedIps: string[]): boolean {
+  for (const allowedCidr of allowedIps) {
     if (isIpInCidr(ip, allowedCidr)) {
       return true;
     }
@@ -174,7 +188,16 @@ export function ipAllowlistMiddleware(allowedIps?: string[], enableBypass = fals
 }
 
 export function adminIpAllowlistMiddleware(): RequestHandler {
-  return ipAllowlistMiddleware();
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as Request & { user?: { id?: string; role?: string } }).user;
+    if (!user || !['admin', 'super_admin'].includes(String(user.role))) {
+      return next();
+    }
+
+    const adminSpecificIps = user.id ? config.adminAllowedIps.get(user.id) : undefined;
+    const ips = adminSpecificIps && adminSpecificIps.length > 0 ? adminSpecificIps : config.allowedIps;
+    return ipAllowlistMiddleware(ips, true)(req, res, next);
+  };
 }
 
 export function apiIpAllowlistMiddleware(): RequestHandler {

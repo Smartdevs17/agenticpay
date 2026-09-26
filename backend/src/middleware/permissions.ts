@@ -5,9 +5,13 @@
  * temporary permissions, API key permissions, and audit logging.
  */
 
+import type { Request, Response, NextFunction, RequestHandler } from 'express';
+import { AppError } from './errorHandler.js';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Role = 'super_admin' | 'admin' | 'operator' | 'viewer' | 'guest';
+export type Action = string;
 
 export interface Permission {
   resource: string;
@@ -171,6 +175,52 @@ export class PermissionEngine {
   evaluate(ctx: AbacContext, resource: string, action: string): 'allow' | 'deny' {
     return this.can(ctx.role, resource, action) ? 'allow' : 'deny';
   }
+}
+
+export const permissionEngine = new PermissionEngine();
+
+function isRole(value: unknown): value is Role {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ROLE_HIERARCHY, value);
+}
+
+export function attachAbacCtx(req: Request, _res: Response, next: NextFunction): void {
+  const user = req.user;
+  if (user && isRole(user.role)) {
+    (req as Request & { abac?: AbacContext }).abac = {
+      userId: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+      requestTime: new Date().toISOString(),
+    };
+  }
+  next();
+}
+
+export function requirePermission(resource: string, action: string): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    const abac = (req as Request & { abac?: AbacContext }).abac;
+    const user = req.user;
+    const ctx = abac ?? (user && isRole(user.role)
+      ? {
+          userId: user.id,
+          tenantId: user.tenantId,
+          role: user.role,
+          requestTime: new Date().toISOString(),
+        }
+      : undefined);
+
+    if (!ctx) {
+      next(new AppError(401, 'Authentication required', 'UNAUTHORIZED'));
+      return;
+    }
+
+    if (permissionEngine.evaluate(ctx, resource, action) === 'deny') {
+      next(new AppError(403, 'Insufficient permissions', 'FORBIDDEN'));
+      return;
+    }
+
+    next();
+  };
 }
 
 // ─── Custom Roles ─────────────────────────────────────────────────────────────
