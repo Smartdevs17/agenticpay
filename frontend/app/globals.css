@@ -1,22 +1,4 @@
 @import "tailwindcss";
-
-@media print {
-  nav,
-  aside,
-  header,
-  .print\:hidden {
-    display: none !important;
-  }
-
-  body {
-    background: white !important;
-  }
-
-  * {
-    color: #111827 !important;
-    box-shadow: none !important;
-  }
-}
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
@@ -201,29 +183,8 @@
     padding: 0 !important;
   }
 
-  /* Ensure report cards are clean when printed */
   .invoice-print-card {
     border: none !important;
     box-shadow: none !important;
   }
-
-  .invoice-print-card {
-    border: none !important;
-    box-shadow: none !important;
-  }
-}
-
-/* RTL layout support — Issue #476 */
-[dir='rtl'] {
-  text-align: start;
-}
-
-[dir='rtl'] .sidebar-mirror {
-  inset-inline-start: 0;
-  inset-inline-end: auto;
-}
-
-[dir='rtl'] .dropdown-end {
-  inset-inline-end: 0;
-  inset-inline-start: auto;
 }

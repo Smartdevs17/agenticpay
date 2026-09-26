@@ -1,9 +1,13 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import express, { Request, Response, NextFunction } from 'express';
-import dotenv from 'dotenv';
-import rateLimit from 'express-rate-limit';
+import * as Sentry from '@sentry/node';
+import cors from 'cors';
+import { tokenBucketRateLimit } from './middleware/rate-limit.js';
+import { apiExpressRateLimit } from './middleware/express-api-rate-limit.js';
+import { compressionMiddleware, getCompressionMetrics } from './middleware/compression.js';
+import { poolMetrics } from './config/database.js';
+import { config } from './config.js';
+import { versionMiddleware } from './middleware/versioning.js';
 import { verificationRouter } from './routes/verification.js';
 import { invoiceRouter } from './routes/invoice.js';
 import { stellarRouter } from './routes/stellar.js';
@@ -13,293 +17,211 @@ import { healthRouter } from './routes/health.js';
 import { docsRouter } from './routes/docs.js';
 import { queueRouter } from './routes/queue.js';
 import { slaRouter } from './routes/sla.js';
+import { legacyRouter } from './routes/legacy.js';
+import { onboardingRouter } from './routes/onboarding.js';
+import { splitsRouter } from './routes/splits.js';
+import { refundsRouter } from './routes/refunds.js';
+import allowancesRouter from './routes/allowances.js';
+import { formsRouter } from './routes/forms.js';
+import { twoFactorAuthRouter } from './routes/2fa.js';
+import { webhooksRouter } from './routes/webhooks.js';
+import { webhookHandlersRouter } from './routes/webhookHandlers.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
+import { batchProcessor } from './services/batch.js';
+import { featureFlags } from './config/featureFlags.js';
+import { getRedisCache } from './middleware/cache.js';
 import { errorHandler, notFoundHandler, AppError } from './middleware/errorHandler.js';
 import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
 import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
+import { traceMiddleware } from './middleware/trace.js';
+import { cacheControlNoStore } from './middleware/cache-control.js';
+import { httpLogger, correlationMiddleware } from './middleware/logger.js';
 import { validateEnv, config as getConfig } from './config/env.js';
-import { config } from './config.js';
 import { flagsRouter } from './routes/flags.js';
-import { kybRouter } from './routes/kyb.js';
-import { batchRouter } from './routes/batch.js';
 import { emailRouter } from './routes/email.js';
 import { portfolioRouter } from './routes/portfolio.js';
 import { backupRouter } from './routes/backup.js';
 import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
-import { stripeRouter } from './routes/stripe.js';
-// Stripe subscription billing (plans, enroll, usage, dunning) — Issue #808.
-// Implemented in routes/subscriptions.ts + services/stripe.ts but never mounted.
-import subscriptionsRouter from './routes/subscriptions.js';
-// Payment retry with exponential backoff — Issue #810.
-// Implemented in routes/retry.ts + services/retry/* but never mounted.
-import { retryRouter } from './routes/retry.js';
-// Multiple payment methods per account (incl. micro-deposit verify) — Issue #811.
-// Implemented in routes/payment-methods.ts but never mounted.
-import { paymentMethodsRouter } from './routes/payment-methods.js';
+import { nfcRouter } from './routes/nfc.js';
+import { cacheRouter } from './routes/cache.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
-import { SecurityMiddleware, SecurityMonitor, securityHeadersMiddleware } from './middleware/security.js';
-import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
-import { createCorsMiddleware } from './middleware/cors.js';
-import { initCorsPolicy } from './services/cors.js';
-import { corsRouter } from './routes/cors.js';
+import { sessionMiddleware } from './middleware/session.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
-import { taxReportingRouter } from './routes/tax-reporting.js';
-import { auditMiddleware } from './middleware/audit.js';
-import { apiKeysRouter } from './routes/api-keys.js';
-import { milestonesRouter } from './routes/milestones.js';
-import { walletRouter } from './routes/wallet.js';
+import { hedgingRouter } from './routes/hedging.js';
+import { complianceRouter } from './routes/compliance.js';
 import { gdprRouter } from './routes/gdpr.js';
-import dataExportRouter from './routes/dataExport.js';
-import securityRouter from './routes/security.js';
-import commentsRouter from './routes/comments.js';
-import collaborationRouter from './routes/collaboration.js';
-import { paymentStrategiesRouter } from './routes/payment-strategies.js';
-import { registerDefaultPaymentProviders } from './services/payments/bootstrap.js';
-import { compressionMiddleware } from './middleware/compression.js';
-import { streamingExportRouter } from './routes/streaming-export.js';
-import { poolMonitorRouter } from './routes/pool-monitor.js';
-import { legacyRouter } from './routes/legacy.js';
-import { splitsRouter } from './routes/splits.js';
-import { refundsRouter } from './routes/refunds.js';
-import { databaseRouter } from './routes/database.js';
-import { archiveRouter } from './routes/archive.js';
-import { searchRouter } from './routes/search.js';
-import { zapierRouter } from './routes/zapier.js';
-import { intercomRouter } from './routes/intercom.js';
-import { getPrismaReplicaClient } from './db/PrismaReplicaClient.js';
-import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
-import { churnPredictionRouter } from './routes/churn-prediction.js';
-import { createAnalyticsRouter } from './routes/analytics.js';
-import { apiUsageTracker } from './middleware/api-usage-tracker.js';
-import { slackRouter } from './routes/slack.js';
-import { githubIntegrationRouter } from './routes/github-integration.js';
-// Issue #823 — Real-time WebSocket API for live updates
+import { kybRouter } from './routes/kyb.js';
+import { batchRouter } from './routes/batch.js';
+import { relayerRouter } from './routes/relayer.js';
+import { paymentQueueRouter } from './routes/payment-queue.js';
+import { disputeRoutes } from './disputes/index.js';
+import { disputeService } from './disputes/disputeService.js';
 import { attachWebSocketServer } from './websocket/server.js';
-import { ConnectionManager } from './websocket/connection-manager.js';
-import { registerWebSocketServer } from './websocket/live-broadcast.js';
 import { createWebSocketRouter } from './routes/websocket.js';
-// ACH/wire fiat payments (bank verification, initiation, wire instructions,
-// reconciliation) — Issue #817. Fully implemented in fiat-payments.ts/
-// providers/fiat.ts already but the router was never mounted.
+import { bindWebSocketServer } from './events/event-bus.js';
+import { receiptsRouter } from './routes/receipts.js';
+import { eventsRouter } from './routes/events.js';
+import { threatDetectionRouter } from './routes/threat-detection.js';
+import { serviceMeshRouter } from './routes/service-mesh.js';
+import { escrowRouter } from './routes/escrow.js';
+import { multisigRouter } from './routes/multisig.js';
 import { fiatPaymentsRouter } from './routes/fiat-payments.js';
-// Payment dispute management — Issue #816
-import disputeRoutes from '../disputes/disputeRoutes.js';
-import { authMiddleware } from './middleware/auth.js';
-// GraphQL API alongside REST — Issue #819
+import { paymentLinksRouter } from './routes/payment-links.js';
+import { taxRouter } from './routes/tax.js';
+import { projectsRouter } from './routes/projects.js';
 import { graphQLRouter, graphQLWsRouter } from './graphql/gateway.js';
-// Admin cache stats/clear/evict endpoints — Issue #818
-import { cacheRouter } from './routes/cache.js';
-// Rate limiting: tier configs, quota overrides, and analytics — Issue #820
-import { rateLimitQuotasRouter } from './routes/rate-limit-quotas.js';
-// Request/response compression — Issue #821
-import { compressionRouter } from './routes/compression.js';
-import { oauthRouter } from './routes/oauth.js';
-import { twoFactorAuthRouter } from './routes/2fa.js';
+import { fraudDetectionRouter } from './routes/fraud-detection.js';
+import { bridgeRouter } from './routes/bridge.js';
+import { tokenizationRouter } from './routes/tokenization.js';
+import { routingRouter } from './routes/routing.js';
+import { disputesRouter } from './routes/disputes.js';
+import { startWebhookWorker, stopWebhookWorker } from './services/webhooks.js';
+import { analyticsService } from './services/analytics.js';
+import { createAnalyticsRouter } from './routes/analytics.js';
+import { paymentQueue } from './queue/payment-queue.js';
+import './events/projections.js';
+import { stripeRouter } from './routes/stripe.js';
+import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
+import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { requestSizeLimit } from './middleware/request-size-limit.js';
+import { signaturesRouter } from './routes/signatures.js';
+import { createSandboxRouter } from './routes/sandbox.js';
+import { circuitBreakerRouter } from './routes/circuit-breaker.js';
+import SandboxManager from './services/sandbox.js';
+import MockPaymentProcessor from './services/mock-payments.js';
+import TestDataSeeder from './services/test-data-seeder.js';
+import { emailV2Router } from './routes/email-v2.js';
+import { createBullMQScheduler, getBullMQScheduler } from './services/bullmq-scheduler.js';
+import { getScheduledTasks } from './config/scheduled-tasks.js';
+import { bullMQMonitorRouter } from './routes/bullmq-monitor.js';
+import { fileUploadRouter } from './routes/file-upload.js';
+import { credentialRotationRouter } from './routes/credential-rotation.js';
+import zkIdentityRouter from './routes/zk-identity.js';
+import { coldStartMonitorRouter } from './routes/cold-start-monitor.js';
+import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
+import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
+import { subscriptionsRouter } from './routes/subscriptions.js';
+import { workspacesRouter } from './routes/workspaces.js';
+import { teamsRouter } from './routes/teams.js';
+import { merchantAuditRouter } from './routes/merchant-audit.js';
 
-dotenv.config();
+// Validate environment variables at startup
+validateEnv();
+const env = getConfig();
 
-const traceStorage = new AsyncLocalStorage<string>();
+// ── Lazy sandbox service initialization ───────────────────────────────────────
+// SandboxManager, MockPaymentProcessor, and TestDataSeeder are only needed in
+// development/sandbox environments. Deferring their construction avoids paying
+// the instantiation cost on every cold start in production.
+let _sandboxManager: InstanceType<typeof SandboxManager> | null = null;
+let _mockPaymentProcessor: InstanceType<typeof MockPaymentProcessor> | null = null;
+let _testDataSeeder: InstanceType<typeof TestDataSeeder> | null = null;
 
-const originalConsole = {
-  log: console.log,
-  info: console.info,
-  warn: console.warn,
-  error: console.error,
-};
-
-function formatMessage(args: any[]): any[] {
-  const traceId = traceStorage.getStore();
-  if (traceId) {
-    if (typeof args[0] === 'string') {
-      args[0] = `[TraceID: ${traceId}] ${args[0]}`;
-    } else {
-      args.unshift(`[TraceID: ${traceId}]`);
-    }
-  }
-  return args;
+function getSandboxManager(): InstanceType<typeof SandboxManager> {
+  if (!_sandboxManager) _sandboxManager = new SandboxManager(env.NODE_ENV || 'development');
+  return _sandboxManager;
+}
+function getMockPaymentProcessor(): InstanceType<typeof MockPaymentProcessor> {
+  if (!_mockPaymentProcessor) _mockPaymentProcessor = new MockPaymentProcessor();
+  return _mockPaymentProcessor;
+}
+function getTestDataSeeder(): InstanceType<typeof TestDataSeeder> {
+  if (!_testDataSeeder) _testDataSeeder = new TestDataSeeder();
+  return _testDataSeeder;
 }
 
-console.log = (...args) => originalConsole.log(...formatMessage(args));
-console.info = (...args) => originalConsole.info(...formatMessage(args));
-console.warn = (...args) => originalConsole.warn(...formatMessage(args));
-console.error = (...args) => originalConsole.error(...formatMessage(args));
+// Initialize IP allowlist from environment
+if (env.IP_ALLOWLIST_ENABLED || env.IP_ALLOWLIST) {
+  const allowedIps = env.IP_ALLOWLIST ? env.IP_ALLOWLIST.split(',').map(ip => ip.trim()).filter(Boolean) : [];
+  initIpAllowlist(allowedIps, env.IP_ALLOWLIST_ENABLED);
+  console.log(`[IP Allowlist] Enabled with ${allowedIps.length} IP(s)`);
+}
+
 
 const app = express();
 
-type UserTier = 'free' | 'pro' | 'enterprise';
+// Security stack: headers, sanitization, payload limits
+SecurityMiddleware.getInstance().applySecurity(app);
+app.use(requestSizeLimit());
 
-type TierRateState = {
-  count: number;
-  resetAtMs: number;
-};
-
-const tierLimits: Record<UserTier, number> = {
-  free: config.rateLimit.free,
-  pro: config.rateLimit.pro,
-  enterprise: config.rateLimit.enterprise,
-};
-
-const tierWindowMs = config.rateLimit.windowMs;
-const tierRateStore = new Map<string, TierRateState>();
-
-function resolveUserTier(req: Request): UserTier {
-  const headerTier = req.headers['x-user-tier'];
-  const normalized = (Array.isArray(headerTier) ? headerTier[0] : headerTier)?.toLowerCase();
-
-  if (normalized === 'pro' || normalized === 'enterprise') {
-    return normalized;
-  }
-
-  return 'free';
-}
-
-function resolveClientIdentifier(req: Request): string {
-  const authHeader = req.headers.authorization;
-  if (authHeader) {
-    return authHeader;
-  }
-
-  const apiKey = req.headers['x-api-key'];
-  if (typeof apiKey === 'string' && apiKey.trim() !== '') {
-    return apiKey;
-  }
-
-  return req.ip || 'unknown-client';
-}
-
-function tieredRateLimit(req: Request, res: Response, next: NextFunction): void {
-  const tier = resolveUserTier(req);
-  const limit = tierLimits[tier];
-  const identifier = resolveClientIdentifier(req);
-  const storeKey = `${tier}:${identifier}`;
-  const nowMs = Date.now();
-  const existingState = tierRateStore.get(storeKey);
-
-  const state =
-    !existingState || existingState.resetAtMs <= nowMs
-      ? { count: 0, resetAtMs: nowMs + tierWindowMs }
-      : existingState;
-
-  state.count += 1;
-  tierRateStore.set(storeKey, state);
-
-  const remaining = Math.max(0, limit - state.count);
-  const resetInSeconds = Math.ceil((state.resetAtMs - nowMs) / 1000);
-
-  res.setHeader('X-RateLimit-Tier', tier);
-  res.setHeader('X-RateLimit-Limit', String(limit));
-  res.setHeader('X-RateLimit-Remaining', String(remaining));
-  res.setHeader('X-RateLimit-Reset', String(resetInSeconds));
-
-  if (state.count > limit) {
-    res.status(429).json({
-      error: {
-        code: 'RATE_LIMIT_EXCEEDED',
-        message: `Rate limit exceeded for tier '${tier}'`,
-        status: 429,
-      },
-    });
-    return;
-  }
-
-  next();
-}
-
-const invoiceLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
+// Token-bucket rate limiter (replaces fixed-window tieredRateLimit)
+const apiRateLimiter = tokenBucketRateLimit({ keyPrefix: 'rl:api' });
+// Stricter limiter for invoice endpoint
+const invoiceLimiter = tokenBucketRateLimit({
+  keyPrefix: 'rl:invoice',
+  endpointConfig: {
+    free:       { capacity: 10,  refillRate: 0.1, burstAllowance: 2  },
+    pro:        { capacity: 60,  refillRate: 1,   burstAllowance: 10 },
+    enterprise: { capacity: 300, refillRate: 5,   burstAllowance: 50 },
+  },
 });
 
-app.use(securityHeadersMiddleware());
-
-// Dynamic CORS policy: seed the allowlist from config, then serve every
-// request through the shared CORSOriginPolicy (runtime-mutable).
-initCorsPolicy({
-  allowedOrigins: config.cors.allowedOrigins,
-  allowCredentials: true,
-});
 app.use(
-  createCorsMiddleware({
+  cors({
+    origin: config.cors.allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id', REQUEST_ID_HEADER],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Trace-Id',
+      REQUEST_ID_HEADER,
+      'API-Version',
+      'X-API-Version',
+      'Accept-Version',
+      'Stripe-Signature',
+      'X-Hub-Signature-256',
+      'X-Webhook-Key-Id',
+    ],
   })
 );
 
-// Content Security Policy & related security headers (XSS prevention)
-app.use(contentSecurityPolicy());
+app.use(requestIdMiddleware);
+app.use(traceMiddleware);
+app.use(correlationMiddleware);
+app.use(httpLogger);
+
+// Incoming webhooks: raw body capture before global JSON parser (#393)
+app.use('/webhooks', webhookHandlersRouter);
 
 app.use(express.json());
+app.use(express.text({ type: ['text/csv', 'text/plain'] }));
 
-app.use(compressionMiddleware({ minSizeBytes: config.compression.threshold }));
+app.use(
+  compressionMiddleware({
+    brotliLevel: 5,
+    gzipLevel: 6,
+    minSizeBytes: 1024,
+  })
+);
 
-// Decompress gzip/brotli request bodies before body parsers run — Issue #821
-app.use(requestDecompressionMiddleware());
-
-app.use(requestIdMiddleware);
-app.use(auditMiddleware());
-
-// Trace ID middleware
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const traceId = (req.headers['x-trace-id'] as string) || randomUUID();
-  res.setHeader('X-Trace-Id', traceId);
-
-  traceStorage.run(traceId, () => {
-    console.log(`${req.method} ${req.url} - Started`);
-
-    res.on('finish', () => {
-      console.log(`${req.method} ${req.url} - Finished with status ${res.statusCode}`);
-    });
-
-    next();
-  });
-});
-
-// SLA Tracking middleware
 app.use(slaTrackingMiddleware);
+app.use(sessionMiddleware);
+app.use(cacheControlNoStore);
 
-// Cache defaults:
-//   - GET/HEAD: individual routes apply cacheControl() with per-route TTLs.
-//   - All other methods: always no-store (mutations must never be cached).
-app.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    res.setHeader('Cache-Control', 'no-store');
-  }
-  // Vary on Accept-Encoding so compressed/uncompressed responses are cached separately
-  res.setHeader('Vary', 'Accept-Encoding');
-  next();
-});
-
-// Health & Readiness checks
 app.use(healthRouter);
-
-// Interactive API documentation & playground — Issue #758
 app.use('/docs', docsRouter);
 
-// GraphQL API alongside REST — Issue #819. Mounted ahead of the REST
-// versioning/rate-limit block below (which only applies under '/api/') so
-// it isn't swept into the REST version-fallback 404. graphQLRouter/
-// graphQLWsRouter don't thread req.user into resolver context yet (see
-// PR notes) — authMiddleware here at least keeps the endpoint from being
-// fully anonymous until that's addressed.
-app.use('/graphql', authMiddleware, graphQLRouter);
-app.use('/graphql/ws', authMiddleware, graphQLWsRouter);
+// Cold start monitoring dashboard — available before auth/rate-limit middleware
+app.use('/api/v1/cold-start', coldStartMonitorRouter);
 
-import { versionMiddleware } from './middleware/versioning.js';
+// express-rate-limit: 100 requests / 15 min per IP on all API routes (Issue #8)
+app.use('/api', apiExpressRateLimit);
 
-// Apply tiered limiter to all API routes
-app.use('/api/', tieredRateLimit);
+app.use('/api/', apiRateLimiter);
 
-// Versioning middleware
+// Apply sandbox-aware rate limiting for sandbox endpoints
+const sandboxRateLimiter = tokenBucketRateLimit({ 
+  keyPrefix: 'rl:sandbox',
+  sandboxMode: env.NODE_ENV === 'sandbox' || env.NODE_ENV === 'development'
+});
+
 app.use('/api/', versionMiddleware);
 
-// Define API v1 Router
 const apiV1Router = express.Router();
 apiV1Router.use('/verification', verificationRouter);
 apiV1Router.use('/invoice', invoiceLimiter, invoiceRouter);
@@ -307,96 +229,107 @@ apiV1Router.use('/stellar', stellarRouter);
 apiV1Router.use('/catalog', catalogRouter);
 apiV1Router.use('/jobs', jobsRouter);
 apiV1Router.use('/queue', queueRouter);
+apiV1Router.use('/queue', bullMQMonitorRouter);
 apiV1Router.use('/sla', slaRouter);
+apiV1Router.use('/onboarding', onboardingRouter);
 apiV1Router.use('/legacy', legacyRouter);
-// Feature flag admin — inspect & override flags at runtime
 apiV1Router.use('/flags', flagsRouter);
+apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
+apiV1Router.use('/zk-identity', zkIdentityRouter);
 apiV1Router.use('/kyb', kybRouter);
 apiV1Router.use('/batch', batchRouter);
+apiV1Router.use('/relayer', relayerRouter);
+apiV1Router.use('/queue/payments', paymentQueueRouter);
 apiV1Router.use('/splits', splitsRouter);
 apiV1Router.use('/refunds', refundsRouter);
 apiV1Router.use('/allowances', allowancesRouter);
-// Email delivery system
+apiV1Router.use('/forms', formsRouter);
+// Webhook management and verification
+apiV1Router.use('/webhooks', webhooksRouter);
+apiV1Router.use('/disputes', disputeRoutes);
 apiV1Router.use('/emails', emailRouter);
-// Portfolio/wallet aggregation
 apiV1Router.use('/portfolio', portfolioRouter);
-// Backup system
 apiV1Router.use('/backup', backupRouter);
-// Audit system
-apiV1Router.use('/audit', auditRouter);
-// IP allowlist management
 apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
-// Dynamic CORS policy management
-apiV1Router.use('/cors', corsRouter);
-// Push notifications
 apiV1Router.use('/push', pushRouter);
-// Stripe card payments
-apiV1Router.use('/stripe', stripeRouter);
-// Stripe subscription billing — Issue #808
+apiV1Router.use('/nfc', nfcRouter);
+apiV1Router.use('/cache', cacheRouter);
+apiV1Router.use('/circuit-breaker', circuitBreakerRouter);
+apiV1Router.use('/fraud-detection', fraudDetectionRouter);
+apiV1Router.use('/bridge', bridgeRouter);
+apiV1Router.use('/tokenization', tokenizationRouter);
+apiV1Router.use('/routing', routingRouter);
+apiV1Router.use('/escrow', escrowRouter);
+apiV1Router.use('/disputes', disputesRouter);
 apiV1Router.use('/subscriptions', subscriptionsRouter);
-// Invoice generation + PDF export is already mounted at /invoice (Issue #809:
-// GET /api/v1/invoice/:id/pdf via buildInvoicePdf in services/invoice.ts).
-// Payment retry engine (exponential backoff, circuit breaker, analytics) — Issue #810
-apiV1Router.use('/payment-retry', retryRouter);
-// Multiple payment methods per account — Issue #811
-apiV1Router.use('/payment-methods', paymentMethodsRouter);
-// Automated tax reporting, export, and calendar — Issues #690–#693
-apiV1Router.use('/tax-reporting', taxReportingRouter);
-// Cross-chain wallet abstraction & unified balance aggregation — Issue #711
-apiV1Router.use('/wallet', walletRouter);
-// GDPR data subject rights: erasure, portability, consent, retention — Issue #713
-apiV1Router.use('/gdpr', gdprRouter);
-// GDPR-aware data export jobs & scheduling — Issue #713
-apiV1Router.use('/data-export', dataExportRouter);
-// Automated security scanning findings & remediation tracking — Issue #712
-apiV1Router.use('/security', securityRouter);
-// Project collaboration: threaded comments, reactions, activity feed — Issue #714
-apiV1Router.use('/comments', commentsRouter);
-// Real-time collaboration: presence, field locks, edit history — Issue #714
-apiV1Router.use('/collaboration', collaborationRouter);
-// Multi-chain payment processing via the PaymentProvider strategy pattern — Issue #726
-apiV1Router.use('/payment-strategies', paymentStrategiesRouter);
-// Large dataset streaming exports
-apiV1Router.use('/exports', streamingExportRouter);
-// Performance and pool monitoring
-apiV1Router.use('/monitoring', poolMonitorRouter);
-apiV1Router.use('/database', databaseRouter);
-// Soft delete archival sweep + restore — Issue #884
-apiV1Router.use('/archive', archiveRouter);
-// Full-text search — Issue #885
-apiV1Router.use('/search', searchRouter);
-apiV1Router.use('/analytics/cohorts', cohortAnalyticsRouter);
-apiV1Router.use('/analytics/churn', churnPredictionRouter);
-// Core analytics: usage snapshot, funnel, revenue, anomalies, event ingest — Issue #826
-apiV1Router.use('/analytics', createAnalyticsRouter());
-apiV1Router.use('/integrations/slack', slackRouter);
-apiV1Router.use('/integrations/github', githubIntegrationRouter);
-// Payment dispute management (filing, response, evidence, arbitration) — Issue #816
-apiV1Router.use('/disputes', authMiddleware, disputeRoutes);
-// Admin cache stats/clear/evict — Issue #818
-apiV1Router.use('/cache', authMiddleware, cacheRouter);
-// ACH/wire fiat payments — Issue #817
-apiV1Router.use('/fiat-payments', authMiddleware, fiatPaymentsRouter);
-// Rate limiting: tier configs, quota overrides, and analytics — Issue #820
-apiV1Router.use('/rate-limit', rateLimitQuotasRouter);
-// Compression metrics and per-endpoint config — Issue #821
-apiV1Router.use('/compression', compressionRouter);
-apiV1Router.use('/auth/oauth', oauthRouter);
-apiV1Router.use('/auth/2fa', twoFactorAuthRouter);
+apiV1Router.use('/workspaces', workspacesRouter);
+apiV1Router.use('/teams', teamsRouter);
+apiV1Router.use('/merchant-audit', merchantAuditRouter);
+apiV1Router.get('/compression/metrics', (_req, res) => {
+  res.json(getCompressionMetrics());
+});
+apiV1Router.get('/pool/metrics', (_req, res) => {
+  res.json(poolMetrics.snapshot());
+});
 
-// Explicit URL-based mounting
-// Per-key usage metrics for the analytics dashboard — Issue #826.
-// Mounted ahead of the routers so every API-key-authenticated call is recorded.
-app.use('/api/v1', apiUsageTracker);
-app.use('/api/v1', apiV1Router);
+app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
-// Milestone dependency management
-app.use('/api/v1/milestones', milestonesRouter);
+app.use('/api/v1/notifications', notificationsRouter);
+app.use('/api/v1/audit', auditRouter);
+app.use('/api/v1/hedging', hedgingRouter);
+app.use('/api/v1/compliance', complianceRouter);
+app.use('/api/v1/gdpr', gdprRouter);
+app.use('/api/v1/escrow', escrowRouter);
+app.use('/api/v1/multisig', multisigRouter);
+app.use('/api/v1/webhooks', webhooksRouter);
+app.use('/api/v1/fraud-detection', fraudDetectionRouter);
+app.use('/api/v1/bridge', bridgeRouter);
+app.use('/api/v1/tokenization', tokenizationRouter);
 
-// API key management
-app.use('/api/v1/api-keys', apiKeysRouter);
+// Payment receipt NFTs
+app.use('/api/v1/receipts', receiptsRouter);
 
-// Header-based or fallback mounting
+// Event-driven architecture — event store, CQRS projections
+app.use('/api/v1/events', eventsRouter);
+
+// Advanced threat detection with behavioral analysis
+app.use('/api/v1/threat-detection', threatDetectionRouter);
+
+// Secure file upload with MIME/magic-bytes validation and ClamAV scanning (Issue #401)
+app.use('/api/v1/uploads', fileUploadRouter);
+
+// Credential rotation management with dual-key overlap and audit trail (Issue #395)
+app.use('/api/v1/credentials', credentialRotationRouter);
+
+// Microservices service mesh — registry, discovery, circuit breakers
+app.use('/api/v1/service-mesh', serviceMeshRouter);
+
+// Fiat ACH/Wire payment approval workflows
+app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
+
+// Merchant dynamic payment links
+app.use('/api/v1/payment-links', paymentLinksRouter);
+
+// Merchant tax report generation (summary, 1099-K, VAT, nexus, CSV export)
+app.use('/api/v1/tax', taxRouter);
+
+// Project + milestone delivery approval workflow
+app.use('/api/v1/projects', projectsRouter);
+
+// Two-factor authentication
+app.use('/api/v1/auth/2fa', twoFactorAuthRouter);
+
+// Sandbox environment for testing (with relaxed rate limits)
+const sandboxRouter = createSandboxRouter(getSandboxManager(), getMockPaymentProcessor(), getTestDataSeeder());
+app.use('/api/v1/sandbox', sandboxRateLimiter, sandboxRouter);
+
+// Email system v2 with templates, analytics, and localization
+app.use('/api/v2/email', emailV2Router);
+
+// GraphQL gateway with federation-ready schema and subscriptions stream
+app.use('/graphql', graphQLRouter);
+app.use('/graphql/ws', graphQLWsRouter);
+
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1/')) {
     return next();
@@ -405,58 +338,133 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.apiVersion === 'v1') {
     return apiV1Router(req, res, next);
   }
-  
+
   next(new AppError(404, `API Version ${req.apiVersion} is not supported`, 'UNSUPPORTED_API_VERSION'));
 });
 
 app.use(notFoundHandler);
+
+Sentry.setupExpressErrorHandler(app);
+
 app.use(errorHandler);
 
 if (config.jobs.enabled) {
   startJobs();
+
+  // Start the BullMQ distributed scheduler when Redis is available.
+  // Falls back silently to the in-process node-cron scheduler if Redis is absent.
+  createBullMQScheduler(getScheduledTasks()).then((scheduler) => {
+    if (scheduler) {
+      console.log('[bullmq] Distributed scheduler active');
+    } else {
+      console.log('[scheduler] Using in-process node-cron (Redis not configured)');
+    }
+  }).catch((err) => {
+    console.error('[bullmq] Scheduler startup error:', err);
+  });
 }
 
-// Start read-replica health-check polling (Issue #881).
-// Only activates when DB_READ_REPLICA_URLS is set; no-op otherwise.
-getPrismaReplicaClient().startHealthChecks();
+// Start automated credential rotation scheduler (Issue #395)
+startScheduledRotation();
+console.log('[CredentialRotation] Scheduled rotation started');
 
 registerDefaultProcessors();
 if (config.queue.enabled) {
   messageQueue.start();
+  paymentQueue.start();
+}
+startWebhookWorker();
+
+// Auto-escalation cron
+setInterval(async () => {
+  const count = await disputeService.processEscalations();
+  if (count > 0) console.log(`Escalated ${count} disputes`);
+}, 5 * 60 * 1000);
+
+if (featureFlags.evaluate('batch-operations')) {
+  batchProcessor.start();
+  console.log('[BatchProcessor] Started');
 }
 
-registerDefaultPaymentProviders();
-
-// ---------------------------------------------------------------------------
-// Issue #823 — Real-time WebSocket API
-// Attach the WebSocket server to the raw HTTP server so we can handle the
-// WS upgrade handshake.  The REST management routes are mounted on /api/v1/ws.
-// ---------------------------------------------------------------------------
-const httpServer = http.createServer(app);
-
-const wsServer = attachWebSocketServer({ server: httpServer });
-const connectionManager = new ConnectionManager(wsServer);
-registerWebSocketServer(wsServer);
-
-// Mount WebSocket REST management routes AFTER wsServer is created so
-// createWebSocketRouter can capture the reference.
-apiV1Router.use('/ws', createWebSocketRouter(wsServer, connectionManager));
-
-const server = httpServer.listen(config.server.port, () => {
-  console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
-  console.log(`WebSocket endpoint: ws://localhost:${config.server.port}/ws`);
+getRedisCache().connect().then(() => {
+  console.log('[RedisCache] Connection initialized');
+}).catch(() => {
+  console.log('[RedisCache] Not available, using in-memory cache only');
 });
 
-// Graceful shutdown
+const server = http.createServer(app);
+const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
+bindWebSocketServer(wsServer);
+app.use('/api/v1/websocket', createWebSocketRouter(wsServer));
+app.use('/api/v1/analytics', createAnalyticsRouter(wsServer));
+
+const analyticsInterval = setInterval(() => {
+  wsServer.broadcastToChannel('analytics.updates', { type: 'analytics:update', payload: analyticsService.snapshot() });
+}, 30_000);
+
+server.listen(config.server.port, () => {
+  console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
+  console.log(`WebSocket server listening on path /ws (max ${wsServer.metrics.activeConnections}/${wsServer.metrics.acceptedConnections})`);
+
+  // ── Deferred startup: run after the server is accepting requests ────────────
+  // These services are not needed to serve the first request. Starting them
+  // after listen() means the process is ready to handle traffic immediately,
+  // and the background work happens concurrently without blocking the hot path.
+  setImmediate(() => {
+    // Load Sentry profiling integration now that the process is warm
+    loadProfilingIntegration();
+
+    // Job scheduler
+    if (config.jobs.enabled) {
+      startJobs();
+
+      createBullMQScheduler(getScheduledTasks()).then((scheduler) => {
+        if (scheduler) {
+          console.log('[bullmq] Distributed scheduler active');
+        } else {
+          console.log('[scheduler] Using in-process node-cron (Redis not configured)');
+        }
+      }).catch((err) => {
+        console.error('[bullmq] Scheduler startup error:', err);
+      });
+    }
+
+    // Queue processors
+    registerDefaultProcessors();
+    if (config.queue.enabled) {
+      messageQueue.start();
+      paymentQueue.start();
+    }
+
+    // Webhook worker
+    startWebhookWorker();
+
+    // Auto-escalation cron
+    setInterval(async () => {
+      const count = await disputeService.processEscalations();
+      if (count > 0) console.log(`Escalated ${count} disputes`);
+    }, 5 * 60 * 1000);
+
+    // Batch processor
+    if (featureFlags.evaluate('batch-operations')) {
+      batchProcessor.start();
+      console.log('[BatchProcessor] Started');
+    }
+
+    // Redis cache connection (non-blocking — falls back to in-memory)
+    getRedisCache().connect().then(() => {
+      console.log('[RedisCache] Connection initialized');
+    }).catch(() => {
+      console.log('[RedisCache] Not available, using in-memory cache only');
+    });
+  });
+});
+
 const shutdown = (signal: string) => {
   console.log(`${signal} received. Starting graceful shutdown...`);
 
   server.close(() => {
     console.log('HTTP server closed.');
-
-    void wsServer.close().then(() => {
-      console.log('WebSocket server closed.');
-    });
 
     try {
       const scheduler = getJobScheduler();
@@ -469,17 +477,43 @@ const shutdown = (signal: string) => {
     }
 
     try {
+      const bullScheduler = getBullMQScheduler();
+      if (bullScheduler) {
+        bullScheduler.shutdown().then(() => console.log('BullMQ scheduler stopped.'));
+      }
+    } catch (err) {
+      console.error('Error stopping BullMQ scheduler:', err);
+    }
+
+    try {
+      stopScheduledRotation();
+      console.log('Credential rotation scheduler stopped.');
+    } catch (err) {
+      console.error('Error stopping credential rotation:', err);
+    }
+
+    try {
       messageQueue.stop();
+      paymentQueue.stop();
+      stopWebhookWorker();
       console.log('Message queue stopped.');
     } catch (err) {
       console.error('Error stopping message queue:', err);
     }
 
     try {
-      getPrismaReplicaClient().stopHealthChecks();
-      console.log('Replica health checks stopped.');
+      batchProcessor.stop();
+      console.log('Batch processor stopped.');
     } catch (err) {
-      console.error('Error stopping replica health checks:', err);
+      console.error('Error stopping batch processor:', err);
+    }
+
+    clearInterval(analyticsInterval);
+
+    try {
+      wsServer.close().then(() => console.log('WebSocket server closed.'));
+    } catch (err) {
+      console.error('Error closing WebSocket server:', err);
     }
 
     console.log('Graceful shutdown complete. Exiting.');

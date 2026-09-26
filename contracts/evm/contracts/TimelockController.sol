@@ -99,26 +99,19 @@ contract TimelockController {
         approvalThreshold = _approvalThreshold;
         admin = msg.sender;
 
-        uint256 pLen = _proposers.length;
-        for (uint256 i; i < pLen; ) {
-            address p = _proposers[i];
-            assembly {
-                sstore(add(proposers.slot, keccak256(0, 0x20)), p)
-            }
+        for (uint256 i; i < _proposers.length; ) {
+            proposers[_proposers[i]] = true;
             unchecked { ++i; }
         }
-        uint256 aLen = _approvers.length;
-        for (uint256 i; i < aLen; ) {
-            address a = _approvers[i];
-            assembly {
-                sstore(add(approvers.slot, keccak256(0, 0x20)), a)
-            }
+        for (uint256 i; i < _approvers.length; ) {
+            approvers[_approvers[i]] = true;
             unchecked { ++i; }
         }
     }
 
     // ── Proposal Lifecycle ───────────────────────────────────────────────────
 
+    /// @notice Schedule a new upgrade proposal.
     function schedule(
         address target,
         address newImplementation,
@@ -126,25 +119,24 @@ contract TimelockController {
     ) external onlyProposer returns (uint256 proposalId) {
         if (target == address(0) || newImplementation == address(0)) revert ZeroAddress();
 
-        unchecked {
-            proposalId = proposalCount++;
-        }
-        uint256 eta;
-        unchecked {
-            eta = block.timestamp + delay;
-        }
+        proposalId = proposalCount++;
+        uint256 eta = block.timestamp + delay;
 
-        Proposal storage p = proposals[proposalId];
-        p.target = target;
-        p.newImplementation = newImplementation;
-        p.data = data;
-        p.eta = eta;
-        p.scheduledAt = block.timestamp;
-        p.status = ProposalStatus.Pending;
+        proposals[proposalId] = Proposal({
+            target: target,
+            newImplementation: newImplementation,
+            data: data,
+            eta: eta,
+            scheduledAt: block.timestamp,
+            executedAt: 0,
+            approvalCount: 0,
+            status: ProposalStatus.Pending
+        });
 
         emit ProposalScheduled(proposalId, target, newImplementation, eta);
     }
 
+    /// @notice Approve a pending proposal.
     function approve(uint256 proposalId) external onlyApprover {
         Proposal storage p = proposals[proposalId];
         if (p.status != ProposalStatus.Pending) revert InvalidStatus();
@@ -153,9 +145,7 @@ contract TimelockController {
         if (hasApproved[approvalKey]) revert AlreadyApproved();
 
         hasApproved[approvalKey] = true;
-        unchecked {
-            p.approvalCount++;
-        }
+        p.approvalCount++;
 
         if (p.approvalCount >= approvalThreshold) {
             p.status = ProposalStatus.Approved;
@@ -164,8 +154,7 @@ contract TimelockController {
         emit ProposalApproved(proposalId, msg.sender);
     }
 
-    error UpgradeFailed();
-
+    /// @notice Execute an approved proposal after the timelock delay.
     function execute(uint256 proposalId) external {
         Proposal storage p = proposals[proposalId];
         if (p.status != ProposalStatus.Approved) revert InsufficientApprovals();
@@ -175,19 +164,23 @@ contract TimelockController {
         p.status = ProposalStatus.Executed;
         p.executedAt = block.timestamp;
 
-        address target = p.target;
-        address impl = p.newImplementation;
-
-        bytes memory upgradeCall = abi.encodeWithSignature("upgradeTo(address)", impl);
-        (bool ok, ) = target.call(upgradeCall);
-        if (!ok) revert UpgradeFailed();
-
+        // Call the proxy's upgradeTo (or upgradeToAndCall if data provided)
         if (p.data.length > 0) {
-            (bool ok2, ) = target.call(p.data);
-            if (!ok2) revert UpgradeFailed();
+            (bool ok, ) = p.target.call(
+                abi.encodeWithSignature("upgradeTo(address)", p.newImplementation)
+            );
+            require(ok, "Upgrade call failed");
+            // If additional data call is needed, execute separately
+            (bool ok2, ) = p.target.call(p.data);
+            require(ok2, "Data call failed");
+        } else {
+            (bool ok, ) = p.target.call(
+                abi.encodeWithSignature("upgradeTo(address)", p.newImplementation)
+            );
+            require(ok, "Upgrade call failed");
         }
 
-        emit ProposalExecuted(proposalId, target);
+        emit ProposalExecuted(proposalId, p.target);
     }
 
     /// @notice Cancel a pending or approved proposal (admin only or proposer).

@@ -10,18 +10,10 @@ import {
   analyticsService,
   scheduleReport,
   getReportSchedule,
-  forecastService,
-  buildRevenueForecastWithAccuracy,
 } from '../services/analytics.js';
 import type { AgenticPayWebSocketServer } from '../websocket/server.js';
 
-/**
- * @param wsServer Optional WebSocket server used to push live updates to
- *   subscribers on the `analytics.updates` channel. The HTTP routes do not
- *   depend on the socket layer, so the router can be mounted without one; when
- *   it is absent the broadcast is skipped and `/track` still records the event.
- */
-export function createAnalyticsRouter(wsServer?: AgenticPayWebSocketServer) {
+export function createAnalyticsRouter(wsServer: AgenticPayWebSocketServer) {
   const router = Router();
 
   function parseSince(req: Request): Date | undefined {
@@ -119,49 +111,6 @@ export function createAnalyticsRouter(wsServer?: AgenticPayWebSocketServer) {
     res.json({ ok: true, schedule });
   });
 
-  // Revenue forecast
-  router.get('/forecast', (req: Request, res: Response) => {
-    const since = parseSince(req);
-    res.json({ forecast: analyticsService.buildRevenueForecast(since) });
-  });
-
-  // Cohort analysis
-  router.get('/cohorts', (req: Request, res: Response) => {
-    const since = parseSince(req);
-    res.json({ cohorts: analyticsService.buildCohortAnalysis(since) });
-  });
-
-  // Forecast accuracy (Issue #637)
-  router.get('/forecast/accuracy', (_req: Request, res: Response) => {
-    res.json({ accuracy: forecastService.getAccuracyMetrics() });
-  });
-
-  // Forecast with accuracy (Issue #637)
-  router.get('/forecast/detailed', (req: Request, res: Response) => {
-    const since = parseSince(req);
-    res.json(buildRevenueForecastWithAccuracy(since));
-  });
-
-  // Trend analysis (Issue #637)
-  router.get('/forecast/trend', (req: Request, res: Response) => {
-    const since = parseSince(req);
-    const revenue = analyticsService.buildTimeSeries('day', since);
-    const amounts = revenue.map((r) => r.revenue);
-    const trend = forecastService.analyzeTrend(amounts);
-    res.json({ trend, dataPoints: amounts.length });
-  });
-
-  // Record forecast prediction (Issue #637)
-  router.post('/forecast/record', (req: Request, res: Response) => {
-    const { granularity, actual, predicted } = req.body as Record<string, unknown>;
-    if (typeof granularity !== 'string' || typeof actual !== 'number' || typeof predicted !== 'number') {
-      res.status(400).json({ error: 'granularity, actual, and predicted are required' });
-      return;
-    }
-    forecastService.recordPrediction(granularity, actual, predicted);
-    res.json({ ok: true });
-  });
-
   // Ingest a payment event and broadcast via WebSocket
   router.post('/track', (req: Request, res: Response) => {
     const { id, amount, currency, network, status } = req.body as Record<string, unknown>;
@@ -180,9 +129,8 @@ export function createAnalyticsRouter(wsServer?: AgenticPayWebSocketServer) {
     analyticsService.trackPayment({ id, amount, currency, network, status: status as 'initiated' | 'confirmed' | 'completed' | 'failed' });
 
     // Broadcast updated snapshot to all WebSocket subscribers
-    wsServer?.broadcast({
+    wsServer.broadcast({
       type: 'analytics:update',
-      channel: 'analytics.updates',
       payload: analyticsService.snapshot(),
     });
 

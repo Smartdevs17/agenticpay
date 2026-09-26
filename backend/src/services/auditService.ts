@@ -1,7 +1,5 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { randomUUID as uuidv4 } from 'node:crypto';
-import { AuditAnchorService } from '../audit/anchor-service.js';
-import { AUDIT_GENESIS_HASH, computeAuditHash, ImmutableAuditLogger } from '../audit/immutable-logger.js';
-import { verifyAuditChain } from '../audit/chain-verifier.js';
 
 export interface AuditEntry {
   id: string;
@@ -44,10 +42,7 @@ export interface RetentionPolicy {
 
 export class AuditService {
   private entries: AuditEntry[] = [];
-  private currentHash = AUDIT_GENESIS_HASH;
-  private immutableLogger = new ImmutableAuditLogger();
-  private anchorService = new AuditAnchorService();
-  private persistenceInitialized = false;
+  private currentHash = '0000000000000000000000000000000000000000000000000000000000000000';
   private retentionPolicy: RetentionPolicy = {
     retentionDays: 2555,
     archiveAfterDays: 2190,
@@ -60,30 +55,27 @@ export class AuditService {
     }
   }
 
-  private async ensurePersistence(): Promise<void> {
-    if (this.persistenceInitialized) return;
-    this.persistenceInitialized = true;
-    if (!process.env.DATABASE_URL || process.env.AUDIT_PERSISTENCE === 'memory') return;
-
-    try {
-      const { PrismaAuditStore } = await import('../audit/prisma-audit-store.js');
-      const store = new PrismaAuditStore();
-      this.immutableLogger = new ImmutableAuditLogger(store);
-      this.anchorService = new AuditAnchorService(store);
-    } catch (error) {
-      console.warn('[audit] Falling back to in-memory immutable audit store', error);
-    }
+  private computeHash(data: string): string {
+    return createHash('sha256').update(data).digest('hex');
   }
 
   private generateEntryHash(entry: Omit<AuditEntry, 'hash'>): string {
-    return computeAuditHash({
-      previousHash: entry.previousHash,
-      timestamp: new Date(entry.timestamp).toISOString(),
-      actor: entry.userId || 'system',
-      action: entry.action,
-      resource: entry.resource,
-      details: entry.details,
-    });
+    const data = [
+      entry.id,
+      entry.timestamp,
+      entry.userId || '',
+      entry.action,
+      entry.resource,
+      entry.resourceId || '',
+      JSON.stringify(entry.details || {}),
+      JSON.stringify(entry.beforeState || {}),
+      JSON.stringify(entry.afterState || {}),
+      entry.ipAddress || '',
+      entry.requestMethod || '',
+      entry.requestPath || '',
+      entry.previousHash,
+    ].join('|');
+    return this.computeHash(data);
   }
 
   async logAction(params: {
@@ -105,16 +97,9 @@ export class AuditService {
       status?: number;
     };
   }): Promise<AuditEntry> {
-    await this.ensurePersistence();
-    const immutable = await this.immutableLogger.log({
-      actor: params.userId || 'system',
-      action: params.action,
-      resource: params.resource,
-      details: params.details,
-    });
     const id = uuidv4();
-    const timestamp = Date.parse(immutable.timestamp);
-
+    const timestamp = Date.now();
+    
     const entry: Omit<AuditEntry, 'hash'> = {
       id,
       timestamp,
@@ -131,10 +116,10 @@ export class AuditService {
       requestPath: params.request?.path,
       requestBody: this.sanitizeRequestBody(params.request?.body),
       responseStatus: params.response?.status,
-      previousHash: immutable.previousHash,
+      previousHash: this.currentHash,
     };
 
-    const hash = immutable.hash;
+    const hash = this.generateEntryHash(entry);
     const fullEntry: AuditEntry = { ...entry, hash };
     
     this.entries.push(fullEntry);
@@ -185,27 +170,26 @@ export class AuditService {
   }
 
   async verifyIntegrity(): Promise<{ valid: boolean; brokenAt?: string }> {
-    await this.ensurePersistence();
-    const result = await verifyAuditChain(this.entries.map((entry) => ({
-      id: entry.id,
-      timestamp: new Date(entry.timestamp).toISOString(),
-      actor: entry.userId || 'system',
-      action: entry.action,
-      resource: entry.resource,
-      details: entry.details ?? {},
-      previousHash: entry.previousHash,
-      hash: entry.hash,
-    })));
-    return { valid: result.valid, brokenAt: result.brokenAt };
-  }
-
-  async anchorLatestHash() {
-    await this.ensurePersistence();
-    return this.anchorService.anchorLatestHash(this.currentHash);
-  }
-
-  listAnchors() {
-    return this.anchorService.listAnchors();
+    let expectedHash = '0000000000000000000000000000000000000000000000000000000000000000';
+    
+    for (const entry of this.entries) {
+      if (entry.previousHash !== expectedHash) {
+        return { valid: false, brokenAt: entry.id };
+      }
+      
+      const computedHash = this.generateEntryHash(entry);
+      if (computedHash !== entry.hash) {
+        return { valid: false, brokenAt: entry.id };
+      }
+      
+      expectedHash = entry.hash;
+    }
+    
+    if (this.currentHash !== expectedHash) {
+      return { valid: false, brokenAt: this.entries[this.entries.length - 1]?.id };
+    }
+    
+    return { valid: true };
   }
 
   async flagSuspicious(entryId: string, reasons: string[]): Promise<AuditEntry | undefined> {

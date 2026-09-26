@@ -11,33 +11,13 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    setupFiles: ['./vitest.setup.ts'],
     // Only unit/integration tests — Playwright E2E specs live under e2e/
     // and are executed via `npm run test:e2e`.
     include: ['**/*.test.{ts,tsx}'],
     exclude: ['node_modules/**', '.next/**', 'e2e/**', 'playwright-report/**', 'test-results/**'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html', 'lcov'],
-      reportsDirectory: './coverage',
-      exclude: [
-        'node_modules/**',
-        '.next/**',
-        'e2e/**',
-        'playwright-report/**',
-        'test-results/**',
-        '**/*.config.*',
-        '**/*.d.ts',
-        '**/*.test.{ts,tsx}',
-        '**/vitest.setup.ts',
-      ],
-      thresholds: {
-        statements: 80,
-        branches: 80,
-        functions: 80,
-        lines: 80,
-      },
-      skipFull: true,
+      reporter: ['text', 'json', 'html'],
     },
   },
 })

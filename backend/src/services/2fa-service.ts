@@ -5,7 +5,7 @@
 
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
   TOTPSecret,
   TwoFactorSetup,
@@ -91,10 +91,10 @@ export function generateBackupCodes(): string[] {
  * Generate a random alphanumeric code
  */
 function generateRandomCode(length: number): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
   for (let i = 0; i < length; i++) {
-    result += chars.charAt(randomBytes(1)[0] % chars.length);
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
 }
@@ -112,11 +112,7 @@ export function hashBackupCode(code: string): string {
  */
 export function validateBackupCode(backupCodes: string[], code: string): boolean {
   const hashedCode = hashBackupCode(code);
-  const candidate = Buffer.from(hashedCode);
-  return backupCodes.some((stored) => {
-    const storedHash = Buffer.from(stored);
-    return storedHash.length === candidate.length && timingSafeEqual(storedHash, candidate);
-  });
+  return backupCodes.some((stored) => hashBackupCode(stored) === hashedCode);
 }
 
 /**

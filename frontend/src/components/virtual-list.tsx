@@ -53,8 +53,6 @@ export interface VirtualListProps<T extends VirtualListItem> {
   renderRow: (item: T, index: number, isSelected: boolean) => ReactNode;
   /** Optional sticky header rendered above the scrollable area. */
   header?: ReactNode;
-  /** Optional node rendered below the scrollable area, e.g. a load-more control. */
-  footer?: ReactNode;
   /** Called when the user scrolls within `threshold`px of the bottom. */
   onLoadMore?: () => void;
   /** px from bottom to trigger onLoadMore (default 200). */
@@ -127,7 +125,6 @@ export function VirtualList<T extends VirtualListItem>({
   overscan = 5,
   renderRow,
   header,
-  footer,
   onLoadMore,
   loadMoreThreshold = 200,
   isLoading = false,
@@ -361,9 +358,6 @@ export function VirtualList<T extends VirtualListItem>({
           </div>
         )}
       </div>
-
-      {/* Footer slot — load-more control, end-of-list message, etc. */}
-      {footer}
     </div>
   );
 }

@@ -1,11 +1,20 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import { ERROR_CODE_REGISTRY, resolveErrorCode } from '@agenticpay/error-codes';
-import { AppError, PaymentError, AuthError, ProjectError, DisputeError, ValidationError, NotFoundError } from '../types/errors';
-import metrics from '../observability/datadog.js';
 
 type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<unknown>;
 
-export { AppError, PaymentError, AuthError, ProjectError, DisputeError, ValidationError, NotFoundError };
+export class AppError extends Error {
+  statusCode: number;
+  code: string;
+  details?: unknown;
+
+  constructor(statusCode: number, message: string, code = 'INTERNAL_SERVER_ERROR', details?: unknown) {
+    super(message);
+    this.name = 'AppError';
+    this.statusCode = statusCode;
+    this.code = code;
+    this.details = details;
+  }
+}
 
 export function asyncHandler(handler: AsyncRouteHandler): RequestHandler {
   return (req, res, next) => {
@@ -14,14 +23,13 @@ export function asyncHandler(handler: AsyncRouteHandler): RequestHandler {
 }
 
 export function notFoundHandler(req: Request, _res: Response, next: NextFunction) {
-  next(new NotFoundError(`Route not found: ${req.method} ${req.originalUrl}`));
+  next(new AppError(404, `Route not found: ${req.method} ${req.originalUrl}`, 'NOT_FOUND'));
 }
 
-export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
+export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
   const isAppError = err instanceof AppError;
   const statusCode = isAppError ? err.statusCode : 500;
-  const code = resolveErrorCode(isAppError ? err.code : undefined, statusCode);
-  const registered = ERROR_CODE_REGISTRY[code];
+  const code = isAppError ? err.code : 'INTERNAL_SERVER_ERROR';
   const isProduction = process.env.NODE_ENV === 'production';
   const message = isAppError
     ? err.message
@@ -31,40 +39,15 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
         ? err.message
         : 'Unexpected error';
 
-  const logMethod = registered.httpStatus >= 500 ? console.error : console.warn;
-  const logContext = {
-    code,
-    message,
-    statusCode: registered.httpStatus || statusCode,
-    ...(isAppError && err.metadata ? { metadata: err.metadata } : {}),
-    ...(req.requestId ? { requestId: req.requestId } : {}),
-    ...(req.user?.id ? { userId: req.user.id } : {}),
-    ...(!isProduction && !isAppError && err instanceof Error && err.stack ? { stack: err.stack } : {}),
-  };
-  logMethod(`[${code}] ${message}`, logContext);
+  const logMethod = statusCode >= 500 ? console.error : console.warn;
+  logMethod(`[${code}] ${message}`, err);
 
-  const endpoint = req.route?.path || req.path;
-  const tags = {
-    endpoint,
-    error_code: code,
-    status_code: String(registered.httpStatus || statusCode),
-  };
-  metrics.increment('errors.total', 1, tags);
-  if (registered.httpStatus >= 500) {
-    metrics.increment('errors.critical', 1, tags);
-  }
-
-  if (registered.deprecated && registered.sunsetAt) {
-    res.setHeader('Sunset', registered.sunsetAt);
-    res.setHeader('Deprecation', 'true');
-  }
-
-  res.status(registered.httpStatus || statusCode).json({
+  res.status(statusCode).json({
     error: {
       code,
       message,
+      status: statusCode,
       ...(isAppError && err.details !== undefined ? { details: err.details } : {}),
-      ...(req.requestId ? { requestId: req.requestId } : {}),
       ...(!isProduction && !isAppError && err instanceof Error && err.stack
         ? { stack: err.stack }
         : {}),

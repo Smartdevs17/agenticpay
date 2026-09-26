@@ -5,7 +5,7 @@
  * PgBouncer integration, and recommended composite indexes for AgenticPay.
  */
 
-import { featureFlags } from "./featureFlags.js";
+import { featureFlags } from './featureFlags.js';
 
 // ── Pool configuration ─────────────────────────────────────────────────────────
 
@@ -25,19 +25,19 @@ function envInt(key: string, fallback: number): number {
 
 export function buildPoolConfig(env = process.env.NODE_ENV): PoolConfig {
   switch (env) {
-    case "production":
+    case 'production':
       return {
-        max: envInt("DB_POOL_MAX", 50),
-        min: envInt("DB_POOL_MIN", 5),
-        acquireTimeoutMs: envInt("DB_ACQUIRE_TIMEOUT_MS", 10_000),
-        idleTimeoutMs: envInt("DB_IDLE_TIMEOUT_MS", 300_000),
-        createTimeoutMs: envInt("DB_CREATE_TIMEOUT_MS", 10_000),
-        maxConnectionAgeMs: envInt("DB_MAX_AGE_MS", 1_800_000),
+        max: envInt('DB_POOL_MAX', 50),
+        min: envInt('DB_POOL_MIN', 5),
+        acquireTimeoutMs: envInt('DB_ACQUIRE_TIMEOUT_MS', 10_000),
+        idleTimeoutMs: envInt('DB_IDLE_TIMEOUT_MS', 300_000),
+        createTimeoutMs: envInt('DB_CREATE_TIMEOUT_MS', 10_000),
+        maxConnectionAgeMs: envInt('DB_MAX_AGE_MS', 1_800_000),
       };
-    case "staging":
+    case 'staging':
       return {
-        max: envInt("DB_POOL_MAX", 20),
-        min: envInt("DB_POOL_MIN", 2),
+        max: envInt('DB_POOL_MAX', 20),
+        min: envInt('DB_POOL_MIN', 2),
         acquireTimeoutMs: 15_000,
         idleTimeoutMs: 600_000,
         createTimeoutMs: 15_000,
@@ -45,8 +45,8 @@ export function buildPoolConfig(env = process.env.NODE_ENV): PoolConfig {
       };
     default:
       return {
-        max: envInt("DB_POOL_MAX", 10),
-        min: envInt("DB_POOL_MIN", 1),
+        max: envInt('DB_POOL_MAX', 10),
+        min: envInt('DB_POOL_MIN', 1),
         acquireTimeoutMs: 30_000,
         idleTimeoutMs: 900_000,
         createTimeoutMs: 30_000,
@@ -55,26 +55,11 @@ export function buildPoolConfig(env = process.env.NODE_ENV): PoolConfig {
   }
 }
 
-/** Apply the supported Prisma PostgreSQL pool settings to a connection URL. */
-export function applyPrismaPoolConfig(
-  databaseUrl: string | undefined,
-  env = process.env.NODE_ENV,
-): string | undefined {
-  if (!databaseUrl) return undefined;
-
-  const url = new URL(databaseUrl);
-  const pool = buildPoolConfig(env);
-  url.searchParams.set('connection_limit', String(pool.max));
-  url.searchParams.set('pool_timeout', String(Math.max(1, Math.ceil(pool.acquireTimeoutMs / 1000))));
-  url.searchParams.set('connect_timeout', String(Math.max(1, Math.ceil(pool.createTimeoutMs / 1000))));
-  return url.toString();
-}
-
 // ── PgBouncer Integration ─────────────────────────────────────────────────────
 
 export interface PgBouncerConfig {
   enabled: boolean;
-  poolMode: "transaction" | "session" | "statement";
+  poolMode: 'transaction' | 'session' | 'statement';
   defaultPoolSize: number;
   maxPoolSize: number;
   minPoolSize: number;
@@ -90,20 +75,20 @@ export interface PgBouncerConfig {
 }
 
 const DEFAULT_PGBOUNCER_CONFIG: PgBouncerConfig = {
-  enabled: process.env.PGBOUNCER_ENABLED === "true",
-  poolMode: "transaction",
-  defaultPoolSize: envInt("PGBOUNCER_DEFAULT_POOL_SIZE", 25),
-  maxPoolSize: envInt("PGBOUNCER_MAX_POOL_SIZE", 50),
-  minPoolSize: envInt("PGBOUNCER_MIN_POOL_SIZE", 5),
-  reservePoolSize: envInt("PGBOUNCER_RESERVE_POOL_SIZE", 5),
-  reservePoolTimeoutMs: envInt("PGBOUNCER_RESERVE_POOL_TIMEOUT_MS", 5_000),
-  maxClientConnections: envInt("PGBOUNCER_MAX_CLIENT_CONNECTIONS", 100),
-  maxPreparedStatements: envInt("PGBOUNCER_MAX_PREPARED_STATEMENTS", 50),
-  queryTimeoutMs: envInt("PGBOUNCER_QUERY_TIMEOUT_MS", 30_000),
-  idleTimeoutMs: envInt("PGBOUNCER_IDLE_TIMEOUT_MS", 600_000),
-  serverLifetimeMs: envInt("PGBOUNCER_SERVER_LIFETIME_MS", 3_600_000),
-  serverIdleTimeoutMs: envInt("PGBOUNCER_SERVER_IDLE_TIMEOUT_MS", 600_000),
-  healthCheckIntervalMs: envInt("PGBOUNCER_HEALTH_CHECK_INTERVAL_MS", 30_000),
+  enabled: process.env.PGBOUNCER_ENABLED === 'true',
+  poolMode: 'transaction',
+  defaultPoolSize: envInt('PGBOUNCER_DEFAULT_POOL_SIZE', 25),
+  maxPoolSize: envInt('PGBOUNCER_MAX_POOL_SIZE', 50),
+  minPoolSize: envInt('PGBOUNCER_MIN_POOL_SIZE', 5),
+  reservePoolSize: envInt('PGBOUNCER_RESERVE_POOL_SIZE', 5),
+  reservePoolTimeoutMs: envInt('PGBOUNCER_RESERVE_POOL_TIMEOUT_MS', 5_000),
+  maxClientConnections: envInt('PGBOUNCER_MAX_CLIENT_CONNECTIONS', 100),
+  maxPreparedStatements: envInt('PGBOUNCER_MAX_PREPARED_STATEMENTS', 50),
+  queryTimeoutMs: envInt('PGBOUNCER_QUERY_TIMEOUT_MS', 30_000),
+  idleTimeoutMs: envInt('PGBOUNCER_IDLE_TIMEOUT_MS', 600_000),
+  serverLifetimeMs: envInt('PGBOUNCER_SERVER_LIFETIME_MS', 3_600_000),
+  serverIdleTimeoutMs: envInt('PGBOUNCER_SERVER_IDLE_TIMEOUT_MS', 600_000),
+  healthCheckIntervalMs: envInt('PGBOUNCER_HEALTH_CHECK_INTERVAL_MS', 30_000),
 };
 
 let pgBouncerConfig: PgBouncerConfig = { ...DEFAULT_PGBOUNCER_CONFIG };
@@ -201,8 +186,7 @@ class PoolMetricsCollector {
   snapshot(): ConnectionPoolMetrics {
     const averageAcquireTimeMs =
       this.acquireTimes.length > 0
-        ? this.acquireTimes.reduce((sum, t) => sum + t, 0) /
-          this.acquireTimes.length
+        ? this.acquireTimes.reduce((sum, t) => sum + t, 0) / this.acquireTimes.length
         : 0;
 
     return {
@@ -288,9 +272,7 @@ class ConnectionLeaseManager {
     const now = Date.now();
     for (const [id, lease] of this.leases.entries()) {
       if (!lease.released && now - lease.acquiredAt > this.leaseTimeoutMs) {
-        console.warn(
-          `[PoolLeak] Connection ${id} has been held for ${now - lease.acquiredAt}ms without release`,
-        );
+        console.warn(`[PoolLeak] Connection ${id} has been held for ${now - lease.acquiredAt}ms without release`);
         poolMetrics.recordLeakDetected();
         this.leases.delete(id);
       } else if (lease.released) {
@@ -346,12 +328,10 @@ class PoolExhaustionManager {
     for (const handler of this.handlers) {
       try {
         handler.onExhaustion();
-      } catch {}
+      } catch { }
     }
 
-    console.warn(
-      `[PoolExhaustion] Pool exhausted, backing off for ${this.backoffMs}ms`,
-    );
+    console.warn(`[PoolExhaustion] Pool exhausted, backing off for ${this.backoffMs}ms`);
   }
 
   notifyRecovery(): void {
@@ -361,10 +341,10 @@ class PoolExhaustionManager {
     for (const handler of this.handlers) {
       try {
         handler.onRecovery();
-      } catch {}
+      } catch { }
     }
 
-    console.log("[PoolExhaustion] Pool recovered");
+    console.log('[PoolExhaustion] Pool recovered');
   }
 
   scheduleRecovery(): void {
@@ -389,8 +369,7 @@ export const poolExhaustionManager = new PoolExhaustionManager();
 // ── Prepared Statement Registry ────────────────────────────────────────────────
 
 export const PREPARED_STATEMENTS = {
-  getPaymentById:
-    "SELECT * FROM payments WHERE id = $1 AND tenant_id = $2 LIMIT 1",
+  getPaymentById: 'SELECT * FROM payments WHERE id = $1 AND tenant_id = $2 LIMIT 1',
   listPendingPayments:
     "SELECT id, tx_hash, amount, network FROM payments WHERE status = 'pending' ORDER BY created_at ASC LIMIT $1",
   upsertGasEstimate: `
@@ -443,10 +422,7 @@ class PreparedStatementManager {
   }
 
   getRegisteredStatements(): Array<{ name: string; sql: string }> {
-    return Array.from(this.statements.entries()).map(([name, sql]) => ({
-      name,
-      sql,
-    }));
+    return Array.from(this.statements.entries()).map(([name, sql]) => ({ name, sql }));
   }
 
   getStatementCount(): number {
@@ -455,19 +431,16 @@ class PreparedStatementManager {
 }
 
 export const preparedStatementManager = new PreparedStatementManager(
-  envInt("PGBOUNCER_MAX_PREPARED_STATEMENTS", 50),
+  envInt('PGBOUNCER_MAX_PREPARED_STATEMENTS', 50),
 );
 preparedStatementManager.registerDefaults();
 
 // ── Slow query detection ───────────────────────────────────────────────────────
 
-export const SLOW_QUERY_THRESHOLD_MS = envInt("SLOW_QUERY_THRESHOLD_MS", 500);
-export const VERY_SLOW_QUERY_THRESHOLD_MS = envInt(
-  "VERY_SLOW_QUERY_THRESHOLD_MS",
-  2_000,
-);
+export const SLOW_QUERY_THRESHOLD_MS = envInt('SLOW_QUERY_THRESHOLD_MS', 500);
+export const VERY_SLOW_QUERY_THRESHOLD_MS = envInt('VERY_SLOW_QUERY_THRESHOLD_MS', 2_000);
 
-export type SlowQuerySeverity = "warn" | "critical";
+export type SlowQuerySeverity = 'warn' | 'critical';
 
 export interface SlowQueryEvent {
   sql: string;
@@ -488,7 +461,7 @@ export function onSlowQuery(handler: SlowQueryHandler): void {
 export async function withQueryTimer<T>(
   sql: string,
   params: unknown[],
-  execute: () => Promise<T>,
+  execute: () => Promise<T>
 ): Promise<T> {
   const start = Date.now();
   try {
@@ -497,7 +470,7 @@ export async function withQueryTimer<T>(
     const durationMs = Date.now() - start;
     if (durationMs >= SLOW_QUERY_THRESHOLD_MS) {
       const severity: SlowQuerySeverity =
-        durationMs >= VERY_SLOW_QUERY_THRESHOLD_MS ? "critical" : "warn";
+        durationMs >= VERY_SLOW_QUERY_THRESHOLD_MS ? 'critical' : 'warn';
       const event: SlowQueryEvent = {
         sql: sql.slice(0, 500),
         durationMs,
@@ -506,19 +479,15 @@ export async function withQueryTimer<T>(
         timestamp: new Date(),
       };
       for (const handler of slowQueryHandlers) {
-        try {
-          handler(event);
-        } catch {}
+        try { handler(event); } catch { }
       }
     }
   }
 }
 
 onSlowQuery((event) => {
-  const label = event.severity === "critical" ? "CRITICAL" : "SLOW";
-  console.warn(
-    `[db] ${label} query ${event.durationMs}ms: ${event.sql.slice(0, 120)}`,
-  );
+  const label = event.severity === 'critical' ? 'CRITICAL' : 'SLOW';
+  console.warn(`[db] ${label} query ${event.durationMs}ms: ${event.sql.slice(0, 120)}`);
 });
 
 // ── Composite index definitions ────────────────────────────────────────────────
@@ -535,342 +504,89 @@ export interface CompositeIndex {
 
 export const RECOMMENDED_INDEXES: CompositeIndex[] = [
   {
-    name: "idx_invoices_project_created",
-    table: "invoices",
-    columns: ["project_id", "created_at"],
-    description: "Optimizes listing invoices by project ordered by date",
-    targetQuery:
-      "SELECT * FROM invoices WHERE project_id = ? ORDER BY created_at DESC",
+    name: 'idx_invoices_project_created',
+    table: 'invoices',
+    columns: ['project_id', 'created_at'],
+    description: 'Optimizes listing invoices by project ordered by date',
+    targetQuery: 'SELECT * FROM invoices WHERE project_id = ? ORDER BY created_at DESC',
   },
   {
-    name: "idx_invoices_tenant_status_due",
-    table: "invoices",
-    columns: ["tenant_id", "status", "due_at"],
-    description: "Optimizes invoice dashboards filtered by tenant, status, and due date",
-    targetQuery:
-      "SELECT * FROM invoices WHERE tenant_id = ? AND status = ? ORDER BY due_at ASC",
+    name: 'idx_verifications_status_type',
+    table: 'verifications',
+    columns: ['status', 'verification_type'],
+    description: 'Filters verifications by status and type',
+    targetQuery: 'SELECT * FROM verifications WHERE status = ? AND verification_type = ?',
   },
   {
-    name: "idx_milestones_project_status_order",
-    table: "milestones",
-    columns: ["project_id", "status", "order"],
-    description: "Optimizes project milestone lists and status progress checks",
-    targetQuery:
-      "SELECT * FROM milestones WHERE project_id = ? AND status = ? ORDER BY \"order\" ASC",
+    name: 'idx_transactions_account_ledger',
+    table: 'transactions',
+    columns: ['account_id', 'ledger_seq'],
+    description: 'Looks up transactions for an account sorted by ledger sequence',
+    targetQuery: 'SELECT * FROM transactions WHERE account_id = ? ORDER BY ledger_seq DESC',
   },
   {
-    name: "idx_projects_tenant_status_created",
-    table: "projects",
-    columns: ["tenant_id", "status", "created_at"],
-    description: "Optimizes project dashboards filtered by tenant and status",
-    targetQuery:
-      "SELECT * FROM projects WHERE tenant_id = ? AND status = ? ORDER BY created_at DESC",
+    name: 'idx_payments_recipient_status',
+    table: 'payments',
+    columns: ['recipient', 'status'],
+    description: 'Finds pending payments for a recipient',
+    targetQuery: 'SELECT * FROM payments WHERE recipient = ? AND status = ?',
   },
   {
-    name: "idx_verifications_status_type",
-    table: "verifications",
-    columns: ["status", "verification_type"],
-    description: "Filters verifications by status and type",
-    targetQuery:
-      "SELECT * FROM verifications WHERE status = ? AND verification_type = ?",
+    name: 'idx_payments_created_status',
+    table: 'payments',
+    columns: ['created_at', 'status'],
+    description: 'Oldest pending payments for processing',
+    targetQuery: 'SELECT * FROM payments WHERE status = ? ORDER BY created_at ASC LIMIT ?',
   },
   {
-    name: "idx_transactions_account_ledger",
-    table: "transactions",
-    columns: ["account_id", "ledger_seq"],
-    description:
-      "Looks up transactions for an account sorted by ledger sequence",
-    targetQuery:
-      "SELECT * FROM transactions WHERE account_id = ? ORDER BY ledger_seq DESC",
-  },
-  {
-    name: "idx_payments_tenant_status_created",
-    table: "payments",
-    columns: ["tenant_id", "status", "created_at"],
-    description: "Finds payments by tenant and status ordered by creation time",
-    targetQuery: "SELECT * FROM payments WHERE tenant_id = ? AND status = ? ORDER BY created_at DESC",
-  },
-  {
-    name: "idx_payments_created_status",
-    table: "payments",
-    columns: ["created_at", "status"],
-    description: "Oldest pending payments for processing",
-    targetQuery:
-      "SELECT * FROM payments WHERE status = ? ORDER BY created_at ASC LIMIT ?",
-  },
-  {
-    name: "idx_payments_tx_hash",
-    table: "payments",
-    columns: ["tx_hash"],
+    name: 'idx_payments_tx_hash',
+    table: 'payments',
+    columns: ['tx_hash'],
     unique: true,
-    description: "Idempotency and on-chain lookup by transaction hash",
-    targetQuery: "SELECT * FROM payments WHERE tx_hash = ?",
+    description: 'Idempotency and on-chain lookup by transaction hash',
+    targetQuery: 'SELECT * FROM payments WHERE tx_hash = ?',
   },
   {
-    name: "idx_sessions_user_expires",
-    table: "sessions",
-    columns: ["user_id", "expires_at"],
-    description: "Finds active sessions for a user",
-    targetQuery: "SELECT * FROM sessions WHERE user_id = ? AND expires_at > ?",
+    name: 'idx_sessions_user_expires',
+    table: 'sessions',
+    columns: ['user_id', 'expires_at'],
+    description: 'Finds active sessions for a user',
+    targetQuery: 'SELECT * FROM sessions WHERE user_id = ? AND expires_at > ?',
   },
   {
-    name: "idx_refunds_invoice_created",
-    table: "refunds",
-    columns: ["invoice_id", "created_at"],
-    description: "Lists refunds for an invoice ordered by date",
-    targetQuery:
-      "SELECT * FROM refunds WHERE invoice_id = ? ORDER BY created_at DESC",
+    name: 'idx_refunds_invoice_created',
+    table: 'refunds',
+    columns: ['invoice_id', 'created_at'],
+    description: 'Lists refunds for an invoice ordered by date',
+    targetQuery: 'SELECT * FROM refunds WHERE invoice_id = ? ORDER BY created_at DESC',
   },
   {
-    name: "idx_users_tenant_email",
-    table: "users",
-    columns: ["tenant_id", "email"],
+    name: 'idx_users_tenant_email',
+    table: 'users',
+    columns: ['tenant_id', 'email'],
     unique: true,
-    description: "Login and uniqueness constraint per tenant",
-    targetQuery: "SELECT * FROM users WHERE tenant_id = ? AND email = ?",
+    description: 'Login and uniqueness constraint per tenant',
+    targetQuery: 'SELECT * FROM users WHERE tenant_id = ? AND email = ?',
   },
   {
-    name: "idx_audit_logs_entity_created",
-    table: "audit_logs",
-    columns: ["entity_id", "created_at"],
-    description: "Audit trail queries per resource ordered by time",
-    targetQuery:
-      "SELECT * FROM audit_logs WHERE entity_id = ? ORDER BY created_at DESC",
+    name: 'idx_audit_logs_entity_created',
+    table: 'audit_logs',
+    columns: ['entity_id', 'created_at'],
+    description: 'Audit trail queries per resource ordered by time',
+    targetQuery: 'SELECT * FROM audit_logs WHERE entity_id = ? ORDER BY created_at DESC',
   },
   {
-    name: "idx_gas_estimates_network_recorded",
-    table: "gas_estimates",
-    columns: ["network", "recorded_at"],
-    description: "Gas analytics aggregation by network and time window",
-    targetQuery:
-      "SELECT * FROM gas_estimates WHERE network = ? ORDER BY recorded_at DESC",
+    name: 'idx_gas_estimates_network_recorded',
+    table: 'gas_estimates',
+    columns: ['network', 'recorded_at'],
+    description: 'Gas analytics aggregation by network and time window',
+    targetQuery: 'SELECT * FROM gas_estimates WHERE network = ? ORDER BY recorded_at DESC',
   },
 ];
 
 export function getRecommendedIndexes(): CompositeIndex[] {
-  if (!featureFlags.evaluate("db-composite-indexes")) return [];
+  if (!featureFlags.evaluate('db-composite-indexes')) return [];
   return RECOMMENDED_INDEXES;
-}
-
-// ── Index Recommendation Engine ──────────────────────────────────────────────
-// Analyses pg_stat_user_indexes and pg_stat_all_tables to detect unused,
-// missing, or redundant indexes.  Hooked into the query logger middleware
-// and exposed via GET /api/v1/database/index-recommendations.
-
-export interface IndexUsageStat {
-  indexName: string;
-  table: string;
-  columns: string;
-  unique: boolean;
-  idxScan: number;
-  idxTupRead: number;
-  idxTupFetch: number;
-  sizeBytes: number;
-  lastUsed: string | null;
-}
-
-export interface TableScanStat {
-  table: string;
-  seqScan: number;
-  seqTupRead: number;
-  estimatedRows: number;
-}
-
-export interface IndexRecommendation {
-  type: "missing" | "unused" | "redundant" | "composite";
-  table: string;
-  columns: string[];
-  reason: string;
-  estimatedImpact: string;
-  ddl: string;
-}
-
-class IndexRecommendationEngine {
-  async getIndexUsageStats(): Promise<IndexUsageStat[]> {
-    try {
-      const { PrismaClient } = await import("@prisma/client");
-      const prisma = new PrismaClient();
-      const stats = await prisma.$queryRawUnsafe<IndexUsageStat[]>(`
-        SELECT
-          i.relname AS "indexName",
-          t.relname AS "table",
-          pg_get_indexdef(i.oid) AS columns,
-          ix.indisunique AS unique,
-          COALESCE(s.idx_scan, 0) AS "idxScan",
-          COALESCE(s.idx_tup_read, 0) AS "idxTupRead",
-          COALESCE(s.idx_tup_fetch, 0) AS "idxTupFetch",
-          pg_relation_size(i.oid) AS "sizeBytes",
-          NULL::text AS "lastUsed"
-        FROM pg_index ix
-        JOIN pg_class i ON ix.indexrelid = i.oid
-        JOIN pg_class t ON ix.indrelid = t.oid
-        LEFT JOIN pg_stat_user_indexes s ON i.oid = s.indexrelid
-        WHERE t.relkind = 'r'
-          AND t.relnamespace NOT IN ('pg_catalog'::regnamespace, 'information_schema'::regnamespace)
-        ORDER BY s.idx_scan ASC NULLS FIRST
-      `);
-      await prisma.$disconnect();
-      return stats;
-    } catch {
-      return [];
-    }
-  }
-
-  async getTableScanStats(): Promise<TableScanStat[]> {
-    try {
-      const { PrismaClient } = await import("@prisma/client");
-      const prisma = new PrismaClient();
-      const stats = await prisma.$queryRawUnsafe<TableScanStat[]>(`
-        SELECT
-          relname AS "table",
-          COALESCE(seq_scan, 0) AS "seqScan",
-          COALESCE(seq_tup_read, 0) AS "seqTupRead",
-          COALESCE(n_live_tup, 0) AS "estimatedRows"
-        FROM pg_stat_user_tables
-        ORDER BY seq_scan DESC
-      `);
-      await prisma.$disconnect();
-      return stats;
-    } catch {
-      return [];
-    }
-  }
-
-  async recommendIndexes(): Promise<IndexRecommendation[]> {
-    const recommendations: IndexRecommendation[] = [];
-    const indexStats = await this.getIndexUsageStats();
-    const tableStats = await this.getTableScanStats();
-
-    // 1. Detect unused indexes
-    for (const idx of indexStats) {
-      if (idx.idxScan === 0 && idx.sizeBytes > 0) {
-        recommendations.push({
-          type: "unused",
-          table: idx.table,
-          columns: [idx.indexName],
-          reason: `Index ${idx.indexName} on ${idx.table} has never been scanned but uses ${(idx.sizeBytes / 1024).toFixed(0)} KB`,
-          estimatedImpact: `Save ${(idx.sizeBytes / 1024).toFixed(0)} KB by dropping`,
-          ddl: `DROP INDEX CONCURRENTLY IF EXISTS ${idx.indexName};`,
-        });
-      }
-    }
-
-    // 2. Detect tables with high seq_scan (potential missing indexes)
-    for (const tbl of tableStats) {
-      if (tbl.seqScan > 100 && tbl.estimatedRows > 1000) {
-        const matchedIndex = indexStats.find((i) => i.table === tbl.table && i.idxScan > 0);
-        if (!matchedIndex) {
-          recommendations.push({
-            type: "missing",
-            table: tbl.table,
-            columns: [],
-            reason: `Table ${tbl.table} has ${tbl.seqScan} sequential scans on ${tbl.estimatedRows.toLocaleString()} rows — consider adding indexes on filter/join columns`,
-            estimatedImpact: "High — sequential scans on large table",
-            ddl: `-- Run EXPLAIN on hot queries against ${tbl.table} to identify columns`,
-          });
-        }
-      }
-    }
-
-    // 3. Recommend composite indexes from RECOMMENDED_INDEXES that don't exist
-    for (const idx of RECOMMENDED_INDEXES) {
-      const exists = indexStats.some(
-        (s) => s.table === idx.table && idx.columns.every((c) => s.columns.includes(c)),
-      );
-      if (!exists) {
-        const unique = idx.unique ? " UNIQUE" : "";
-        const cols = idx.columns.join(", ");
-        recommendations.push({
-          type: "composite",
-          table: idx.table,
-          columns: idx.columns,
-          reason: idx.description,
-          estimatedImpact: "Medium — optimises query pattern",
-          ddl: `CREATE${unique} INDEX CONCURRENTLY ${idx.name} ON "${idx.table}" (${cols});`,
-        });
-      }
-    }
-
-    return recommendations;
-  }
-
-  async getQueryPlans(): Promise<Array<{ query: string; plan: unknown; durationMs: number }>> {
-    const slowQueries = queryProfiler.getTopSlowQueries(10);
-    const plans: Array<{ query: string; plan: unknown; durationMs: number }> = [];
-
-    for (const q of slowQueries) {
-      if (!/^\s*(select|with)\b/i.test(q.query)) {
-        plans.push({ query: q.query, plan: { skipped: "Only SELECT/CTE queries are eligible for EXPLAIN ANALYZE" }, durationMs: q.durationMs });
-        continue;
-      }
-      try {
-        const { PrismaClient } = await import("@prisma/client");
-        const prisma = new PrismaClient();
-        const result = await prisma.$queryRawUnsafe(
-          `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${q.query}`,
-        );
-        plans.push({ query: q.query, plan: result, durationMs: q.durationMs });
-        await prisma.$disconnect();
-      } catch {
-        plans.push({ query: q.query, plan: { error: "EXPLAIN failed" }, durationMs: q.durationMs });
-      }
-    }
-    return plans;
-  }
-}
-
-export const indexRecommendationEngine = new IndexRecommendationEngine();
-
-// ── Database performance alerts ──────────────────────────────────────────────
-
-export interface DbAlert {
-  type: "high_seq_scan" | "unused_index" | "pool_exhaustion" | "query_performance";
-  severity: "info" | "warn" | "critical";
-  message: string;
-  timestamp: string;
-  details?: Record<string, unknown>;
-}
-
-class DbAlertManager {
-  private alerts: DbAlert[] = [];
-  private maxAlerts = 100;
-
-  addAlert(alert: Omit<DbAlert, "timestamp">): void {
-    this.alerts.push({ ...alert, timestamp: new Date().toISOString() });
-    if (this.alerts.length > this.maxAlerts) this.alerts.shift();
-  }
-
-  getAlerts(severity?: DbAlert["severity"]): DbAlert[] {
-    if (severity) return this.alerts.filter((a) => a.severity === severity);
-    return [...this.alerts];
-  }
-
-  async checkAndAlert(): Promise<void> {
-    try {
-      const tableStats = await indexRecommendationEngine.getTableScanStats();
-      for (const tbl of tableStats) {
-        if (tbl.seqScan > 1000 && tbl.estimatedRows > 10000) {
-          this.addAlert({
-            type: "high_seq_scan",
-            severity: "warn",
-            message: `High sequential scans on ${tbl.table}: ${tbl.seqScan} scans on ${tbl.estimatedRows.toLocaleString()} rows`,
-            details: { table: tbl.table, seqScan: tbl.seqScan, rows: tbl.estimatedRows },
-          });
-        }
-      }
-    } catch {
-      // alert check is best-effort
-    }
-  }
-}
-
-export const dbAlertManager = new DbAlertManager();
-
-// Periodic health check (every 5 minutes)
-if (typeof setInterval !== "undefined") {
-  setInterval(() => {
-    void dbAlertManager.checkAndAlert();
-  }, 300_000);
 }
 
 // ── Read replica routing ───────────────────────────────────────────────────────
@@ -881,324 +597,29 @@ export interface ReplicaConfig {
   database: string;
   user: string;
   password: string;
-  enabled: boolean;
-  maxLag: number;
 }
 
 export function buildReplicaConfigs(): ReplicaConfig[] {
-  const replicaUrls = (process.env.DB_READ_REPLICA_URLS ?? "")
-    .split(",")
+  const replicaUrls = (process.env.DB_READ_REPLICA_URLS ?? '')
+    .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-
-  const maxLag = envInt("DB_REPLICA_MAX_LAG_MS", 5000);
 
   return replicaUrls.map((url) => {
     const parsed = new URL(url);
     return {
       host: parsed.hostname,
       port: Number(parsed.port) || 5432,
-      database: parsed.pathname.replace(/^\//, ""),
+      database: parsed.pathname.replace(/^\//, ''),
       user: parsed.username,
       password: parsed.password,
-      enabled: true,
-      maxLag,
     };
   });
 }
 
-export function buildReplicaUrls(): string[] {
-  return (process.env.DB_READ_REPLICA_URLS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-/**
- * Returns true for queries that are safe to run on a read replica.
- * Matches SELECT statements and CTEs (WITH …).
- */
 export function isReadQuery(sql: string): boolean {
   return /^\s*(SELECT|WITH\s)/i.test(sql);
 }
-
-export type ReplicaHealth = "healthy" | "lagging" | "unhealthy";
-
-export interface ReadReplicaTarget {
-  url: string;
-  health: ReplicaHealth;
-  lagMs: number;
-  lastCheckedAt: number;
-  /** Consecutive health-check failures since last healthy state. */
-  failureCount: number;
-  /** True when explicitly disabled by an operator. */
-  disabled: boolean;
-  /** Epoch ms when the replica entered failover cooldown (0 = not in cooldown). */
-  cooldownUntil: number;
-}
-
-export interface ReplicaSelection {
-  url: string;
-  source: "primary" | "replica";
-  reason: "write_query" | "no_replicas" | "healthy_replica" | "replica_unavailable";
-}
-
-export interface ReadReplicaRouterOptions {
-  /** Reject replicas with lag > this value. Default: DB_REPLICA_MAX_LAG_MS or 5000. */
-  maxLagMs?: number;
-  /** How often (ms) to fire background health checks. Default: DB_REPLICA_HEALTH_CHECK_INTERVAL_MS or 30 000. */
-  healthCheckIntervalMs?: number;
-  /** How long (ms) a failed replica stays in cooldown before re-admission. Default: DB_REPLICA_FAILOVER_COOLDOWN_MS or 15 000. */
-  failoverCooldownMs?: number;
-  /** Enable session-stickiness: once a session reads from a replica, pin it there. */
-  enableStickiness?: boolean;
-  /**
-   * Optional async function that checks a replica URL and returns its
-   * replication lag in milliseconds.  If it throws, the replica is marked
-   * unhealthy.  Defaults to a no-op that always returns 0 (useful in tests;
-   * in production wire a real pg query).
-   */
-  lagProbe?: (url: string) => Promise<number>;
-}
-
-/**
- * ReadReplicaRouter — Issue #881
- *
- * Lightweight, dependency-free router that:
- *  - classifies SQL as read vs write
- *  - round-robins across healthy replicas for reads
- *  - fails over to primary when all replicas are unavailable or lagging
- *  - polls replica lag on a configurable interval in the background
- *  - enforces a failover cooldown before re-admitting a flapping replica
- *  - supports per-session stickiness (once a session picks a replica, it
- *    stays on that replica until the replica becomes unhealthy)
- *  - lets operators disable/enable individual replicas at runtime
- */
-export class ReadReplicaRouter {
-  private replicas: ReadReplicaTarget[];
-  private nextReplicaIndex = 0;
-
-  private readonly maxLagMs: number;
-  private readonly healthCheckIntervalMs: number;
-  private readonly failoverCooldownMs: number;
-  private readonly enableStickiness: boolean;
-  private readonly lagProbe: (url: string) => Promise<number>;
-
-  /** sessionId → replica URL */
-  private readonly stickyMap = new Map<string, string>();
-
-  private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
-
-  constructor(
-    replicaUrls: string[] = buildReplicaUrls(),
-    readonly primaryUrl: string = process.env.DATABASE_URL ?? "",
-    maxLagMs?: number,
-    options: ReadReplicaRouterOptions = {},
-  ) {
-    // Accept the legacy positional-third-arg signature used in existing tests,
-    // but also support the new options bag.
-    this.maxLagMs = maxLagMs
-      ?? options.maxLagMs
-      ?? envInt("DB_REPLICA_MAX_LAG_MS", 5000);
-
-    this.healthCheckIntervalMs =
-      options.healthCheckIntervalMs
-      ?? envInt("DB_REPLICA_HEALTH_CHECK_INTERVAL_MS", 30_000);
-
-    this.failoverCooldownMs =
-      options.failoverCooldownMs
-      ?? envInt("DB_REPLICA_FAILOVER_COOLDOWN_MS", 15_000);
-
-    this.enableStickiness = options.enableStickiness ?? true;
-
-    // Default probe: always healthy (0 ms lag).  In production, inject a
-    // real pg probe via PrismaReplicaClient.startHealthChecks().
-    this.lagProbe = options.lagProbe ?? (() => Promise.resolve(0));
-
-    this.replicas = replicaUrls.map((url) => ({
-      url,
-      health: "healthy" as ReplicaHealth,
-      lagMs: 0,
-      lastCheckedAt: 0,
-      failureCount: 0,
-      disabled: false,
-      cooldownUntil: 0,
-    }));
-  }
-
-  // ── Query routing ───────────────────────────────────────────────────────────
-
-  /**
-   * Choose the target URL for a given SQL statement.
-   *
-   * @param sql     The raw SQL (or Prisma action name if using Prisma middleware).
-   * @param sessionId  Optional session identifier for stickiness.
-   */
-  select(sql: string, sessionId?: string): ReplicaSelection {
-    if (!isReadQuery(sql)) {
-      return { url: this.primaryUrl, source: "primary", reason: "write_query" };
-    }
-
-    if (this.replicas.length === 0) {
-      return { url: this.primaryUrl, source: "primary", reason: "no_replicas" };
-    }
-
-    // Session stickiness: if this session already pinned a healthy replica, reuse it.
-    if (sessionId && this.enableStickiness) {
-      const pinned = this.stickyMap.get(sessionId);
-      if (pinned) {
-        const target = this.replicas.find((r) => r.url === pinned);
-        if (target && this.isEligible(target)) {
-          return { url: pinned, source: "replica", reason: "healthy_replica" };
-        }
-        // Pinned replica is no longer healthy — release the sticky binding.
-        this.stickyMap.delete(sessionId);
-      }
-    }
-
-    const eligible = this.replicas.filter((r) => this.isEligible(r));
-
-    if (eligible.length === 0) {
-      return { url: this.primaryUrl, source: "primary", reason: "replica_unavailable" };
-    }
-
-    // Round-robin across eligible replicas.
-    const replica = eligible[this.nextReplicaIndex % eligible.length]!;
-    this.nextReplicaIndex = (this.nextReplicaIndex + 1) % eligible.length;
-
-    if (sessionId && this.enableStickiness) {
-      this.stickyMap.set(sessionId, replica.url);
-    }
-
-    return { url: replica.url, source: "replica", reason: "healthy_replica" };
-  }
-
-  // ── Health management ───────────────────────────────────────────────────────
-
-  /**
-   * Apply a health update from an external caller (e.g. the Prisma middleware
-   * after a failed query, or a dedicated health-check job).
-   */
-  updateHealth(
-    url: string,
-    params: { healthy: boolean; lagMs?: number; checkedAt?: number },
-  ): void {
-    const replica = this.replicas.find((r) => r.url === url);
-    if (!replica) return;
-
-    replica.lagMs = params.lagMs ?? replica.lagMs;
-    replica.lastCheckedAt = params.checkedAt ?? Date.now();
-
-    if (!params.healthy) {
-      replica.health = "unhealthy";
-      replica.failureCount += 1;
-      // Enter failover cooldown on first failure.
-      if (replica.cooldownUntil === 0) {
-        replica.cooldownUntil = Date.now() + this.failoverCooldownMs;
-      }
-    } else if (replica.lagMs > this.maxLagMs) {
-      replica.health = "lagging";
-      replica.failureCount += 1;
-    } else {
-      replica.health = "healthy";
-      replica.failureCount = 0;
-      replica.cooldownUntil = 0;
-    }
-  }
-
-  /** Administratively disable a replica (excludes it from routing). */
-  disableReplica(url: string): void {
-    const replica = this.replicas.find((r) => r.url === url);
-    if (replica) {
-      replica.disabled = true;
-    }
-  }
-
-  /** Re-enable a previously disabled replica. */
-  enableReplica(url: string): void {
-    const replica = this.replicas.find((r) => r.url === url);
-    if (replica) {
-      replica.disabled = false;
-      replica.failureCount = 0;
-      replica.cooldownUntil = 0;
-    }
-  }
-
-  // ── Background health checks ────────────────────────────────────────────────
-
-  /**
-   * Start the background polling loop.  Safe to call multiple times — only
-   * one timer is ever active.
-   */
-  startHealthChecks(): void {
-    if (this.healthCheckTimer !== null) return;
-    if (this.replicas.length === 0) return;
-
-    this.healthCheckTimer = setInterval(() => {
-      void this.runHealthCheckCycle();
-    }, this.healthCheckIntervalMs);
-
-    // Don't keep the Node.js process alive solely for health checks.
-    if (typeof this.healthCheckTimer === "object" && this.healthCheckTimer !== null) {
-      (this.healthCheckTimer as NodeJS.Timeout).unref?.();
-    }
-  }
-
-  /** Stop the background polling loop (call during graceful shutdown). */
-  stopHealthChecks(): void {
-    if (this.healthCheckTimer !== null) {
-      clearInterval(this.healthCheckTimer);
-      this.healthCheckTimer = null;
-    }
-  }
-
-  /** Run one round of health checks across all replicas. Exposed for testing. */
-  async runHealthCheckCycle(): Promise<void> {
-    const now = Date.now();
-
-    await Promise.allSettled(
-      this.replicas.map(async (replica) => {
-        // Lift cooldown once the window has passed.
-        if (replica.cooldownUntil > 0 && now >= replica.cooldownUntil) {
-          replica.cooldownUntil = 0;
-        }
-
-        if (replica.disabled) return;
-
-        try {
-          const lagMs = await this.lagProbe(replica.url);
-          // Pass healthy=true so that updateHealth can decide whether the
-          // replica is "healthy" or "lagging" based on the lagMs value.
-          this.updateHealth(replica.url, { healthy: true, lagMs, checkedAt: now });
-        } catch {
-          this.updateHealth(replica.url, { healthy: false, checkedAt: now });
-        }
-      }),
-    );
-  }
-
-  // ── Observation ─────────────────────────────────────────────────────────────
-
-  /** Return a copy of the current replica state (safe to serialise). */
-  snapshot(): ReadReplicaTarget[] {
-    return this.replicas.map((r) => ({ ...r }));
-  }
-
-  /** Number of sessions currently pinned to a specific replica. */
-  stickySessions(): Map<string, string> {
-    return new Map(this.stickyMap);
-  }
-
-  // ── Private helpers ─────────────────────────────────────────────────────────
-
-  private isEligible(r: ReadReplicaTarget): boolean {
-    if (r.disabled) return false;
-    if (Date.now() < r.cooldownUntil) return false;
-    return r.health === "healthy";
-  }
-}
-
-export const readReplicaRouter = new ReadReplicaRouter();
 
 // ── Query Profiler ────────────────────────────────────────────────────────────
 
@@ -1231,7 +652,7 @@ class QueryProfiler {
   }
 
   isEnabled(): boolean {
-    return featureFlags.evaluate("db-query-profiling");
+    return featureFlags.evaluate('db-query-profiling');
   }
 
   profile<T>(query: string, source: string, fn: () => Promise<T>): Promise<T> {
@@ -1240,70 +661,47 @@ class QueryProfiler {
     const start = Date.now();
     return fn().then((result) => {
       const durationMs = Date.now() - start;
-      const profile: QueryProfile = {
-        query,
-        durationMs,
-        timestamp: new Date().toISOString(),
-        source,
-      };
+      const profile: QueryProfile = { query, durationMs, timestamp: new Date().toISOString(), source };
 
       this.allQueries.push(profile);
       if (this.allQueries.length > this.maxAllQueries) this.allQueries.shift();
 
       if (durationMs > this.slowThresholdMs) {
-        console.warn(
-          `[QueryProfiler] SLOW QUERY (${durationMs.toFixed(0)}ms) [${source}]: ${query.substring(0, 200)}`,
-        );
+        console.warn(`[QueryProfiler] SLOW QUERY (${durationMs.toFixed(0)}ms) [${source}]: ${query.substring(0, 200)}`);
         this.slowQueries.push(profile);
-        if (this.slowQueries.length > this.maxSlowQueries)
-          this.slowQueries.shift();
+        if (this.slowQueries.length > this.maxSlowQueries) this.slowQueries.shift();
       }
 
       return result;
     });
   }
 
-  detectNPlusOne(
-    source: string,
-    parentFn: () => Promise<unknown[]>,
-  ): Promise<unknown[]> {
+  detectNPlusOne(source: string, parentFn: () => Promise<unknown[]>): Promise<unknown[]> {
     if (!this.isEnabled()) return parentFn();
-    const originalQuery =
-      this.allQueries[this.allQueries.length - 1]?.query || "unknown";
+    const originalQuery = this.allQueries[this.allQueries.length - 1]?.query || 'unknown';
 
     return parentFn().then((results) => {
       const total = this.allQueries.length;
       if (total > 10 && results.length > 1) {
-        console.warn(
-          `[QueryProfiler] N+1 DETECTED [${source}]: ${total} queries for ${results.length} results`,
-        );
+        console.warn(`[QueryProfiler] N+1 DETECTED [${source}]: ${total} queries for ${results.length} results`);
         console.warn(`  Parent: ${originalQuery.substring(0, 150)}`);
       }
       return results;
     });
   }
 
-  getSlowQueries(): QueryProfile[] {
-    return [...this.slowQueries];
-  }
+  getSlowQueries(): QueryProfile[] { return [...this.slowQueries]; }
 
   getTopSlowQueries(n = 10): QueryProfile[] {
-    return [...this.slowQueries]
-      .sort((a, b) => b.durationMs - a.durationMs)
-      .slice(0, n);
+    return [...this.slowQueries].sort((a, b) => b.durationMs - a.durationMs).slice(0, n);
   }
 
-  getAllQueries(): QueryProfile[] {
-    return [...this.allQueries];
-  }
+  getAllQueries(): QueryProfile[] { return [...this.allQueries]; }
 
   getStats() {
     const total = this.allQueries.length;
     const slow = this.slowQueries.length;
-    const avgDuration =
-      total > 0
-        ? this.allQueries.reduce((sum, q) => sum + q.durationMs, 0) / total
-        : 0;
+    const avgDuration = total > 0 ? this.allQueries.reduce((sum, q) => sum + q.durationMs, 0) / total : 0;
     return {
       totalQueries: total,
       slowQueries: slow,
@@ -1316,9 +714,7 @@ class QueryProfiler {
 
   private calculatePercentile(pct: number): number {
     if (this.allQueries.length === 0) return 0;
-    const sorted = [...this.allQueries].sort(
-      (a, b) => a.durationMs - b.durationMs,
-    );
+    const sorted = [...this.allQueries].sort((a, b) => a.durationMs - b.durationMs);
     const idx = Math.ceil((pct / 100) * sorted.length) - 1;
     return sorted[Math.max(0, idx)].durationMs;
   }

@@ -329,42 +329,6 @@ function isSustainedOveruse(clientKey: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Per-key custom quota overrides (runtime-mutable)
-// ---------------------------------------------------------------------------
-
-export interface QuotaOverride {
-  tier: UserTier;
-  capacity: number;
-  refillRate: number;
-  burstAllowance: number;
-  /** ISO-8601 expiry; omit for permanent overrides */
-  expiresAt?: string;
-}
-
-const quotaOverrides = new Map<string, QuotaOverride>();
-
-export function setQuotaOverride(clientKey: string, override: QuotaOverride): void {
-  quotaOverrides.set(clientKey, override);
-}
-
-export function removeQuotaOverride(clientKey: string): boolean {
-  return quotaOverrides.delete(clientKey);
-}
-
-export function listQuotaOverrides(): Array<{ clientKey: string } & QuotaOverride> {
-  const now = new Date().toISOString();
-  const active: Array<{ clientKey: string } & QuotaOverride> = [];
-  for (const [clientKey, override] of quotaOverrides) {
-    if (!override.expiresAt || override.expiresAt > now) {
-      active.push({ clientKey, ...override });
-    } else {
-      quotaOverrides.delete(clientKey);
-    }
-  }
-  return active;
-}
-
-// ---------------------------------------------------------------------------
 // Main middleware factory
 // ---------------------------------------------------------------------------
 
@@ -383,17 +347,6 @@ export function tokenBucketRateLimit(opts: RateLimitOptions = {}) {
         refillRate: customHourly / HOUR_SECONDS,
         burstAllowance: Math.ceil(customHourly * 0.1),
       };
-    }
-
-    // Runtime quota overrides take highest precedence
-    const override = quotaOverrides.get(clientKey);
-    if (override) {
-      const now = new Date().toISOString();
-      if (!override.expiresAt || override.expiresAt > now) {
-        cfg = { capacity: override.capacity, refillRate: override.refillRate, burstAllowance: override.burstAllowance };
-      } else {
-        quotaOverrides.delete(clientKey);
-      }
     }
 
     const batchCountRaw = req.headers[batchCountHeader];
@@ -481,8 +434,3 @@ export function tokenBucketRateLimit(opts: RateLimitOptions = {}) {
     next();
   };
 }
-
-// ---------------------------------------------------------------------------
-// Convenience alias — allows importing as `rateLimit` alongside the longer name
-// ---------------------------------------------------------------------------
-export const rateLimit = tokenBucketRateLimit;

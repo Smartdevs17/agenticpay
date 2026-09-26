@@ -19,13 +19,8 @@ slaRouter.get(
     const endpoint = req.query.endpoint as string | undefined;
     const metrics = slaTracker.getMetrics(endpoint);
 
-    let data = metrics;
-    if (metrics instanceof Map) {
-      data = Object.fromEntries(metrics);
-    }
-
     res.json({
-      data,
+      data: metrics,
       timestamp: new Date(),
     });
   })

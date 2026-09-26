@@ -19,36 +19,28 @@ import { markOverdueRequests } from '../services/gdpr.js';
 import { sandboxCleanupJobs } from '../jobs/sandbox-cleanup.js';
 import { SubscriptionService } from '../services/subscription.service.js';
 import { SubscriptionProcessor } from '../jobs/subscription-processor.js';
-import { aggregateUsage, checkUsageAlerts, processDunning } from '../jobs/usageAggregation.js';
-import { getArchivalService } from '../services/archival/index.js';
-import { getBridgeMonitorService } from '../services/bridge-monitor/bridge-monitor.js';
-import { runScheduledReconciliation } from '../services/payment-reconciliation/index.js';
-import { runEscalationEvaluation } from '../jobs/escalation.job.js';
-import { disputeService } from '../../disputes/disputeService.js';
-import { runProjectArchivalSweep } from '../services/project-archival/index.js';
 import { ethers } from 'ethers';
-import {
-  runFullBackupJob,
-  runIncrementalBackupJob,
-  runBackupRetentionCleanup,
-} from '../jobs/backup.job.js';
-import { BACKUP_SCHEDULES } from '../services/backup/BackupAutomationService.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface ScheduledTaskMeta {
+  /** Unique identifier — must be kebab-case, globally unique */
   id: string;
+  /** Human-readable name shown in dashboards */
   name: string;
+  /** What the job does */
   description: string;
+  /** node-cron / BullMQ cron expression */
   schedule: string;
+  /** IANA timezone for schedule evaluation */
   timezone?: string;
+  /** Abort after this many milliseconds; undefined = no timeout */
   timeoutMs?: number;
+  /** Max consecutive failures before the job is paused */
   maxFailures?: number;
-  priority?: 'critical' | 'high' | 'normal' | 'low';
-  rateLimitPerSecond?: number;
-  rateLimitBurst?: number;
+  /** Actual work to perform */
   handler: () => Promise<void> | void;
 }
 
@@ -88,13 +80,12 @@ export function getNextRunTimes(expression: string, count = 5, timezone?: string
 // Raw task definitions
 // ---------------------------------------------------------------------------
 
-const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string })[] = [
+const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string }[] = [
   {
     id: 'system-heartbeat',
     name: 'System heartbeat log',
     description: 'Emits a periodic heartbeat log entry for uptime monitoring.',
     defaultSchedule: '*/5 * * * *',
-    priority: 'low',
     handler: () => {
       console.log('[jobs] heartbeat', new Date().toISOString());
     },
@@ -105,9 +96,6 @@ const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: strin
     description: 'Finds subscriptions due for renewal and executes on-chain payments via the EVM subscription contract.',
     defaultSchedule: '0 * * * *',
     timeoutMs: 5 * 60 * 1000,
-    priority: 'high',
-    rateLimitPerSecond: 1,
-    rateLimitBurst: 2,
     handler: async () => {
       const contractAddress = process.env.SUBSCRIPTION_CONTRACT_ADDRESS;
       const rpcUrl = process.env.EVM_RPC_URL;
@@ -154,7 +142,6 @@ const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: strin
     name: 'Cleanup Expired Sandbox Accounts',
     description: 'Deactivates sandbox accounts whose trial period has elapsed.',
     defaultSchedule: '0 */6 * * *',
-    priority: 'low',
     handler: sandboxCleanupJobs.find((j) => j.id === 'sandbox-cleanup-expired-accounts')!.handler,
   },
   {
@@ -170,239 +157,6 @@ const RAW_TASKS: (Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: strin
     description: 'Aggregates sandbox usage statistics for monitoring dashboards.',
     defaultSchedule: '0 0 * * *',
     handler: sandboxCleanupJobs.find((j) => j.id === 'sandbox-maintenance-stats')!.handler,
-  },
-  {
-    id: 'usage-aggregation',
-    name: 'Usage Aggregation and Billing',
-    description: 'Aggregates metered usage records and syncs to Stripe for subscription billing.',
-    defaultSchedule: '0 * * * *', // Hourly
-    timeoutMs: 10 * 60 * 1000, // 10 minutes
-    priority: 'high',
-    handler: aggregateUsage,
-  },
-  {
-    id: 'usage-alerts-check',
-    name: 'Usage Alerts Check',
-    description: 'Checks subscription usage against limits and triggers alerts at 80% and 100%.',
-    defaultSchedule: '0 * * * *', // Hourly
-    timeoutMs: 5 * 60 * 1000, // 5 minutes
-    handler: checkUsageAlerts,
-  },
-  {
-    id: 'subscription-dunning',
-    name: 'Subscription Dunning Process',
-    description: 'Processes failed payments with retry logic and grace period management.',
-    defaultSchedule: '0 0 * * *', // Daily
-    timeoutMs: 15 * 60 * 1000, // 15 minutes
-    handler: processDunning,
-  },
-  {
-    id: 'daily-onchain-archival',
-    name: 'Daily On-Chain Data Archival',
-    description: 'Backs up transaction data, event logs, and contract state to IPFS with integrity verification.',
-    defaultSchedule: '0 3 * * *',
-    timezone: 'UTC',
-    timeoutMs: 60 * 60 * 1000,
-    handler: async () => {
-      const result = await getArchivalService().runDailyArchival();
-      if (result.ok) {
-        console.log(`[archival] Daily batch complete: ${result.value.batchesProcessed} chain(s) archived`);
-      } else {
-        console.error('[archival] Daily batch failed:', result.error.message);
-      }
-    },
-  },
-  {
-    id: 'bridge-monitor-reconcile',
-    name: 'Bridge Message Reconciliation',
-    description: 'Polls bridge providers, detects stuck/delayed messages, and emits alerts.',
-    defaultSchedule: '*/5 * * * *',
-    timeoutMs: 5 * 60 * 1000,
-    priority: 'critical',
-    rateLimitPerSecond: 2,
-    rateLimitBurst: 5,
-    handler: async () => {
-      await getBridgeMonitorService().pollAndReconcile();
-    },
-  },
-  {
-    id: 'daily-payment-reconciliation',
-    name: 'Daily Payment Reconciliation',
-    description: 'Matches internal payments against external statement records for the previous day and files exceptions for mismatches.',
-    defaultSchedule: '0 5 * * *',
-    timezone: 'UTC',
-    timeoutMs: 30 * 60 * 1000,
-    handler: async () => {
-      await runScheduledReconciliation();
-    },
-  },
-  {
-    id: 'archival-retention-cleanup',
-    name: 'Archival retention enforcement',
-    description: 'Removes archival batches past the 7-year retention window.',
-    defaultSchedule: '0 4 * * 0',
-    timezone: 'UTC',
-    handler: async () => {
-      if (!process.env.DATABASE_URL) return;
-      const { prisma } = await import('../lib/prisma.js');
-      const cutoff = new Date();
-      const deleted = await prisma.archivalBatch.deleteMany({
-        where: { retentionUntil: { lt: cutoff } },
-      });
-      if (deleted.count > 0) {
-        console.log(`[archival] Purged ${deleted.count} expired batch(es)`);
-      }
-    },
-  },
-  {
-    id: 'project-archival-sweep',
-    name: 'Automated Project Archival',
-    description:
-      'Archives projects that have exceeded their retention policy window, warns about upcoming purges, and purges archives past retention.',
-    defaultSchedule: '0 4 * * *',
-    timezone: 'UTC',
-    timeoutMs: 10 * 60 * 1000,
-    priority: 'normal',
-    handler: () => {
-      runProjectArchivalSweep();
-    },
-  },
-  {
-    id: 'escalation-evaluation',
-    name: 'Escalation SLA Evaluation',
-    description: 'Evaluates all open issues for SLA breaches, triggers escalations, and aggregates analytics — Issue #646.',
-    defaultSchedule: '*/5 * * * *',
-    timeoutMs: 10 * 60 * 1000,
-    priority: 'high',
-    handler: runEscalationEvaluation,
-  },
-  {
-    id: 'dispute-escalation',
-    name: 'Payment Dispute Auto-Escalation',
-    description:
-      'Escalates disputes whose respondent missed the 72-hour response deadline — Issue #816.',
-    defaultSchedule: '0 * * * *', // Hourly
-    timeoutMs: 5 * 60 * 1000,
-    priority: 'normal',
-    handler: async () => {
-      const count = await disputeService.processEscalations();
-      if (count > 0) {
-        console.log(`[disputes] Escalated ${count} overdue dispute(s)`);
-      }
-    },
-  },
-  // ── Compliance Automation (Issue #590 enhancements) ─────────────────────
-  {
-    id: 'compliance-threshold-evaluation',
-    name: 'Compliance Threshold Evaluation',
-    description: 'Evaluates compliance metrics against thresholds hourly and raises alerts for breaches.',
-    defaultSchedule: '0 * * * *', // Hourly
-    timeoutMs: 5 * 60 * 1000,
-    priority: 'high',
-    handler: async () => {
-      const { ComplianceService } = await import('../services/complianceService.js');
-      const alerts = ComplianceService.evaluateThresholds();
-      if (alerts.length > 0) console.log(`[compliance] Threshold evaluation raised ${alerts.length} alert(s)`);
-    },
-  },
-  {
-    id: 'compliance-automated-checks',
-    name: 'Automated Compliance Checks',
-    description: 'Runs full suite of automated compliance checks (KYC, AML, sanctions, GDPR, security etc)',
-    defaultSchedule: '0 */6 * * *', // Every 6 hours
-    timezone: 'UTC',
-    timeoutMs: 10 * 60 * 1000,
-    priority: 'high',
-    handler: async () => {
-      const { ComplianceAutomationService } = await import('../services/compliance-automation.js');
-      const result = await ComplianceAutomationService.runAutomatedChecks('GLOBAL', undefined, 'scheduler');
-      console.log(
-        `[compliance] Automated checks: ${result.summary.totalChecks} checks, score ${result.summary.overallScore}, status ${result.summary.overallStatus}`,
-      );
-    },
-  },
-  {
-    id: 'compliance-regulatory-poll',
-    name: 'Regulatory Update Polling',
-    description: 'Polls regulatory sources (FinCEN, OFAC, EBA, FCA, MAS, AUSTRAC, FATF) for new updates',
-    defaultSchedule: '0 */6 * * *', // Every 6 hours, with OFAC polled more frequently in handler
-    timeoutMs: 10 * 60 * 1000,
-    priority: 'high',
-    handler: async () => {
-      const { ComplianceAutomationService } = await import('../services/compliance-automation.js');
-      const { result } = await ComplianceAutomationService.pollRegulatoryUpdates('scheduler');
-      if (result.newUpdates > 0) {
-        console.log(`[compliance] Regulatory poll found ${result.newUpdates} new update(s)`);
-      }
-    },
-  },
-  {
-    id: 'compliance-monthly-report',
-    name: 'Monthly Compliance Report Generation',
-    description: 'Generates monthly compliance reports for all jurisdictions on 1st of month',
-    defaultSchedule: '0 2 1 * *', // 02:00 UTC on 1st day
-    timezone: 'UTC',
-    timeoutMs: 30 * 60 * 1000,
-    priority: 'normal',
-    handler: async () => {
-      const { generateMonthlyComplianceReports } = await import('../jobs/compliance-report.job.js');
-      const res = await generateMonthlyComplianceReports();
-      console.log(
-        `[compliance] Monthly reports: ${res.reportsGenerated} generated, ${res.alertsRaised} alerts, errors ${res.errors.length}`,
-      );
-    },
-  },
-  {
-    id: 'compliance-daily-summary',
-    name: 'Daily Compliance Summary',
-    description: 'Runs full compliance automation cycle (checks + regulatory poll + reporting) daily',
-    defaultSchedule: '0 6 * * *', // 06:00 UTC daily
-    timezone: 'UTC',
-    timeoutMs: 15 * 60 * 1000,
-    priority: 'high',
-    handler: async () => {
-      const { ComplianceAutomationService } = await import('../services/compliance-automation.js');
-      const result = await ComplianceAutomationService.runFullCycle('GLOBAL', 'scheduler');
-      console.log(
-        `[compliance] Daily summary: checks score ${result.checks.overallScore}, ${result.regulatory.newUpdates} new regulatory updates, ${result.reports.count} reports`,
-      );
-    },
-  },
-  // ── Database Backup Automation (Issue #880) ──────────────────────────────
-  {
-    id: 'backup-full-daily',
-    name: 'Daily Full Database Backup',
-    description:
-      'Runs a full pg_dump of the primary database, compresses it, verifies the checksum, ' +
-      'and optionally uploads to S3. Creates a new restore point on success.',
-    defaultSchedule: BACKUP_SCHEDULES.FULL, // '0 2 * * *'  — 02:00 UTC daily
-    timezone: 'UTC',
-    timeoutMs: 60 * 60 * 1000, // 1 hour
-    priority: 'critical',
-    handler: runFullBackupJob,
-  },
-  {
-    id: 'backup-incremental-6h',
-    name: '6-Hour Incremental Database Backup',
-    description:
-      'Runs a data-only pg_dump on top of the latest full backup every 6 hours. ' +
-      'Appends the incremental to the active restore point for point-in-time recovery.',
-    defaultSchedule: BACKUP_SCHEDULES.INCREMENTAL, // '0 0,6,12,18 * * *'
-    timezone: 'UTC',
-    timeoutMs: 30 * 60 * 1000, // 30 minutes
-    priority: 'high',
-    handler: runIncrementalBackupJob,
-  },
-  {
-    id: 'backup-retention-cleanup',
-    name: 'Backup Retention Cleanup',
-    description:
-      'Deletes local backup files and records older than BACKUP_RETENTION_DAYS (default: 30).',
-    defaultSchedule: BACKUP_SCHEDULES.CLEANUP, // '0 4 * * 0'  — Sunday 04:00 UTC
-    timezone: 'UTC',
-    timeoutMs: 10 * 60 * 1000,
-    priority: 'low',
-    handler: runBackupRetentionCleanup,
   },
 ];
 
@@ -447,9 +201,6 @@ export function getScheduledTaskDashboard() {
     schedule: task.schedule,
     timezone: task.timezone ?? 'UTC',
     timeoutMs: task.timeoutMs ?? null,
-    priority: task.priority ?? 'normal',
-    rateLimitPerSecond: task.rateLimitPerSecond ?? null,
-    rateLimitBurst: task.rateLimitBurst ?? null,
     nextRuns: getNextRunTimes(task.schedule, 3, task.timezone),
   }));
 }
