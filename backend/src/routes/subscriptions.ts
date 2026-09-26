@@ -1,547 +1,116 @@
-import { Router } from 'express';
-import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
-import * as stripeService from '../services/stripe.js';
-import { AppError } from '../middleware/errorHandler.js';
+import { Router, Request, Response } from 'express';
+import { asyncHandler } from '../middleware/errorHandler.js';
+import { prisma } from '../config/database.js';
 
-const router = Router();
-const prisma = new PrismaClient();
+export const subscriptionsRouter = Router();
 
-// ── Validation Schemas ───────────────────────────────────────────────────────
+subscriptionsRouter.get('/export/csv', asyncHandler(async (req: Request, res: Response) => {
+  const { merchantId, startDate, endDate } = req.query;
 
-const CreateSubscriptionSchema = z.object({
-  planId: z.string().uuid(),
-  userId: z.string().uuid(),
-  paymentMethodId: z.string().optional(),
-});
-
-const UpdateSubscriptionSchema = z.object({
-  planId: z.string().uuid().optional(),
-  cancelAtPeriodEnd: z.boolean().optional(),
-});
-
-const RecordUsageSchema = z.object({
-  metricType: z.enum(['api_calls', 'storage_gb', 'compute_hours', 'transactions', 'custom']),
-  quantity: z.number().int().positive(),
-  metadata: z.record(z.string()).optional(),
-});
-
-// ── Routes ───────────────────────────────────────────────────────────────────
-
-/**
- * POST /api/subscriptions
- * Create a new subscription for a user
- */
-router.post('/', async (req, res, next) => {
-  try {
-    const { planId, userId, paymentMethodId } = CreateSubscriptionSchema.parse(req.body);
-    const tenantId = req.headers['x-tenant-id'] as string;
-
-    if (!tenantId) {
-      throw new AppError(400, 'Tenant ID required', 'TENANT_ID_REQUIRED');
-    }
-
-    // Get plan details
-    const plan = await prisma.subscriptionPlan.findFirst({
-      where: { id: planId, tenantId, isActive: true, deletedAt: null },
-      include: { meteredPricing: true },
-    });
-
-    if (!plan) {
-      throw new AppError(404, 'Plan not found', 'PLAN_NOT_FOUND');
-    }
-
-    // Get or create Stripe customer
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
-    }
-
-    let stripeCustomerId = user.walletAddress; // Temporary - should store in separate field
-    
-    // Create Stripe customer if doesn't exist
-    const stripeCustomer = await stripeService.createCustomer(user.email, `User ${userId}`);
-    stripeCustomerId = stripeCustomer.id;
-
-    // Create Stripe subscription
-    const stripeSubscription = await stripeService.createSubscription({
-      customerId: stripeCustomerId,
-      priceId: plan.stripePriceId!,
-      trialPeriodDays: plan.trialDays > 0 ? plan.trialDays : undefined,
-      metadata: {
-        planId,
-        userId,
-        tenantId,
-      },
-    });
-
-    // Create subscription record
-    const now = new Date();
-    const periodEnd = new Date(stripeSubscription.current_period_end * 1000);
-    const subscription = await prisma.subscription.create({
-      data: {
-        tenantId,
-        userId,
-        planId,
-        stripeSubscriptionId: stripeSubscription.id,
-        stripeCustomerId,
-        status: stripeSubscription.status === 'trialing' ? 'trialing' : 'active',
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-        trialStart: plan.trialDays > 0 ? now : null,
-        trialEnd: plan.trialDays > 0 ? new Date(now.getTime() + plan.trialDays * 24 * 60 * 60 * 1000) : null,
-      },
-      include: {
-        plan: {
-          include: { meteredPricing: true },
-        },
-      },
-    });
-
-    // Create usage alerts at 80% and 100%
-    for (const pricing of plan.meteredPricing) {
-      await prisma.usageAlert.createMany({
-        data: [
-          {
-            subscriptionId: subscription.id,
-            tenantId,
-            metricType: pricing.metricType,
-            threshold: 80,
-          },
-          {
-            subscriptionId: subscription.id,
-            tenantId,
-            metricType: pricing.metricType,
-            threshold: 100,
-          },
-        ],
-      });
-    }
-
-    res.status(201).json({
-      success: true,
-      data: subscription,
-    });
-  } catch (error) {
-    next(error);
+  const whereClause: any = {};
+  if (merchantId) whereClause.merchantId = merchantId as string;
+  if (startDate || endDate) {
+    whereClause.createdAt = {};
+    if (startDate) whereClause.createdAt.gte = new Date(startDate as string);
+    if (endDate) whereClause.createdAt.lte = new Date(endDate as string);
   }
-});
 
-/**
- * GET /api/subscriptions
- * List all subscriptions for a tenant
- */
-router.get('/', async (req, res, next) => {
-  try {
-    const tenantId = req.headers['x-tenant-id'] as string;
-    const userId = req.query.userId as string | undefined;
+  const subscriptions = await prisma.paymentLink.findMany({
+    where: whereClause,
+    orderBy: { createdAt: 'desc' },
+  });
 
-    if (!tenantId) {
-      throw new AppError(400, 'Tenant ID required', 'TENANT_ID_REQUIRED');
-    }
+  const headers = ['ID', 'Merchant ID', 'Amount', 'Currency', 'Status', 'Created At', 'Updated At'];
+  const rows = subscriptions.map(s => [
+    s.id,
+    s.merchantId,
+    s.amount?.toString() || 'N/A',
+    s.currency,
+    s.status,
+    s.createdAt.toISOString(),
+    s.updatedAt.toISOString(),
+  ]);
 
-    const subscriptions = await prisma.subscription.findMany({
-      where: {
-        tenantId,
-        userId,
-        deletedAt: null,
-      },
-      include: {
-        plan: {
-          include: { meteredPricing: true },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
 
-    res.json({
-      success: true,
-      data: subscriptions,
-    });
-  } catch (error) {
-    next(error);
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="subscriptions-${Date.now()}.csv"`);
+  res.status(200).send(csv);
+}));
+
+subscriptionsRouter.get('/export/json', asyncHandler(async (req: Request, res: Response) => {
+  const { merchantId, startDate, endDate } = req.query;
+
+  const whereClause: any = {};
+  if (merchantId) whereClause.merchantId = merchantId as string;
+  if (startDate || endDate) {
+    whereClause.createdAt = {};
+    if (startDate) whereClause.createdAt.gte = new Date(startDate as string);
+    if (endDate) whereClause.createdAt.lte = new Date(endDate as string);
   }
-});
 
-/**
- * GET /api/subscriptions/:id
- * Get subscription details with current usage
- */
-router.get('/:id', async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const tenantId = req.headers['x-tenant-id'] as string;
+  const subscriptions = await prisma.paymentLink.findMany({
+    where: whereClause,
+    orderBy: { createdAt: 'desc' },
+  });
 
-    if (!tenantId) {
-      throw new AppError(400, 'Tenant ID required', 'TENANT_ID_REQUIRED');
-    }
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="subscriptions-${Date.now()}.json"`);
+  res.status(200).json({
+    total: subscriptions.length,
+    data: subscriptions,
+    exportedAt: new Date().toISOString(),
+  });
+}));
 
-    const subscription = await prisma.subscription.findFirst({
-      where: { id, tenantId, deletedAt: null },
-      include: {
-        plan: {
-          include: { meteredPricing: true },
-        },
-        usageRecords: {
-          where: {
-            timestamp: {
-              gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
-            },
-          },
-          orderBy: { timestamp: 'desc' },
-          take: 100,
-        },
-      },
-    });
+subscriptionsRouter.get('/:merchantId', asyncHandler(async (req: Request, res: Response) => {
+  const { merchantId } = req.params;
+  const { limit = '50', offset = '0' } = req.query;
 
-    if (!subscription) {
-      throw new AppError(404, 'Subscription not found', 'SUBSCRIPTION_NOT_FOUND');
-    }
+  const subscriptions = await prisma.paymentLink.findMany({
+    where: { merchantId },
+    take: Math.min(Number(limit), 100),
+    skip: Number(offset),
+    orderBy: { createdAt: 'desc' },
+  });
 
-    // Calculate current period usage
-    const currentPeriodUsage = await prisma.usageRecord.groupBy({
-      by: ['metricType'],
-      where: {
-        subscriptionId: id,
-        timestamp: {
-          gte: subscription.currentPeriodStart,
-          lte: subscription.currentPeriodEnd,
-        },
-      },
-      _sum: {
-        quantity: true,
-      },
-    });
+  const total = await prisma.paymentLink.count({ where: { merchantId } });
 
-    res.json({
-      success: true,
-      data: {
-        ...subscription,
-        currentPeriodUsage: currentPeriodUsage.map(u => ({
-          metricType: u.metricType,
-          totalQuantity: u._sum.quantity || 0,
-        })),
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+  res.status(200).json({
+    total,
+    limit: Number(limit),
+    offset: Number(offset),
+    data: subscriptions,
+  });
+}));
 
-/**
- * PATCH /api/subscriptions/:id
- * Update subscription (upgrade/downgrade plan or cancel)
- */
-router.patch('/:id', async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const tenantId = req.headers['x-tenant-id'] as string;
-    const updates = UpdateSubscriptionSchema.parse(req.body);
+subscriptionsRouter.get('/:merchantId/analytics', asyncHandler(async (req: Request, res: Response) => {
+  const { merchantId } = req.params;
 
-    if (!tenantId) {
-      throw new AppError(400, 'Tenant ID required', 'TENANT_ID_REQUIRED');
-    }
+  const subscriptions = await prisma.paymentLink.findMany({
+    where: { merchantId },
+  });
 
-    const subscription = await prisma.subscription.findFirst({
-      where: { id, tenantId, deletedAt: null },
-    });
+  const active = subscriptions.filter(s => s.status === 'active').length;
+  const expired = subscriptions.filter(s => s.status === 'expired').length;
+  const used = subscriptions.filter(s => s.status === 'used').length;
 
-    if (!subscription) {
-      throw new AppError(404, 'Subscription not found', 'SUBSCRIPTION_NOT_FOUND');
-    }
+  const totalRevenue = subscriptions
+    .filter(s => s.amount && s.status === 'used')
+    .reduce((sum, s) => sum + Number(s.amount || 0), 0);
 
-    // Handle plan change
-    if (updates.planId) {
-      const newPlan = await prisma.subscriptionPlan.findFirst({
-        where: { id: updates.planId, tenantId, isActive: true, deletedAt: null },
-      });
-
-      if (!newPlan) {
-        throw new AppError(404, 'New plan not found', 'PLAN_NOT_FOUND');
-      }
-
-      // Update Stripe subscription
-      if (subscription.stripeSubscriptionId && newPlan.stripePriceId) {
-        await stripeService.updateSubscription(subscription.stripeSubscriptionId, {
-          items: [{
-            id: subscription.stripeSubscriptionId,
-            price: newPlan.stripePriceId,
-          }],
-          proration_behavior: 'create_prorations',
-        });
-      }
-
-      await prisma.subscription.update({
-        where: { id },
-        data: { planId: updates.planId },
-      });
-    }
-
-    // Handle cancellation
-    if (updates.cancelAtPeriodEnd !== undefined) {
-      if (subscription.stripeSubscriptionId) {
-        await stripeService.cancelSubscription(
-          subscription.stripeSubscriptionId,
-          updates.cancelAtPeriodEnd
-        );
-      }
-
-      await prisma.subscription.update({
-        where: { id },
-        data: {
-          cancelAtPeriodEnd: updates.cancelAtPeriodEnd,
-          canceledAt: updates.cancelAtPeriodEnd ? new Date() : null,
-        },
-      });
-    }
-
-    const updatedSubscription = await prisma.subscription.findUnique({
-      where: { id },
-      include: { plan: true },
-    });
-
-    res.json({
-      success: true,
-      data: updatedSubscription,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * DELETE /api/subscriptions/:id
- * Cancel subscription immediately
- */
-router.delete('/:id', async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const tenantId = req.headers['x-tenant-id'] as string;
-
-    if (!tenantId) {
-      throw new AppError(400, 'Tenant ID required', 'TENANT_ID_REQUIRED');
-    }
-
-    const subscription = await prisma.subscription.findFirst({
-      where: { id, tenantId, deletedAt: null },
-    });
-
-    if (!subscription) {
-      throw new AppError(404, 'Subscription not found', 'SUBSCRIPTION_NOT_FOUND');
-    }
-
-    // Cancel in Stripe
-    if (subscription.stripeSubscriptionId) {
-      await stripeService.cancelSubscription(subscription.stripeSubscriptionId, false);
-    }
-
-    // Soft delete
-    await prisma.subscription.update({
-      where: { id },
-      data: {
-        status: 'canceled',
-        canceledAt: new Date(),
-        deletedAt: new Date(),
-      },
-    });
-
-    res.json({
-      success: true,
-      message: 'Subscription cancelled',
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * POST /api/subscriptions/:id/usage
- * Record usage for metered billing
- */
-router.post('/:id/usage', async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const tenantId = req.headers['x-tenant-id'] as string;
-    const { metricType, quantity, metadata } = RecordUsageSchema.parse(req.body);
-
-    if (!tenantId) {
-      throw new AppError(400, 'Tenant ID required', 'TENANT_ID_REQUIRED');
-    }
-
-    const subscription = await prisma.subscription.findFirst({
-      where: { id, tenantId, deletedAt: null, status: { in: ['active', 'trialing'] } },
-      include: { plan: { include: { meteredPricing: true } } },
-    });
-
-    if (!subscription) {
-      throw new AppError(404, 'Active subscription not found', 'SUBSCRIPTION_NOT_FOUND');
-    }
-
-    // Verify metric type is configured for this plan
-    const metricConfig = subscription.plan.meteredPricing.find(m => m.metricType === metricType);
-    if (!metricConfig) {
-      throw new AppError(400, 'Metric type not configured for this plan', 'METRIC_NOT_CONFIGURED');
-    }
-
-    // Record usage
-    const usageRecord = await prisma.usageRecord.create({
-      data: {
-        subscriptionId: id,
-        tenantId,
-        metricType,
-        quantity,
-        metadata,
-        timestamp: new Date(),
-      },
-    });
-
-    // Check if we need to trigger alerts
-    const usageLimits = subscription.plan.usageLimits as Record<string, number> | null;
-    if (usageLimits && usageLimits[metricType]) {
-      const currentUsage = await prisma.usageRecord.aggregate({
-        where: {
-          subscriptionId: id,
-          metricType,
-          timestamp: {
-            gte: subscription.currentPeriodStart,
-            lte: subscription.currentPeriodEnd,
-          },
-        },
-        _sum: { quantity: true },
-      });
-
-      const totalUsage = currentUsage._sum.quantity || 0;
-      const limit = usageLimits[metricType];
-      const percentage = (totalUsage / limit) * 100;
-
-      // Trigger alerts at 80% and 100%
-      for (const threshold of [80, 100]) {
-        if (percentage >= threshold) {
-          await prisma.usageAlert.updateMany({
-            where: {
-              subscriptionId: id,
-              metricType,
-              threshold,
-              triggered: false,
-            },
-            data: {
-              triggered: true,
-              triggeredAt: new Date(),
-            },
-          });
-        }
-      }
-    }
-
-    res.status(201).json({
-      success: true,
-      data: usageRecord,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * GET /api/subscriptions/:id/usage/summary
- * Get usage summary for current period
- */
-router.get('/:id/usage/summary', async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const tenantId = req.headers['x-tenant-id'] as string;
-
-    if (!tenantId) {
-      throw new AppError(400, 'Tenant ID required', 'TENANT_ID_REQUIRED');
-    }
-
-    const subscription = await prisma.subscription.findFirst({
-      where: { id, tenantId, deletedAt: null },
-      include: { plan: { include: { meteredPricing: true } } },
-    });
-
-    if (!subscription) {
-      throw new AppError(404, 'Subscription not found', 'SUBSCRIPTION_NOT_FOUND');
-    }
-
-    const usageSummary = await prisma.usageRecord.groupBy({
-      by: ['metricType'],
-      where: {
-        subscriptionId: id,
-        timestamp: {
-          gte: subscription.currentPeriodStart,
-          lte: subscription.currentPeriodEnd,
-        },
-      },
-      _sum: { quantity: true },
-    });
-
-    const usageLimits = subscription.plan.usageLimits as Record<string, number> | null;
-
-    const summary = usageSummary.map(u => {
-      const totalUsage = u._sum.quantity || 0;
-      const limit = usageLimits?.[u.metricType] || 0;
-      const percentage = limit > 0 ? (totalUsage / limit) * 100 : 0;
-
-      return {
-        metricType: u.metricType,
-        totalUsage,
-        limit,
-        percentage: Math.round(percentage * 100) / 100,
-        remaining: Math.max(0, limit - totalUsage),
-      };
-    });
-
-    res.json({
-      success: true,
-      data: {
-        subscription: {
-          id: subscription.id,
-          planName: subscription.plan.name,
-          currentPeriodStart: subscription.currentPeriodStart,
-          currentPeriodEnd: subscription.currentPeriodEnd,
-        },
-        usage: summary,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * GET /api/subscriptions/:id/invoices
- * Get invoices for a subscription
- */
-router.get('/:id/invoices', async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const tenantId = req.headers['x-tenant-id'] as string;
-
-    if (!tenantId) {
-      throw new AppError(400, 'Tenant ID required', 'TENANT_ID_REQUIRED');
-    }
-
-    const subscription = await prisma.subscription.findFirst({
-      where: { id, tenantId, deletedAt: null },
-    });
-
-    if (!subscription) {
-      throw new AppError(404, 'Subscription not found', 'SUBSCRIPTION_NOT_FOUND');
-    }
-
-    const invoices = await prisma.subscriptionInvoice.findMany({
-      where: { subscriptionId: id },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    res.json({
-      success: true,
-      data: invoices,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-export default router;
+  res.status(200).json({
+    merchantId,
+    totalSubscriptions: subscriptions.length,
+    activeLinks: active,
+    expiredLinks: expired,
+    usedLinks: used,
+    totalRevenue,
+    byStatus: {
+      active,
+      expired,
+      used,
+      disabled: subscriptions.filter(s => s.status === 'disabled').length,
+    },
+  });
+}));
