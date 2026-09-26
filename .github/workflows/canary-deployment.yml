@@ -1,0 +1,304 @@
+name: Canary Deployment
+
+# Trigger on manual dispatch with environment selection
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+      canary_percentage:
+        description: "Canary traffic percentage (1-10)"
+        required: false
+        default: "5"
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "5"
+          - "10"
+      duration_minutes:
+        description: "Canary duration in minutes"
+        required: false
+        default: "15"
+        type: choice
+        options:
+          - "5"
+          - "10"
+          - "15"
+          - "30"
+      rollback_threshold:
+        description: "Auto-rollback if error rate exceeds %"
+        required: false
+        default: "5"
+
+jobs:
+  canary-deployment:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Verify canary parameters
+        run: |
+          echo "🎯 Canary Configuration:"
+          echo "  Environment: ${{ github.event.inputs.environment }}"
+          echo "  Traffic: ${{ github.event.inputs.canary_percentage }}%"
+          echo "  Duration: ${{ github.event.inputs.duration_minutes }}m"
+          echo "  Auto-rollback threshold: ${{ github.event.inputs.rollback_threshold }}%"
+
+      - name: Get current deployment
+        id: current
+        run: |
+          CURRENT=$(aws ecs describe-services \
+            --cluster agenticpay-${{ github.event.inputs.environment }} \
+            --services agenticpay-api \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          echo "current_task_def=$CURRENT" >> $GITHUB_OUTPUT
+          echo "✅ Current task definition: $CURRENT"
+
+      - name: Get new image version
+        id: image
+        run: |
+          LATEST=$(aws ecr describe-images \
+            --repository-name agenticpay \
+            --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageTags[0]' \
+            --output text)
+          echo "image_tag=$LATEST" >> $GITHUB_OUTPUT
+          echo "✅ Latest image: $LATEST"
+
+      - name: Create canary task definition
+        id: canary_task
+        run: |
+          CURRENT_DEF=$(aws ecs describe-task-definition \
+            --task-definition ${{ steps.current.outputs.current_task_def }} \
+            --query 'taskDefinition' \
+            --output json)
+
+          # Update image in task definition
+          CANARY_DEF=$(echo "$CURRENT_DEF" | \
+            jq ".containerDefinitions[0].image = \"${{ steps.image.outputs.image_tag }}\"" | \
+            jq 'del(.revision) | del(.status) | del(.requiresAttributes) | del(.compatibilities) | del(.registeredAt) | del(.registeredBy)')
+
+          # Register new task definition
+          TASK_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$CANARY_DEF" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "task_def=$TASK_ARN" >> $GITHUB_OUTPUT
+          echo "✅ Created canary task definition: $TASK_ARN"
+
+      - name: Deploy canary (1-10% traffic)
+        id: deploy
+        run: |
+          # Get current service
+          SERVICE_JSON=$(aws ecs describe-services \
+            --cluster agenticpay-${{ github.event.inputs.environment }} \
+            --services agenticpay-api \
+            --query 'services[0]' \
+            --output json)
+
+          # Get current desired count
+          DESIRED_COUNT=$(echo "$SERVICE_JSON" | jq '.desiredCount')
+
+          # Calculate canary replicas (at least 1)
+          CANARY_COUNT=$(( (DESIRED_COUNT * ${{ github.event.inputs.canary_percentage }} + 99) / 100 ))
+          CANARY_COUNT=$(( CANARY_COUNT < 1 ? 1 : CANARY_COUNT ))
+
+          echo "📊 Deployment plan:"
+          echo "  Current replicas: $DESIRED_COUNT"
+          echo "  Canary replicas: $CANARY_COUNT (${{ github.event.inputs.canary_percentage }}%)"
+          echo "  Existing replicas: $(( DESIRED_COUNT - CANARY_COUNT ))"
+
+          # Update service with canary task definition
+          aws ecs update-service \
+            --cluster agenticpay-${{ github.event.inputs.environment }} \
+            --service agenticpay-api \
+            --task-definition ${{ steps.canary_task.outputs.task_def }} \
+            --force-new-deployment \
+            --desired-count $(( DESIRED_COUNT + CANARY_COUNT )) \
+            --output text
+
+          echo "deployment_id=$(date +%s)" >> $GITHUB_OUTPUT
+          echo "✅ Canary deployment initiated"
+
+      - name: Wait for canary to stabilize
+        run: |
+          echo "⏳ Waiting for canary tasks to reach running state (max 5 minutes)..."
+          timeout 300 bash -c '
+            while true; do
+              RUNNING=$(aws ecs describe-services \
+                --cluster agenticpay-${{ github.event.inputs.environment }} \
+                --services agenticpay-api \
+                --query "services[0].runningCount" \
+                --output text)
+              DESIRED=$(aws ecs describe-services \
+                --cluster agenticpay-${{ github.event.inputs.environment }} \
+                --services agenticpay-api \
+                --query "services[0].desiredCount" \
+                --output text)
+              echo "  Running: $RUNNING / $DESIRED"
+              if [ "$RUNNING" -eq "$DESIRED" ]; then
+                echo "✅ All tasks running"
+                break
+              fi
+              sleep 10
+            done
+          '
+
+      - name: Monitor canary metrics
+        id: monitor
+        run: |
+          echo "📈 Monitoring canary for ${{ github.event.inputs.duration_minutes }} minutes..."
+
+          # Poll CloudWatch metrics
+          DURATION=${{ github.event.inputs.duration_minutes }}
+          INTERVAL=10
+          ITERATIONS=$(( DURATION * 60 / INTERVAL ))
+
+          ERROR_RATE_THRESHOLD=${{ github.event.inputs.rollback_threshold }}
+          MAX_ERROR_RATE=0
+
+          for i in $(seq 1 $ITERATIONS); do
+            # Get error rate from CloudWatch
+            ERROR_RATE=$(aws cloudwatch get-metric-statistics \
+              --namespace "AWS/ECS" \
+              --metric-name "TargetResponseTime" \
+              --start-time $(date -u -d "5 minutes ago" +%Y-%m-%dT%H:%M:%S) \
+              --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+              --period 60 \
+              --statistics Sum \
+              --query 'Datapoints[0].Sum' \
+              --output text | jq '. // 0')
+
+            echo "  [$(( i * INTERVAL ))s] Error rate: ${ERROR_RATE}%"
+
+            # Track max error rate
+            if (( $(echo "$ERROR_RATE > $MAX_ERROR_RATE" | bc -l) )); then
+              MAX_ERROR_RATE=$ERROR_RATE
+            fi
+
+            # Auto-rollback on threshold exceeded
+            if (( $(echo "$ERROR_RATE > $ERROR_RATE_THRESHOLD" | bc -l) )); then
+              echo "⚠️  Error rate ($ERROR_RATE%) exceeded threshold ($ERROR_RATE_THRESHOLD%)"
+              echo "should_rollback=true" >> $GITHUB_OUTPUT
+              break
+            fi
+
+            sleep $INTERVAL
+          done
+
+          echo "max_error_rate=$MAX_ERROR_RATE" >> $GITHUB_OUTPUT
+          echo "✅ Monitoring complete. Max error rate: ${MAX_ERROR_RATE}%"
+
+      - name: Auto-rollback on error threshold
+        if: steps.monitor.outputs.should_rollback == 'true'
+        run: |
+          echo "🔄 Initiating automatic rollback..."
+
+          # Get current desired count
+          DESIRED=$(aws ecs describe-services \
+            --cluster agenticpay-${{ github.event.inputs.environment }} \
+            --services agenticpay-api \
+            --query "services[0].desiredCount" \
+            --output text)
+
+          # Calculate canary count
+          CANARY_COUNT=$(( (DESIRED * ${{ github.event.inputs.canary_percentage }} + 99) / 100 ))
+          CANARY_COUNT=$(( CANARY_COUNT < 1 ? 1 : CANARY_COUNT ))
+
+          # Scale back to original
+          NEW_DESIRED=$(( DESIRED - CANARY_COUNT ))
+
+          aws ecs update-service \
+            --cluster agenticpay-${{ github.event.inputs.environment }} \
+            --service agenticpay-api \
+            --task-definition ${{ steps.current.outputs.current_task_def }} \
+            --desired-count $NEW_DESIRED \
+            --force-new-deployment
+
+          echo "✅ Rolled back to previous version"
+          exit 1
+
+      - name: Promote canary to full deployment
+        if: steps.monitor.outputs.should_rollback != 'true'
+        run: |
+          echo "✅ Canary passed metrics threshold. Promoting to full deployment..."
+
+          # Get original desired count
+          ORIGINAL_DESIRED=$(aws ecs describe-services \
+            --cluster agenticpay-${{ github.event.inputs.environment }} \
+            --services agenticpay-api \
+            --query "services[0].desiredCount" \
+            --output text | awk '{print int($1 / 1.05)}')
+
+          # Scale all replicas to new version
+          aws ecs update-service \
+            --cluster agenticpay-${{ github.event.inputs.environment }} \
+            --service agenticpay-api \
+            --task-definition ${{ steps.canary_task.outputs.task_def }} \
+            --desired-count $ORIGINAL_DESIRED \
+            --force-new-deployment
+
+          echo "🚀 Promotion initiated"
+
+      - name: Verify full deployment
+        run: |
+          echo "⏳ Waiting for full deployment to complete..."
+          timeout 600 bash -c '
+            while true; do
+              RUNNING=$(aws ecs describe-services \
+                --cluster agenticpay-${{ github.event.inputs.environment }} \
+                --services agenticpay-api \
+                --query "services[0].runningCount" \
+                --output text)
+              DESIRED=$(aws ecs describe-services \
+                --cluster agenticpay-${{ github.event.inputs.environment }} \
+                --services agenticpay-api \
+                --query "services[0].desiredCount" \
+                --output text)
+              echo "  Running: $RUNNING / $DESIRED"
+              if [ "$RUNNING" -eq "$DESIRED" ]; then
+                echo "✅ Full deployment complete"
+                break
+              fi
+              sleep 15
+            done
+          '
+
+      - name: Post deployment summary
+        if: always()
+        run: |
+          echo "📋 Canary Deployment Summary"
+          echo "================================"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Image: ${{ steps.image.outputs.image_tag }}"
+          echo "Status: $([ $? -eq 0 ] && echo '✅ Success' || echo '❌ Failed')"
+          echo "Duration: ${{ github.event.inputs.duration_minutes }}m"
+          echo "Max Error Rate: ${{ steps.monitor.outputs.max_error_rate }}%"
+          echo "Threshold: ${{ github.event.inputs.rollback_threshold }}%"
+          echo "Deployment ID: ${{ steps.deploy.outputs.deployment_id }}"
+
+      - name: Notify deployment
+        if: always()
+        run: |
+          # Send notification to Slack/Teams (implement per your preference)
+          echo "Would send deployment notification to #deployments"
