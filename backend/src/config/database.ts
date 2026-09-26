@@ -543,6 +543,30 @@ export const RECOMMENDED_INDEXES: CompositeIndex[] = [
       "SELECT * FROM invoices WHERE project_id = ? ORDER BY created_at DESC",
   },
   {
+    name: "idx_invoices_tenant_status_due",
+    table: "invoices",
+    columns: ["tenant_id", "status", "due_at"],
+    description: "Optimizes invoice dashboards filtered by tenant, status, and due date",
+    targetQuery:
+      "SELECT * FROM invoices WHERE tenant_id = ? AND status = ? ORDER BY due_at ASC",
+  },
+  {
+    name: "idx_milestones_project_status_order",
+    table: "milestones",
+    columns: ["project_id", "status", "order"],
+    description: "Optimizes project milestone lists and status progress checks",
+    targetQuery:
+      "SELECT * FROM milestones WHERE project_id = ? AND status = ? ORDER BY \"order\" ASC",
+  },
+  {
+    name: "idx_projects_tenant_status_created",
+    table: "projects",
+    columns: ["tenant_id", "status", "created_at"],
+    description: "Optimizes project dashboards filtered by tenant and status",
+    targetQuery:
+      "SELECT * FROM projects WHERE tenant_id = ? AND status = ? ORDER BY created_at DESC",
+  },
+  {
     name: "idx_verifications_status_type",
     table: "verifications",
     columns: ["status", "verification_type"],
@@ -560,11 +584,11 @@ export const RECOMMENDED_INDEXES: CompositeIndex[] = [
       "SELECT * FROM transactions WHERE account_id = ? ORDER BY ledger_seq DESC",
   },
   {
-    name: "idx_payments_recipient_status",
+    name: "idx_payments_tenant_status_created",
     table: "payments",
-    columns: ["recipient", "status"],
-    description: "Finds pending payments for a recipient",
-    targetQuery: "SELECT * FROM payments WHERE recipient = ? AND status = ?",
+    columns: ["tenant_id", "status", "created_at"],
+    description: "Finds payments by tenant and status ordered by creation time",
+    targetQuery: "SELECT * FROM payments WHERE tenant_id = ? AND status = ? ORDER BY created_at DESC",
   },
   {
     name: "idx_payments_created_status",
@@ -671,15 +695,16 @@ class IndexRecommendationEngine {
           i.relname AS "indexName",
           t.relname AS "table",
           pg_get_indexdef(i.oid) AS columns,
-          i.indisunique AS unique,
+          ix.indisunique AS unique,
           COALESCE(s.idx_scan, 0) AS "idxScan",
           COALESCE(s.idx_tup_read, 0) AS "idxTupRead",
           COALESCE(s.idx_tup_fetch, 0) AS "idxTupFetch",
           pg_relation_size(i.oid) AS "sizeBytes",
-          (SELECT MAX(statime) FROM pg_stat_all_indexes WHERE indexrelid = i.oid) AS "lastUsed"
-        FROM pg_index i
-        JOIN pg_class t ON i.indrelid = t.oid
-        LEFT JOIN pg_stat_user_indexes s ON i.indexrelid = s.indexrelid
+          NULL::text AS "lastUsed"
+        FROM pg_index ix
+        JOIN pg_class i ON ix.indexrelid = i.oid
+        JOIN pg_class t ON ix.indrelid = t.oid
+        LEFT JOIN pg_stat_user_indexes s ON i.oid = s.indexrelid
         WHERE t.relkind = 'r'
           AND t.relnamespace NOT IN ('pg_catalog'::regnamespace, 'information_schema'::regnamespace)
         ORDER BY s.idx_scan ASC NULLS FIRST
@@ -774,6 +799,10 @@ class IndexRecommendationEngine {
     const plans: Array<{ query: string; plan: unknown; durationMs: number }> = [];
 
     for (const q of slowQueries) {
+      if (!/^\s*(select|with)\b/i.test(q.query)) {
+        plans.push({ query: q.query, plan: { skipped: "Only SELECT/CTE queries are eligible for EXPLAIN ANALYZE" }, durationMs: q.durationMs });
+        continue;
+      }
       try {
         const { PrismaClient } = await import("@prisma/client");
         const prisma = new PrismaClient();

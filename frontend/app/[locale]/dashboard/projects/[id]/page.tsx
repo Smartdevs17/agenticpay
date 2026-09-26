@@ -121,10 +121,17 @@ export default function ProjectDetailPage() {
     const events = project.milestones
       .filter((m) => m.dueDate)
       .map((m) => ({
-        uid: `milestone-${m.id}@agenticpay`,
+        uid: `agenticpay-project-${project.id}-milestone-${m.id}@agenticpay`,
         summary: `${project.title} — ${m.title}`,
-        description: m.description ?? undefined,
+        description: [
+          m.description,
+          `Project: ${project.title}`,
+          `Amount: ${m.amount} ${project.currency}`,
+          `Status: ${m.status}`,
+          project.githubRepo ? `Repository: ${project.githubRepo}` : undefined,
+        ].filter(Boolean).join('\n'),
         start: new Date(m.dueDate!),
+        allDay: true,
       }));
 
     if (events.length === 0) {
@@ -132,7 +139,9 @@ export default function ProjectDetailPage() {
       return;
     }
 
-    downloadICS(`${project.title.replace(/\s+/g, '-')}.ics`, generateICS(events));
+    const filename = `${project.title.trim().replace(/\s+/g, '-') || `project-${project.id}`}-milestones.ics`;
+    downloadICS(filename, generateICS(events));
+    toast.success('Calendar file downloaded.');
   };
 
   return (

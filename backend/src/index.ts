@@ -97,6 +97,8 @@ import { cacheRouter } from './routes/cache.js';
 import { rateLimitQuotasRouter } from './routes/rate-limit-quotas.js';
 // Request/response compression — Issue #821
 import { compressionRouter } from './routes/compression.js';
+import { oauthRouter } from './routes/oauth.js';
+import { twoFactorAuthRouter } from './routes/2fa.js';
 
 dotenv.config();
 
@@ -379,6 +381,8 @@ apiV1Router.use('/fiat-payments', authMiddleware, fiatPaymentsRouter);
 apiV1Router.use('/rate-limit', rateLimitQuotasRouter);
 // Compression metrics and per-endpoint config — Issue #821
 apiV1Router.use('/compression', compressionRouter);
+apiV1Router.use('/auth/oauth', oauthRouter);
+apiV1Router.use('/auth/2fa', twoFactorAuthRouter);
 
 // Explicit URL-based mounting
 // Per-key usage metrics for the analytics dashboard — Issue #826.

@@ -175,6 +175,8 @@ model Payment {
   disputes  Dispute[]
 
   @@index([tenantId, createdAt])
+  @@index([tenantId, status, createdAt], map: "idx_payments_tenant_status_created")
+  @@index([projectId, status, createdAt], map: "idx_payments_project_status_created")
   @@index([status], map: "payments_active_status_idx")
   @@index([txHash])
   @@index([projectId])
@@ -273,6 +275,7 @@ model Project {
   payments   Payment[]
 
   @@index([tenantId, createdAt])
+  @@index([tenantId, status, createdAt], map: "idx_projects_tenant_status_created")
   @@index([status])
   @@index([deletedAt], map: "projects_deleted_at_idx")
   @@map("projects")
@@ -295,6 +298,7 @@ model Milestone {
   payments Payment[]
 
   @@index([projectId])
+  @@index([projectId, status, order], map: "idx_milestones_project_status_order")
   @@index([deletedAt], map: "milestones_deleted_at_idx")
   @@map("milestones")
 }
@@ -318,6 +322,8 @@ model Invoice {
   milestone Milestone? @relation(fields: [milestoneId], references: [id])
 
   @@index([tenantId, generatedAt])
+  @@index([projectId, createdAt], map: "idx_invoices_project_created")
+  @@index([tenantId, status, dueAt], map: "idx_invoices_tenant_status_due")
   @@index([projectId])
   @@index([status])
   @@index([deletedAt], map: "invoices_deleted_at_idx")
