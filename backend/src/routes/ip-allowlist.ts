@@ -5,6 +5,8 @@ import {
   initIpAllowlist,
   addBypassCode,
   removeBypassCode,
+  setAdminIpAllowlist,
+  clearAdminIpAllowlist,
   config as ipAllowlistConfig,
 } from '../middleware/ip-allowlist.js';
 
@@ -13,6 +15,10 @@ const router = express.Router();
 const UpdateConfigSchema = z.object({
   allowedIps: z.array(z.string()),
   enabled: z.boolean().optional(),
+});
+
+const AdminAllowlistSchema = z.object({
+  allowedIps: z.array(z.string()),
 });
 
 const BypassCodeSchema = z.object({
@@ -28,6 +34,7 @@ router.get(
     res.json({
       enabled: ipAllowlistConfig.enabled,
       allowedIps: ipAllowlistConfig.allowedIps,
+      adminAllowlistsCount: ipAllowlistConfig.adminAllowedIps.size,
       bypassCodesCount: ipAllowlistConfig.bypassCodes.size,
     });
   })
@@ -73,6 +80,32 @@ router.delete(
     res.json({
       message: 'Bypass code removed',
       code,
+    });
+  })
+);
+
+router.put(
+  '/admins/:adminId',
+  asyncHandler(async (req, res) => {
+    const body = AdminAllowlistSchema.parse(req.body);
+    setAdminIpAllowlist(req.params.adminId, body.allowedIps);
+
+    res.json({
+      message: 'Admin IP allowlist updated',
+      adminId: req.params.adminId,
+      allowedIps: body.allowedIps,
+    });
+  })
+);
+
+router.delete(
+  '/admins/:adminId',
+  asyncHandler(async (req, res) => {
+    clearAdminIpAllowlist(req.params.adminId);
+
+    res.json({
+      message: 'Admin IP allowlist cleared',
+      adminId: req.params.adminId,
     });
   })
 );

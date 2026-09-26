@@ -25,7 +25,7 @@ import { AppError } from './errorHandler.js';
 import { hmacAuthMiddleware, HEADER_SIGNATURE } from './hmac-auth.js';
 import { tokenAuthMiddleware } from './token-auth.js';
 import { getSession } from '../services/session.js';
-import { lookupApiKey } from '../services/api-key-registry.js';
+import { lookupApiKeyRecord } from '../services/api-key-registry.js';
 
 export type AuthMethod = 'session' | 'hmac' | 'token' | 'apiKey';
 
@@ -130,7 +130,7 @@ export const apiKeyStrategy: AuthStrategy = {
   applies: (req) => Boolean(getHeader(req, 'x-api-key')),
   async authenticate(req) {
     const key = getHeader(req, 'x-api-key')!;
-    const record = lookupApiKey(key);
+    const record = await lookupApiKeyRecord(key);
     if (!record) throw new AppError(401, 'Invalid API key', 'API_KEY_INVALID');
     return {
       id: record.key,

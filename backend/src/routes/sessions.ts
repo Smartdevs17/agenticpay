@@ -72,6 +72,15 @@ sessionsRouter.post('/unlock', asyncHandler(async (req, res) => {
   res.json({ success: true });
 }));
 
+// Terminate all other sessions
+sessionsRouter.delete('/others/:currentId', asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const currentId = req.params.currentId as string;
+
+  const count = terminateOtherSessions(userId, currentId);
+  res.json({ success: true, terminatedCount: count });
+}));
+
 // Terminate a specific session
 sessionsRouter.delete('/:id', asyncHandler(async (req, res) => {
   const id = req.params.id as string;
@@ -82,15 +91,6 @@ sessionsRouter.delete('/:id', asyncHandler(async (req, res) => {
   }
   
   res.json({ success: true });
-}));
-
-// Terminate all other sessions
-sessionsRouter.delete('/others/:currentId', asyncHandler(async (req, res) => {
-  const userId = getUserId(req);
-  const currentId = req.params.currentId as string;
-  
-  const count = terminateOtherSessions(userId, currentId);
-  res.json({ success: true, terminatedCount: count });
 }));
 
 // Trust a device

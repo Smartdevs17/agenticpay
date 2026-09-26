@@ -3,7 +3,7 @@ export { circuitBreaker, getCircuitState, getAllCircuits, resetCircuit } from '.
 export { deprecationMiddleware, type DeprecationOptions } from './deprecation.js';
 export { AppError, asyncHandler, notFoundHandler, errorHandler } from './errorHandler.js';
 export { idempotency, clearIdempotencyCache } from './idempotency.js';
-export { initIpAllowlist, addBypassCode, removeBypassCode, ipAllowlistMiddleware, adminIpAllowlistMiddleware, apiIpAllowlistMiddleware, config as ipAllowlistConfig } from './ip-allowlist.js';
+export { initIpAllowlist, addBypassCode, removeBypassCode, setAdminIpAllowlist, clearAdminIpAllowlist, ipAllowlistMiddleware, adminIpAllowlistMiddleware, apiIpAllowlistMiddleware, config as ipAllowlistConfig } from './ip-allowlist.js';
 export { logger, httpLogger } from './logger.js';
 export { type Role, type Action, type AbacContext, roleAtLeast, PermissionEngine, permissionEngine, requirePermission, attachAbacCtx } from './permissions.js';
 export { tokenBucketRateLimit, rateLimit, resolveUserTier, resolveClientKey, getAnalyticsSummary, setQuotaOverride, removeQuotaOverride, listQuotaOverrides, type UserTier, type TokenBucketConfig, type RateLimitOptions, type QuotaOverride, DEFAULT_TIER_CONFIGS, SANDBOX_TIER_CONFIGS, ENDPOINT_CONFIGS } from './rate-limit.js';
