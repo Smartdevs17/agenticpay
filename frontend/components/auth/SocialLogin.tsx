@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { web3auth } from '@/lib/web3auth';
 
 import { Button } from '@/components/ui/button';
-import { Mail, Chrome, Twitter } from 'lucide-react';
+import { Mail, Chrome, Github, Twitter } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
 import { toast } from 'sonner';
@@ -13,6 +13,12 @@ export function SocialLogin() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const setAuth = useAuthStore((state) => state.setAuth);
+
+  const handleOAuthLogin = (provider: 'google' | 'github') => {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+    const redirectTo = `${window.location.origin}/auth/oauth/callback`;
+    window.location.href = `${apiBase}/auth/oauth/${provider}?redirectTo=${encodeURIComponent(redirectTo)}`;
+  };
 
   const handleLogin = async (loginProvider: string) => {
     if (!web3auth) {
@@ -64,11 +70,20 @@ export function SocialLogin() {
       <Button
         variant="outline"
         className="w-full justify-start gap-3 h-12"
-        onClick={() => handleLogin('google')}
+        onClick={() => handleOAuthLogin('google')}
         disabled={loading}
       >
         <Chrome className="h-5 w-5" />
         Continue with Google
+      </Button>
+      <Button
+        variant="outline"
+        className="w-full justify-start gap-3 h-12"
+        onClick={() => handleOAuthLogin('github')}
+        disabled={loading}
+      >
+        <Github className="h-5 w-5" />
+        Continue with GitHub
       </Button>
       <Button
         variant="outline"
