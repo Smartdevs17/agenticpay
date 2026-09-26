@@ -201,6 +201,12 @@
     padding: 0 !important;
   }
 
+  /* Ensure report cards are clean when printed */
+  .invoice-print-card {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
   .invoice-print-card {
     border: none !important;
     box-shadow: none !important;
