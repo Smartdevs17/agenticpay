@@ -9,23 +9,53 @@ import type { PaymentCategoryType as PrismaCategoryType } from '@prisma/client';
 
 export type CategoryType = 'subscription' | 'invoice' | 'donation' | 'refund' | 'escrow' | 'milestone' | 'other';
 
-const AUTO_RULES: Array<{
-  match: (p: { type?: string; network?: string; metadata?: Record<string, unknown> }) => boolean;
+export interface CategoryScore {
   category: CategoryType;
+  confidence: number;
+}
+
+type PaymentSignal = { type?: string; network?: string; metadata?: Record<string, unknown> };
+
+// Issue #963: weighted signals replace the old first-match rule list, so a
+// payment can score against several categories at once and callers get a
+// confidence they can threshold on.
+// ponytail: heuristic weighted-rule scorer, not a trained model — upgrade to
+// a real classifier once labeled categorization corrections accumulate.
+const CATEGORY_SIGNALS: Array<{
+  match: (p: PaymentSignal) => boolean;
+  category: CategoryType;
+  weight: number;
 }> = [
-  { match: (p) => p.type === 'refund', category: 'refund' },
-  { match: (p) => p.type === 'milestone_payment', category: 'milestone' },
-  { match: (p) => p.type === 'full_payment' && p.network === 'stellar', category: 'escrow' },
-  { match: (p) => typeof (p.metadata as Record<string, unknown> | undefined)?.subscriptionId === 'string', category: 'subscription' },
-  { match: (p) => typeof (p.metadata as Record<string, unknown> | undefined)?.invoiceId === 'string', category: 'invoice' },
-  { match: (p) => (p.metadata as Record<string, unknown> | undefined)?.isDonation === true, category: 'donation' },
+  { match: (p) => p.type === 'refund', category: 'refund', weight: 0.95 },
+  { match: (p) => p.type === 'milestone_payment', category: 'milestone', weight: 0.95 },
+  { match: (p) => p.type === 'full_payment' && p.network === 'stellar', category: 'escrow', weight: 0.8 },
+  { match: (p) => p.type === 'full_payment', category: 'escrow', weight: 0.3 },
+  { match: (p) => typeof (p.metadata as Record<string, unknown> | undefined)?.subscriptionId === 'string', category: 'subscription', weight: 0.9 },
+  { match: (p) => typeof (p.metadata as Record<string, unknown> | undefined)?.invoiceId === 'string', category: 'invoice', weight: 0.9 },
+  { match: (p) => (p.metadata as Record<string, unknown> | undefined)?.isDonation === true, category: 'donation', weight: 0.95 },
 ];
 
-export function inferCategory(payment: { type?: string; network?: string; metadata?: Record<string, unknown> }): CategoryType {
-  for (const rule of AUTO_RULES) {
-    if (rule.match(payment)) return rule.category;
+/**
+ * Scores every category against the payment's signals and returns them
+ * ranked highest-confidence first. Multiple signals for the same category
+ * stack (capped at 1); no signals firing means 'other' at full confidence.
+ */
+export function scoreCategories(payment: PaymentSignal): CategoryScore[] {
+  const scores = new Map<CategoryType, number>();
+  for (const signal of CATEGORY_SIGNALS) {
+    if (!signal.match(payment)) continue;
+    scores.set(signal.category, Math.min(1, (scores.get(signal.category) ?? 0) + signal.weight));
   }
-  return 'other';
+
+  if (scores.size === 0) return [{ category: 'other', confidence: 1 }];
+
+  return [...scores.entries()]
+    .map(([category, confidence]) => ({ category, confidence }))
+    .sort((a, b) => b.confidence - a.confidence);
+}
+
+export function inferCategory(payment: PaymentSignal): CategoryType {
+  return scoreCategories(payment)[0].category;
 }
 
 export class CategoriesService {
@@ -65,6 +95,14 @@ export class CategoriesService {
 
   getPaymentCategories(paymentId: string) {
     return this.repo.findAssignmentsForPayment(paymentId);
+  }
+
+  /**
+   * Ranks candidate categories for a payment with confidence scores, without
+   * persisting anything. Lets callers preview/override before assigning.
+   */
+  suggestCategories(payment: PaymentSignal): CategoryScore[] {
+    return scoreCategories(payment);
   }
 
   /**
