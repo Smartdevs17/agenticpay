@@ -30,6 +30,15 @@ import { backupRouter } from './routes/backup.js';
 import { pushRouter } from './routes/push.js';
 import { ipAllowlistRouter } from './routes/ip-allowlist.js';
 import { stripeRouter } from './routes/stripe.js';
+// Stripe subscription billing (plans, enroll, usage, dunning) — Issue #808.
+// Implemented in routes/subscriptions.ts + services/stripe.ts but never mounted.
+import subscriptionsRouter from './routes/subscriptions.js';
+// Payment retry with exponential backoff — Issue #810.
+// Implemented in routes/retry.ts + services/retry/* but never mounted.
+import { retryRouter } from './routes/retry.js';
+// Multiple payment methods per account (incl. micro-deposit verify) — Issue #811.
+// Implemented in routes/payment-methods.ts but never mounted.
+import { paymentMethodsRouter } from './routes/payment-methods.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { SecurityMiddleware, SecurityMonitor, securityHeadersMiddleware } from './middleware/security.js';
 import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
@@ -321,6 +330,14 @@ apiV1Router.use('/cors', corsRouter);
 apiV1Router.use('/push', pushRouter);
 // Stripe card payments
 apiV1Router.use('/stripe', stripeRouter);
+// Stripe subscription billing — Issue #808
+apiV1Router.use('/subscriptions', subscriptionsRouter);
+// Invoice generation + PDF export is already mounted at /invoice (Issue #809:
+// GET /api/v1/invoice/:id/pdf via buildInvoicePdf in services/invoice.ts).
+// Payment retry engine (exponential backoff, circuit breaker, analytics) — Issue #810
+apiV1Router.use('/payment-retry', retryRouter);
+// Multiple payment methods per account — Issue #811
+apiV1Router.use('/payment-methods', paymentMethodsRouter);
 // Automated tax reporting, export, and calendar — Issues #690–#693
 apiV1Router.use('/tax-reporting', taxReportingRouter);
 // Cross-chain wallet abstraction & unified balance aggregation — Issue #711
