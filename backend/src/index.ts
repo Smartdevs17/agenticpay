@@ -108,6 +108,7 @@ import { subscriptionsRouter } from './routes/subscriptions.js';
 import { workspacesRouter } from './routes/workspaces.js';
 import { teamsRouter } from './routes/teams.js';
 import { merchantAuditRouter } from './routes/merchant-audit.js';
+import { installmentsRouter } from './routes/installments.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -265,6 +266,7 @@ apiV1Router.use('/subscriptions', subscriptionsRouter);
 apiV1Router.use('/workspaces', workspacesRouter);
 apiV1Router.use('/teams', teamsRouter);
 apiV1Router.use('/merchant-audit', merchantAuditRouter);
+apiV1Router.use('/installments', installmentsRouter);
 apiV1Router.get('/compression/metrics', (_req, res) => {
   res.json(getCompressionMetrics());
 });

@@ -583,3 +583,63 @@ model NotificationLog {
   @@map("notification_logs")
 }
 
+// ─── BNPL installment plans (Issue #919) ──────────────────────────────────────
+
+enum InstallmentPlanStatus {
+  active
+  completed
+  cancelled
+  defaulted
+}
+
+enum InstallmentStatus {
+  scheduled
+  due
+  paid
+  failed
+  cancelled
+}
+
+model InstallmentPlan {
+  id               String                @id @default(uuid())
+  tenantId         String                @map("tenant_id")
+  customerId       String?               @map("customer_id")
+  merchantId       String?               @map("merchant_id")
+  currency         String                @default("USD")
+  principal        Decimal               @db.Decimal(20, 8)
+  downPayment      Decimal               @default(0) @map("down_payment") @db.Decimal(20, 8)
+  financedAmount   Decimal               @map("financed_amount") @db.Decimal(20, 8)
+  installmentCount Int                   @map("installment_count")
+  frequency        String                @default("monthly")
+  status           InstallmentPlanStatus @default(active)
+  metadata         Json?
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+
+  installments Installment[]
+
+  @@index([tenantId, status])
+  @@index([customerId])
+  @@map("installment_plans")
+}
+
+model Installment {
+  id            String            @id @default(uuid())
+  planId        String            @map("plan_id")
+  tenantId      String            @map("tenant_id")
+  installmentNo Int               @map("installment_no")
+  amount        Decimal           @db.Decimal(20, 8)
+  dueAt         DateTime          @map("due_at")
+  status        InstallmentStatus @default(scheduled)
+  paidAt        DateTime?         @map("paid_at")
+  paymentId     String?           @map("payment_id")
+  failureReason String?           @map("failure_reason")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  plan InstallmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, installmentNo])
+  @@index([status, dueAt])
+  @@map("installments")
+}
