@@ -46,7 +46,7 @@ export function MarkdownContent({
               customStyle={{ margin: 0, borderRadius: '0.375rem', fontSize: '0.8125rem' }}
             >
               {code}
-            SyntaxHighlighter>
+            </SyntaxHighlighter>
           );
         }
         return (
