@@ -109,6 +109,9 @@ import { workspacesRouter } from './routes/workspaces.js';
 import { teamsRouter } from './routes/teams.js';
 import { merchantAuditRouter } from './routes/merchant-audit.js';
 import { installmentsRouter } from './routes/installments.js';
+import { jobQueueRouter } from './routes/job-queue.js';
+import { recurringBillingRouter } from './routes/recurring-billing.js';
+import { splitPaymentsRouter } from './routes/split-payments.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -267,6 +270,9 @@ apiV1Router.use('/workspaces', workspacesRouter);
 apiV1Router.use('/teams', teamsRouter);
 apiV1Router.use('/merchant-audit', merchantAuditRouter);
 apiV1Router.use('/installments', installmentsRouter);
+apiV1Router.use('/job-queue', jobQueueRouter);
+apiV1Router.use('/recurring-payments', recurringBillingRouter);
+apiV1Router.use('/split-payments', splitPaymentsRouter);
 apiV1Router.get('/compression/metrics', (_req, res) => {
   res.json(getCompressionMetrics());
 });

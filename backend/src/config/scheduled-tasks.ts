@@ -19,6 +19,7 @@ import { markOverdueRequests } from '../services/gdpr.js';
 import { sandboxCleanupJobs } from '../jobs/sandbox-cleanup.js';
 import { SubscriptionService } from '../services/subscription.service.js';
 import { SubscriptionProcessor } from '../jobs/subscription-processor.js';
+import { recurringBillingService } from '../services/recurring-billing/index.js';
 import { ethers } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +122,25 @@ const RAW_TASKS: Omit<ScheduledTaskMeta, 'schedule'> & { defaultSchedule: string
       const service = new SubscriptionService(contractAddress, abi, signer);
       const processor = new SubscriptionProcessor(service);
       await processor.processPendingRenewals();
+    },
+  },
+  {
+    id: 'recurring-payments-run-due',
+    name: 'Run due recurring payments',
+    description: 'Generates invoices for cron-based recurring payment schedules whose next run is due (Issue #918).',
+    defaultSchedule: '*/15 * * * *',
+    timeoutMs: 2 * 60 * 1000,
+    handler: async () => {
+      const result = await recurringBillingService.runDue();
+      if (!result.ok) {
+        console.error(`[jobs] recurring billing sweep failed: ${result.error.message}`);
+        return;
+      }
+      if (result.value.processed > 0) {
+        console.log(
+          `[jobs] recurring billing: processed ${result.value.processed} schedule(s), generated ${result.value.invoices.length} invoice(s)`,
+        );
+      }
     },
   },
   {
