@@ -11,6 +11,24 @@ const pricingTierSchema = z.object({
   unitPrice: z.number().nonnegative(),
 });
 
+const meterTierSchema = z.object({
+  upTo: z.number().positive().nullable(),
+  unitPrice: z.number().nonnegative(),
+  flatFee: z.number().nonnegative().optional(),
+});
+
+const meteredPriceSchema = z.object({
+  metric: z.string().min(1).max(80),
+  displayName: z.string().min(1).max(120).optional(),
+  aggregation: z.enum(['sum', 'max', 'last']).optional(),
+  model: z.enum(['per_unit', 'package', 'graduated', 'volume']),
+  includedUnits: z.number().nonnegative().optional(),
+  unitPrice: z.number().nonnegative().optional(),
+  packageSize: z.number().int().positive().optional(),
+  packagePrice: z.number().nonnegative().optional(),
+  tiers: z.array(meterTierSchema).min(1).optional(),
+});
+
 const createPlanSchema = z.object({
   id: z.string().min(1).optional(),
   name: z.string().min(1).max(120),
@@ -19,6 +37,7 @@ const createPlanSchema = z.object({
   includedUnits: z.number().nonnegative().optional(),
   overageUnitPrice: z.number().nonnegative().optional(),
   tiers: z.array(pricingTierSchema).min(1).optional(),
+  meters: z.array(meteredPriceSchema).min(1).optional(),
   billingInterval: z.enum(['monthly', 'annual']).optional(),
   features: z.array(z.string()).optional(),
 });
@@ -28,6 +47,7 @@ const createSubscriptionSchema = z.object({
   customerId: z.string().min(1),
   planId: z.string().min(1),
   trialDays: z.number().int().nonnegative().optional(),
+  promoCode: z.string().min(1).max(40).optional(),
 });
 
 const recordUsageSchema = z.object({
@@ -39,6 +59,50 @@ const recordUsageSchema = z.object({
 
 const cancelSubscriptionSchema = z.object({
   atPeriodEnd: z.boolean().optional(),
+});
+
+const changePlanSchema = z.object({
+  planId: z.string().min(1),
+  prorationBehavior: z.enum(['create_prorations', 'always_invoice', 'none']).optional(),
+});
+
+const createPromoCodeSchema = z.object({
+  code: z.string().min(3).max(40),
+  description: z.string().max(200).optional(),
+  merchantId: z.string().min(1).optional(),
+  discountType: z.enum(['percent', 'fixed']),
+  percentOff: z.number().positive().max(100).optional(),
+  amountOff: z.number().positive().optional(),
+  currency: z.string().length(3).optional(),
+  duration: z.enum(['once', 'repeating', 'forever']).optional(),
+  durationInPeriods: z.number().int().positive().optional(),
+  maxRedemptions: z.number().int().positive().optional(),
+  perCustomerLimit: z.number().int().positive().optional(),
+  appliesToPlanIds: z.array(z.string().min(1)).optional(),
+  minimumAmount: z.number().nonnegative().optional(),
+  startsAt: z.string().datetime().optional(),
+  expiresAt: z.string().datetime().optional(),
+});
+
+const validatePromoCodeSchema = z.object({
+  code: z.string().min(1).max(40),
+  merchantId: z.string().min(1),
+  customerId: z.string().min(1),
+  planId: z.string().min(1),
+});
+
+const applyPromoCodeSchema = z.object({
+  code: z.string().min(1).max(40),
+});
+
+const dunningConfigSchema = z.object({
+  retryScheduleDays: z.array(z.number().positive()).min(1).max(10).optional(),
+  finalAction: z.enum(['cancel_subscription', 'mark_uncollectible']).optional(),
+});
+
+const paymentAttemptSchema = z.object({
+  success: z.boolean(),
+  failureReason: z.string().max(200).optional(),
 });
 
 /**
@@ -133,6 +197,40 @@ subscriptionBillingRouter.post(
   }),
 );
 
+subscriptionBillingRouter.get(
+  '/subscriptions/:id/change-plan/preview',
+  serviceHandler((req: Request, res: Response) => {
+    const planId = req.query.planId;
+    if (typeof planId !== 'string' || !planId) {
+      throw new AppError(400, 'planId query parameter is required', 'VALIDATION_ERROR');
+    }
+    res.json({ data: subscriptionBillingService.previewPlanChange(String(req.params.id), planId) });
+  }),
+);
+
+subscriptionBillingRouter.post(
+  '/subscriptions/:id/change-plan',
+  validate(changePlanSchema),
+  serviceHandler((req: Request, res: Response) => {
+    res.json({ data: subscriptionBillingService.changePlan(String(req.params.id), req.body) });
+  }),
+);
+
+subscriptionBillingRouter.post(
+  '/subscriptions/:id/discount',
+  validate(applyPromoCodeSchema),
+  serviceHandler((req: Request, res: Response) => {
+    res.json({ data: subscriptionBillingService.applyPromoCode(String(req.params.id), req.body.code) });
+  }),
+);
+
+subscriptionBillingRouter.delete(
+  '/subscriptions/:id/discount',
+  serviceHandler((req: Request, res: Response) => {
+    res.json({ data: subscriptionBillingService.removeDiscount(String(req.params.id)) });
+  }),
+);
+
 // ---------------------------------------------------------------- metering
 
 subscriptionBillingRouter.post(
@@ -200,5 +298,97 @@ subscriptionBillingRouter.post(
   '/invoices/:id/void',
   serviceHandler((req: Request, res: Response) => {
     res.json({ data: subscriptionBillingService.voidInvoice(String(req.params.id)) });
+  }),
+);
+
+subscriptionBillingRouter.post(
+  '/invoices/:id/payment-attempts',
+  validate(paymentAttemptSchema),
+  serviceHandler((req: Request, res: Response) => {
+    res.json({ data: subscriptionBillingService.recordPaymentAttempt(String(req.params.id), req.body) });
+  }),
+);
+
+// ------------------------------------------------------------- promo codes
+
+subscriptionBillingRouter.post(
+  '/promo-codes',
+  validate(createPromoCodeSchema),
+  serviceHandler((req: Request, res: Response) => {
+    res.status(201).json({ data: subscriptionBillingService.createPromoCode(req.body) });
+  }),
+);
+
+subscriptionBillingRouter.get(
+  '/promo-codes',
+  serviceHandler((req: Request, res: Response) => {
+    const { merchantId, active } = req.query;
+    res.json({
+      data: subscriptionBillingService.listPromoCodes({
+        merchantId: merchantId as string | undefined,
+        active: active === undefined ? undefined : active === 'true',
+      }),
+    });
+  }),
+);
+
+subscriptionBillingRouter.post(
+  '/promo-codes/validate',
+  validate(validatePromoCodeSchema),
+  serviceHandler((req: Request, res: Response) => {
+    res.json({ data: subscriptionBillingService.validatePromoCode(req.body) });
+  }),
+);
+
+subscriptionBillingRouter.get(
+  '/promo-codes/:code',
+  serviceHandler((req: Request, res: Response) => {
+    const promo = subscriptionBillingService.getPromoCode(String(req.params.code));
+    if (!promo) throw new AppError(404, 'Promo code not found', 'NOT_FOUND');
+    res.json({ data: promo });
+  }),
+);
+
+subscriptionBillingRouter.post(
+  '/promo-codes/:code/deactivate',
+  serviceHandler((req: Request, res: Response) => {
+    res.json({ data: subscriptionBillingService.deactivatePromoCode(String(req.params.code)) });
+  }),
+);
+
+// ----------------------------------------------------------------- dunning
+
+subscriptionBillingRouter.get(
+  '/dunning/config/:merchantId',
+  serviceHandler((req: Request, res: Response) => {
+    res.json({ data: subscriptionBillingService.getDunningConfig(String(req.params.merchantId)) });
+  }),
+);
+
+subscriptionBillingRouter.put(
+  '/dunning/config/:merchantId',
+  validate(dunningConfigSchema),
+  serviceHandler((req: Request, res: Response) => {
+    res.json({ data: subscriptionBillingService.configureDunning(String(req.params.merchantId), req.body) });
+  }),
+);
+
+subscriptionBillingRouter.get(
+  '/dunning/invoices',
+  serviceHandler((req: Request, res: Response) => {
+    const { merchantId, status } = req.query;
+    res.json({
+      data: subscriptionBillingService.listDunningInvoices({
+        merchantId: merchantId as string | undefined,
+        status: status as never,
+      }),
+    });
+  }),
+);
+
+subscriptionBillingRouter.post(
+  '/dunning/process',
+  serviceHandler(async (_req: Request, res: Response) => {
+    res.json({ data: await subscriptionBillingService.processDunning() });
   }),
 );
