@@ -68,6 +68,8 @@ import { eventsRouter } from './routes/events.js';
 import { threatDetectionRouter } from './routes/threat-detection.js';
 import { serviceMeshRouter } from './routes/service-mesh.js';
 import { escrowRouter } from './routes/escrow.js';
+import { fxRouter } from './routes/fx.js';
+import { crossBorderRouter } from './routes/cross-border.js';
 import { multisigRouter } from './routes/multisig.js';
 import { fiatPaymentsRouter } from './routes/fiat-payments.js';
 import { paymentLinksRouter } from './routes/payment-links.js';
@@ -306,6 +308,10 @@ app.use('/api/v1/service-mesh', serviceMeshRouter);
 
 // Fiat ACH/Wire payment approval workflows
 app.use('/api/v1/fiat-payments', fiatPaymentsRouter);
+
+// Multi-currency FX rates/conversion (Issue #626) and cross-border payments (Issue #920)
+app.use('/api/v1/fx', fxRouter);
+app.use('/api/v1/cross-border', crossBorderRouter);
 
 // Merchant dynamic payment links
 app.use('/api/v1/payment-links', paymentLinksRouter);
