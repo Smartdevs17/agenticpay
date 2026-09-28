@@ -20,7 +20,15 @@ interface OAuthProviderConfig {
   scopes: string[];
 }
 
-const stateStore = new Map<string, { provider: OAuthProvider; expiresAt: number; redirectTo?: string }>();
+interface StateEntry {
+  provider: OAuthProvider;
+  expiresAt: number;
+  redirectTo?: string;
+  codeChallenge?: string;
+  codeChallengeMethod?: 'S256' | 'plain';
+}
+
+const stateStore = new Map<string, StateEntry>();
 const STATE_TTL_MS = 10 * 60 * 1000;
 
 function getProviderConfig(provider: OAuthProvider): OAuthProviderConfig {
@@ -54,10 +62,88 @@ function requireConfig(provider: OAuthProvider): OAuthProviderConfig {
   return config;
 }
 
-export function createOAuthAuthorizationUrl(provider: OAuthProvider, callbackUrl: string, redirectTo?: string): string {
+// ---------------------------------------------------------------------------
+// PKCE utilities (RFC 7636)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates a cryptographically secure code verifier (43-128 URL-safe chars).
+ */
+export function generateCodeVerifier(): string {
+  // 32 random bytes → 43-char base64url string (well within 43–128 range)
+  return randomBytes(32).toString('base64url');
+}
+
+/**
+ * Derives the code challenge from the verifier.
+ * - S256: BASE64URL(SHA256(ASCII(code_verifier)))
+ * - plain: code_verifier unchanged
+ */
+export function generateCodeChallenge(verifier: string, method: 'S256' | 'plain'): string {
+  if (method === 'plain') {
+    return verifier;
+  }
+  return createHash('sha256').update(verifier).digest('base64url');
+}
+
+/**
+ * Validates that the supplied verifier matches the stored challenge.
+ */
+export function validateCodeChallenge(
+  verifier: string,
+  challenge: string,
+  method: 'S256' | 'plain',
+): boolean {
+  const expected = generateCodeChallenge(verifier, method);
+  return expected === challenge;
+}
+
+// ---------------------------------------------------------------------------
+// Authorization URL creation
+// ---------------------------------------------------------------------------
+
+export interface PKCEOptions {
+  codeChallenge: string;
+  codeChallengeMethod: 'S256' | 'plain';
+  codeVerifier: string;
+}
+
+export interface CreateAuthUrlResult {
+  url: string;
+  codeVerifier?: string;
+}
+
+/**
+ * Creates an OAuth authorization URL.
+ * When `pkce` is supplied the PKCE parameters are embedded in the URL and the
+ * challenge is persisted in the state store so it can be validated during the
+ * token exchange.
+ *
+ * Returns the URL string for backwards-compatibility.  When PKCE is used the
+ * returned value is still a plain string – callers that need the codeVerifier
+ * should use `createPKCEAuthorizationUrl` instead.
+ */
+export function createOAuthAuthorizationUrl(
+  provider: OAuthProvider,
+  callbackUrl: string,
+  redirectTo?: string,
+  pkce?: PKCEOptions,
+): string {
   const config = requireConfig(provider);
   const state = randomBytes(24).toString('base64url');
-  stateStore.set(state, { provider, expiresAt: Date.now() + STATE_TTL_MS, redirectTo });
+
+  const entry: StateEntry = {
+    provider,
+    expiresAt: Date.now() + STATE_TTL_MS,
+    redirectTo,
+  };
+
+  if (pkce) {
+    entry.codeChallenge = pkce.codeChallenge;
+    entry.codeChallengeMethod = pkce.codeChallengeMethod;
+  }
+
+  stateStore.set(state, entry);
 
   const url = new URL(config.authorizationUrl);
   url.searchParams.set('client_id', config.clientId!);
@@ -65,14 +151,50 @@ export function createOAuthAuthorizationUrl(provider: OAuthProvider, callbackUrl
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', config.scopes.join(' '));
   url.searchParams.set('state', state);
+
   if (provider === 'google') {
     url.searchParams.set('access_type', 'offline');
     url.searchParams.set('prompt', 'select_account');
   }
+
+  if (pkce) {
+    url.searchParams.set('code_challenge', pkce.codeChallenge);
+    url.searchParams.set('code_challenge_method', pkce.codeChallengeMethod);
+  }
+
   return url.toString();
 }
 
-export function consumeOAuthState(provider: OAuthProvider, state: string): { redirectTo?: string } {
+/**
+ * Convenience function that generates a PKCE verifier + S256 challenge,
+ * builds the authorization URL, and returns both so the caller can pass the
+ * verifier to the token exchange step.
+ */
+export function createPKCEAuthorizationUrl(
+  provider: OAuthProvider,
+  callbackUrl: string,
+  redirectTo?: string,
+): { url: string; codeVerifier: string } {
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier, 'S256');
+
+  const url = createOAuthAuthorizationUrl(provider, callbackUrl, redirectTo, {
+    codeChallenge,
+    codeChallengeMethod: 'S256',
+    codeVerifier,
+  });
+
+  return { url, codeVerifier };
+}
+
+// ---------------------------------------------------------------------------
+// State consumption
+// ---------------------------------------------------------------------------
+
+export function consumeOAuthState(
+  provider: OAuthProvider,
+  state: string,
+): { redirectTo?: string; codeChallenge?: string; codeChallengeMethod?: 'S256' | 'plain' } {
   const stored = stateStore.get(state);
   stateStore.delete(state);
 
@@ -80,28 +202,62 @@ export function consumeOAuthState(provider: OAuthProvider, state: string): { red
     throw new Error('Invalid or expired OAuth state');
   }
 
-  return { redirectTo: stored.redirectTo };
+  return {
+    redirectTo: stored.redirectTo,
+    codeChallenge: stored.codeChallenge,
+    codeChallengeMethod: stored.codeChallengeMethod,
+  };
 }
+
+// ---------------------------------------------------------------------------
+// Token exchange
+// ---------------------------------------------------------------------------
 
 export async function exchangeOAuthCode(
   provider: OAuthProvider,
   code: string,
   callbackUrl: string,
+  options?: {
+    codeVerifier?: string;
+    codeChallenge?: string;
+    codeChallengeMethod?: 'S256' | 'plain';
+  },
 ): Promise<OAuthUserProfile> {
   const config = requireConfig(provider);
+
+  // PKCE validation: if a challenge was stored for this flow, the verifier
+  // must be supplied and must match.
+  if (options?.codeChallenge) {
+    if (!options.codeVerifier) {
+      throw new Error('PKCE code_verifier is required when a code_challenge was registered');
+    }
+    const method = options.codeChallengeMethod ?? 'S256';
+    const valid = validateCodeChallenge(options.codeVerifier, options.codeChallenge, method);
+    if (!valid) {
+      throw new Error('PKCE code_verifier does not match stored code_challenge');
+    }
+  }
+
+  const bodyParams: Record<string, string> = {
+    client_id: config.clientId!,
+    client_secret: config.clientSecret!,
+    code,
+    redirect_uri: callbackUrl,
+    grant_type: 'authorization_code',
+  };
+
+  // Pass code_verifier to the provider if this is a PKCE flow.
+  if (options?.codeVerifier) {
+    bodyParams.code_verifier = options.codeVerifier;
+  }
+
   const tokenResponse = await fetch(config.tokenUrl, {
     method: 'POST',
     headers: {
       accept: 'application/json',
       'content-type': 'application/x-www-form-urlencoded',
     },
-    body: new URLSearchParams({
-      client_id: config.clientId!,
-      client_secret: config.clientSecret!,
-      code,
-      redirect_uri: callbackUrl,
-      grant_type: 'authorization_code',
-    }),
+    body: new URLSearchParams(bodyParams),
   });
 
   if (!tokenResponse.ok) {
@@ -117,6 +273,10 @@ export async function exchangeOAuthCode(
     ? fetchGoogleProfile(config.profileUrl, tokenBody.access_token)
     : fetchGitHubProfile(config.profileUrl, config.emailUrl!, tokenBody.access_token);
 }
+
+// ---------------------------------------------------------------------------
+// Profile fetchers (internal)
+// ---------------------------------------------------------------------------
 
 async function fetchGoogleProfile(profileUrl: string, accessToken: string): Promise<OAuthUserProfile> {
   const response = await fetch(profileUrl, { headers: { authorization: `Bearer ${accessToken}` } });
@@ -159,6 +319,10 @@ async function fetchGitHubProfile(
     avatarUrl: profile.avatar_url ?? null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Session token
+// ---------------------------------------------------------------------------
 
 export function createOAuthSessionToken(profile: OAuthUserProfile): string {
   const payload = JSON.stringify({
