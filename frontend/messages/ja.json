@@ -89,6 +89,19 @@
     "coverage": "カバレッジ",
     "namespace": "名前空間"
   },
+  "upload": {
+    "dragDrop": "ここにファイルをドラッグ＆ドロップ",
+    "clickSelect": "またはクリックしてファイルを選択",
+    "fileTooLarge": "ファイルが大きすぎます",
+    "success": "ファイルのアップロードに成功しました",
+    "error": "ファイルのアップロードに失敗しました"
+  },
+  "notifications": {
+    "title": "通知",
+    "noNotifications": "通知はありません",
+    "markAsRead": "既読にする",
+    "clear": "すべてクリア"
+  },
   "metadata": {
     "title": "AgenticPay - 仕事の対価を即座に受け取る",
     "description": "ブロックチェーン技術による、安全で迅速かつ透明なフリーランサー向け決済。"

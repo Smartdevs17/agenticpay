@@ -15,7 +15,7 @@ export interface RequestSizeLimitOptions {
 export function requestSizeLimit(options: RequestSizeLimitOptions = {}) {
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const uploadMaxBytes = options.uploadMaxBytes ?? UPLOAD_MAX_BYTES;
-  const uploadPaths = options.uploadPaths ?? ['/api/v1/uploads', '/api/v1/forms'];
+  const uploadPaths = options.uploadPaths ?? ['/api/v1/uploads', '/api/v1/forms', '/api/v1/kyc'];
 
   return (req: Request, res: Response, next: NextFunction) => {
     const contentLength = Number(req.headers['content-length'] ?? 0);

@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response } from 'express';
 
-const { mockLoggerWarn } = vi.hoisted(() => ({
-  mockLoggerWarn: vi.fn(),
-}));
-
+const mockLoggerWarn = vi.fn();
 vi.mock('../logger.js', () => ({
   logger: { warn: mockLoggerWarn, info: vi.fn(), error: vi.fn() },
 }));

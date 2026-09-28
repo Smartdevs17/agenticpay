@@ -15,31 +15,7 @@ export { sessionMiddleware } from './session.js';
 export { slaTrackingMiddleware } from './slaTracking.js';
 export { traceMiddleware, TRACE_ID_HEADER } from './trace.js';
 export { cacheControlNoStore, CACHE_NOSTORE_HEADER, VARY_HEADER } from './cache-control.js';
-export { createCorsMiddleware, cors, type CorsMiddlewareOptions, DEFAULT_METHODS, DEFAULT_ALLOWED_HEADERS } from './cors.js';
 export { validate } from './validate.js';
-export {
-  validateAndSanitize,
-  validateRequest as validateRequestWithSanitization,
-  validateBody,
-  commonSchemas,
-  type ValidationOptions,
-  type ValidationSchemas,
-} from './validation.js';
 export { versionMiddleware } from './versioning.js';
-export { verifyWebhookProvider, verifyCustomProviderWebhookWithKeys, webhookVerifiers, captureRawBody, webhookJsonParser, configureWebhookVerification, resetWebhookVerificationConfig, type WebhookVerificationConfig } from './webhookVerification.js';
+export { verifyWebhook, webhookVerifiers, rawBodyCapture, type WebhookVerificationConfig } from './webhookVerification.js';
 export { composeMiddleware, type MiddlewareFunction, type MiddlewareChain } from './compose.js';
-export { tokenAuthMiddleware } from './token-auth.js';
-export { hmacAuthMiddleware, invalidateKeyCache, HEADER_SIGNATURE, HEADER_TIMESTAMP, HEADER_NONCE } from './hmac-auth.js';
-export {
-  authMiddleware,
-  createAuthMiddleware,
-  DEFAULT_AUTH_STRATEGIES,
-  sessionStrategy,
-  hmacStrategy,
-  tokenStrategy,
-  apiKeyStrategy,
-  type AuthStrategy,
-  type AuthPrincipal,
-  type AuthMethod,
-} from './auth.js';
-export { requestCoalescer, getCoalesceMetrics, setCoalesceConfig, resetCoalesceStore } from './request-coalescer.js';

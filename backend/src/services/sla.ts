@@ -81,7 +81,7 @@ class SLATracker {
 
     // Update counters
     metrics.totalRequests += 1;
-    if (statusCode >= 200 && statusCode < 400) {
+    if (statusCode >= 200 && statusCode < 300) {
       metrics.successfulRequests += 1;
     } else {
       metrics.failedRequests += 1;

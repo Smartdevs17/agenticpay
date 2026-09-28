@@ -71,6 +71,7 @@ export async function rotateApiKeyWithGracePeriod(opts: {
         keyId: newKeyId,
         description: existing.description ? `${existing.description} (rotated)` : 'Rotated key',
         expiresAt: existing.expiresAt,
+        scopes: existing.scopes,
         predecessorKeyId: existing.keyId,
       },
     });

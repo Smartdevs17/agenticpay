@@ -13,6 +13,7 @@
  */
 
 import React, { useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   useOnboardingStore,
@@ -72,6 +73,15 @@ function StepContent({ stepId, variant }: { stepId: string; variant: 'A' | 'B' }
               : '🚀 You\'re 3 steps away from your first payment.'}
           </p>
         </div>
+      )}
+
+      {stepId === 'kyc_verification' && (
+        <Link
+          href="/dashboard/kyc"
+          className="inline-block mb-4 px-4 py-2 text-sm font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          Start identity verification →
+        </Link>
       )}
 
       {/* Completion screen */}

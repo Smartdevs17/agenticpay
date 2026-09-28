@@ -1,6 +1,14 @@
-# Devcontainer services: dev environment + Postgres + Redis
+# Devcontainer services: dev environment + Postgres + Redis.
 # Used by VS Code / Cursor "Reopen in Container". Root docker-compose.yml
 # provides the same Postgres/Redis stack for local (non-container) development.
+#
+# The `backend`, `frontend`, and `deps` services live behind the `app` profile
+# so they are NOT started when the devcontainer opens (you run the dev servers
+# yourself inside the container). Start the whole stack — Postgres, Redis, a
+# one-time dependency install, backend, and frontend — with:
+#
+#   scripts/devcontainer.sh up
+#   # or: docker compose -f .devcontainer/docker-compose.yml --profile app up
 
 services:
   devcontainer:
@@ -46,6 +54,72 @@ services:
       timeout: 3s
       retries: 10
 
+  # One-time dependency install shared by the backend/frontend services.
+  deps:
+    profiles: ['app']
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    working_dir: /workspaces/agenticpay
+    command: sh -c "npm install --no-audit --no-fund"
+    volumes:
+      - ..:/workspaces/agenticpay:cached
+      - node-modules:/workspaces/agenticpay/node_modules
+
+  backend:
+    profiles: ['app']
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    working_dir: /workspaces/agenticpay
+    command: npm run dev --workspace=backend
+    volumes:
+      - ..:/workspaces/agenticpay:cached
+      - node-modules:/workspaces/agenticpay/node_modules
+    environment:
+      NODE_ENV: development
+      PORT: '3001'
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agenticpay
+      REDIS_URL: redis://redis:6379
+      REDIS_ENABLED: 'true'
+      JOBS_ENABLED: 'false'
+      QUEUE_ENABLED: 'false'
+      OPENAI_API_KEY: sk-dev-placeholder-replace-me
+      CORS_ALLOWED_ORIGINS: 'http://localhost:3000,http://localhost:3001'
+    ports:
+      - '3001:3001'
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    profiles: ['app']
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    working_dir: /workspaces/agenticpay
+    command: npm run dev --workspace=frontend
+    volumes:
+      - ..:/workspaces/agenticpay:cached
+      - node-modules:/workspaces/agenticpay/node_modules
+    environment:
+      NODE_ENV: development
+      PORT: '3000'
+      NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:3001
+    ports:
+      - '3000:3000'
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+
 volumes:
   postgres-data:
   redis-data:
+  node-modules:

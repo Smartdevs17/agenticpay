@@ -89,6 +89,19 @@
     "coverage": "Cobertura",
     "namespace": "Espacio de nombres"
   },
+  "upload": {
+    "dragDrop": "Arrastra y suelta tu archivo aquí",
+    "clickSelect": "o haz clic para seleccionar un archivo",
+    "fileTooLarge": "El archivo es demasiado grande",
+    "success": "Archivo cargado exitosamente",
+    "error": "Error al cargar el archivo"
+  },
+  "notifications": {
+    "title": "Notificaciones",
+    "noNotifications": "Sin notificaciones",
+    "markAsRead": "Marcar como leído",
+    "clear": "Limpiar todo"
+  },
   "metadata": {
     "title": "AgenticPay - Cobrá al instante por tu trabajo",
     "description": "Pagos seguros, rápidos y transparentes para freelancers con tecnología blockchain."

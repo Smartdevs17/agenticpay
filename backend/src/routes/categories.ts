@@ -24,6 +24,7 @@ categoriesRouter.delete('/:id', asyncHandler(categoriesController.deleteCategory
 
 categoriesRouter.post('/payments/:paymentId/assign', asyncHandler(categoriesController.assignCategory));
 categoriesRouter.post('/payments/:paymentId/auto-assign', asyncHandler(categoriesController.autoAssignCategory));
+categoriesRouter.post('/payments/:paymentId/suggest', asyncHandler(categoriesController.suggestCategories));
 categoriesRouter.delete('/payments/:paymentId/assign/:categoryId', asyncHandler(categoriesController.removeAssignment));
 categoriesRouter.get('/payments/:paymentId/categories', asyncHandler(categoriesController.getPaymentCategories));
 

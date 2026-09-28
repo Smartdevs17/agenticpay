@@ -3,7 +3,7 @@
  * Tests for TOTP generation, verification, and management
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   generateTOTPSecret,
   verifyTOTPToken,
@@ -30,10 +30,8 @@ const TEST_USER_ID = '550e8400-e29b-41d4-a716-446655440000';
 
 describe('2FA Service', () => {
   beforeEach(() => {
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
+    // Clean up state before each test
+    jest.clearAllMocks();
   });
 
   describe('generateTOTPSecret', () => {

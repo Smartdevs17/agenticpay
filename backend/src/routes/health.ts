@@ -1,8 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { server as stellarServer } from '../services/stellar.js';
 import { getJobScheduler } from '../jobs/index.js';
-import { prisma } from '../lib/prisma.js';
-import { DatabasePoolManager } from '../db/pool.js';
 
 export const healthRouter = Router();
 
@@ -82,55 +80,6 @@ healthRouter.get('/health', async (_req: Request, res: Response) => {
     uptime: process.uptime(),
     dependencies,
     latency_ms: Date.now() - start
-  });
-});
-
-/**
- * @openapi
- * /health/db:
- *   get:
- *     summary: Database connectivity and pool health check
- *     responses:
- *       200:
- *         description: Database is reachable
- *       503:
- *         description: Database is unreachable
- *
- * Issue #886: Build database health check endpoint.
- * Runs a real `SELECT 1` against Postgres (not just "is the client
- * configured") and reports latency alongside connection pool stats so
- * this can be wired into readiness probes and dashboards.
- */
-healthRouter.get('/health/db', async (_req: Request, res: Response) => {
-  const start = Date.now();
-  let connected = false;
-  let error: string | undefined;
-
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    connected = true;
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
-    console.error('Database health check failed:', error);
-  }
-
-  const latencyMs = Date.now() - start;
-  const pool = DatabasePoolManager.getInstance();
-  const poolStats = pool.getStats();
-
-  const status: 'healthy' | 'degraded' | 'unhealthy' = !connected
-    ? 'unhealthy'
-    : latencyMs > 500
-      ? 'degraded'
-      : 'healthy';
-
-  res.status(connected ? 200 : 503).json({
-    status,
-    connected,
-    latency_ms: latencyMs,
-    pool: poolStats,
-    ...(error ? { error } : {}),
-    timestamp: new Date().toISOString(),
   });
 });
 

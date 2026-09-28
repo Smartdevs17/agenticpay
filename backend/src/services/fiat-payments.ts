@@ -438,7 +438,7 @@ class FiatPaymentsService {
         },
       },
       byStatus,
-      discrepancies,
+      discreancies,
     };
   }
 

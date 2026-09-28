@@ -33,28 +33,9 @@
     "lighthouse:ci": "lhci autorun --config=./lighthouse/lighthouse.config.json",
     "log-viewer": "node packages/log-viewer/dist/cli.js",
     "release": "semantic-release"
+    "dev": "turbo run dev"
   },
   "devDependencies": {
-    "turbo": "^1.10.16",
-    "@commitlint/cli": "^18.4.3",
-    "@commitlint/config-conventional": "^18.4.3",
-    "husky": "^8.0.3",
-    "lint-staged": "^15.2.0"
-  },
-  "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.62.2",
-    "lightningcss-linux-x64-gnu": "^1.32.0"
-  },
-  "dependencies": {
-    "lightningcss": "^1.32.0"
-  },
-  "lint-staged": {
-    "*.{js,jsx,ts,tsx}": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "*.{json,md,yml,yaml}": [
-      "prettier --write"
-    ]
+    "turbo": "^1.10.16"
   }
 }

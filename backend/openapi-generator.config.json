@@ -1,9 +1,9 @@
 {
   "openapiGenerator": {
     "version": "7.0.1",
-    "inputSpec": "docs/api/openapi/swagger.json",
+    "inputSpec": "docs/api/openapi/openapi.json",
     "generatorName": "typescript-axios",
-    "outputDir": "../packages/sdk/typescript",
+    "outputDir": "../packages/sdk/generated/typescript",
     "additionalProperties": {
       "modelPackage": "models",
       "apiPackage": "api",
@@ -31,7 +31,7 @@
   "generators": {
     "typescript": {
       "generatorName": "typescript-axios",
-      "outputDir": "../packages/sdk/typescript",
+      "outputDir": "../packages/sdk/generated/typescript",
       "additionalProperties": {
         "modelPackage": "models",
         "apiPackage": "api",
@@ -41,7 +41,7 @@
     },
     "python": {
       "generatorName": "python",
-      "outputDir": "../packages/sdk/python",
+      "outputDir": "../packages/sdk/generated/python",
       "additionalProperties": {
         "packageName": "agenticpay_sdk",
         "packageVersion": "1.0.0"
@@ -49,7 +49,7 @@
     },
     "go": {
       "generatorName": "go",
-      "outputDir": "../packages/sdk/go",
+      "outputDir": "../packages/sdk/generated/go",
       "additionalProperties": {
         "packageName": "agenticpay",
         "packageVersion": "1.0.0"
