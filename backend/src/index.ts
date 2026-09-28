@@ -107,6 +107,7 @@ import { startScheduledRotation, stopScheduledRotation } from './config/credenti
 import { subscriptionsRouter } from './routes/subscriptions.js';
 import { workspacesRouter } from './routes/workspaces.js';
 import { teamsRouter } from './routes/teams.js';
+import { walletPaymentsRouter } from './routes/wallet-payments.js';
 import { merchantAuditRouter } from './routes/merchant-audit.js';
 import { installmentsRouter } from './routes/installments.js';
 
@@ -265,6 +266,7 @@ apiV1Router.use('/disputes', disputesRouter);
 apiV1Router.use('/subscriptions', subscriptionsRouter);
 apiV1Router.use('/workspaces', workspacesRouter);
 apiV1Router.use('/teams', teamsRouter);
+apiV1Router.use('/wallet-payments', walletPaymentsRouter);
 apiV1Router.use('/merchant-audit', merchantAuditRouter);
 apiV1Router.use('/installments', installmentsRouter);
 apiV1Router.get('/compression/metrics', (_req, res) => {
