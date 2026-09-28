@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { buildReportPayload, validateReportConfig } from '../lib/reports/report-config';
 
 export type ChartType = 'line' | 'bar' | 'pie' | 'table' | 'heatmap' | 'area';
 
@@ -112,8 +113,9 @@ export const useReportBuilderStore = create<ReportBuilderState>()(
 
       saveReport: async (tenantId) => {
         const { config } = get();
-        if (!config.name) {
-          set({ error: 'Report name is required' });
+        const validationError = validateReportConfig(config);
+        if (validationError) {
+          set({ error: validationError });
           return;
         }
         set({ isSaving: true, error: null });
@@ -121,8 +123,9 @@ export const useReportBuilderStore = create<ReportBuilderState>()(
           const res = await fetch('/api/v1/reports', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId },
-            body: JSON.stringify(config),
+            body: JSON.stringify(buildReportPayload(config)),
           });
+          if (!res.ok) throw new Error((await res.json()).error ?? 'Unable to save report');
           const report = await res.json();
           set((s) => ({
             savedReports: [report, ...s.savedReports],

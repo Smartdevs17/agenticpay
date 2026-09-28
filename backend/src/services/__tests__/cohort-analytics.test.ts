@@ -148,6 +148,16 @@ describe('CohortAnalyticsService', () => {
       expect(comparison.summary.averageRetentionPctByCohort['2025-01']).toBe(100);
       expect(comparison.summary.averageRetentionPctByCohort['2025-02']).toBe(75);
     });
+
+    it('builds an aligned retention matrix without treating unavailable months as churn', () => {
+      const matrix = service.getRetentionMatrix();
+
+      expect(matrix.maxMonthOffset).toBe(1);
+      expect(matrix.cohorts).toEqual([
+        { cohortMonth: '2025-01', cohortSize: 1, retentionByMonth: [100, 100] },
+        { cohortMonth: '2025-02', cohortSize: 2, retentionByMonth: [100, 50] },
+      ]);
+    });
   });
 
   describe('exportToCsv', () => {

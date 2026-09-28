@@ -79,7 +79,7 @@ the HTML report.
 ## Test data & cleanup
 
 Fixtures in `helpers/test-data.ts` and API mocks in `helpers/api-mocks.ts` provide
-stable onboarding, disputes (`mockDisputesApi`), and payment payloads. The `authenticatedPage` fixture clears
+stable onboarding and payment payloads. The `authenticatedPage` fixture clears
 `localStorage` after each test.
 
 ## CI

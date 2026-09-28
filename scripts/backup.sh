@@ -82,10 +82,12 @@ do_full_backup() {
         local size=$(du -h "$filepath" | cut -f1)
         log "Full backup completed: $filepath ($size)"
 
+        # Persist the checksum before verification; verification intentionally
+        # treats a missing checksum as an invalid backup.
+        sha256sum "$filepath" > "${filepath}.sha256"
+        log "Checksum created: ${filepath}.sha256"
+
         if verify_backup_integrity "$filepath"; then
-            # Create checksum
-            sha256sum "$filepath" > "${filepath}.sha256"
-            log "Checksum created: ${filepath}.sha256"
 
             # Upload to S3
             if command -v aws &>/dev/null; then
@@ -129,8 +131,8 @@ do_incremental_backup() {
         local size=$(du -h "$filepath" | cut -f1)
         log "Incremental backup completed: $filepath ($size)"
 
+        sha256sum "$filepath" > "${filepath}.sha256"
         if verify_backup_integrity "$filepath"; then
-            sha256sum "$filepath" > "${filepath}.sha256"
 
             if command -v aws &>/dev/null; then
                 aws s3 cp "$filepath" "s3://$S3_BUCKET/incremental/$filename" --region "$S3_REGION"
@@ -162,6 +164,11 @@ do_restore() {
         return 1
     fi
 
+    if ! verify_backup_integrity "$restore_file"; then
+        log "ERROR: Refusing to restore an unverified backup: $restore_file"
+        return 1
+    fi
+
     log "Starting restore from: $restore_file"
     notify_slack "🔄 Starting database restore from: $(basename $restore_file)" "warning"
 
@@ -169,9 +176,16 @@ do_restore() {
         log "Restore completed successfully from: $restore_file"
 
         # Apply incremental backups if available
-        for incr in $(ls -t "$BACKUP_DIR/incremental/"*.sql.gz 2>/dev/null); do
+        for incr in $(ls -tr "$BACKUP_DIR/incremental/"*.sql.gz 2>/dev/null); do
             log "Applying incremental backup: $incr"
-            gunzip -c "$incr" | psql "$DB_URL" || true
+            if ! verify_backup_integrity "$incr"; then
+                log "ERROR: Refusing to apply an unverified incremental backup: $incr"
+                return 1
+            fi
+            if ! gunzip -c "$incr" | psql "$DB_URL"; then
+                log "ERROR: Failed to apply incremental backup: $incr"
+                return 1
+            fi
         done
 
         notify_slack "✅ Database restore completed successfully" "good"
@@ -304,6 +318,10 @@ do_pitr() {
     notify_slack "🔄 Starting PITR: base full backup $(basename "$best_full")" "warning"
 
     # Restore base full backup
+    if ! verify_backup_integrity "$best_full"; then
+        log "ERROR: Refusing PITR from an unverified base backup: $best_full"
+        return 1
+    fi
     if gunzip -c "$best_full" | psql "$DB_URL"; then
         log "Base full backup restored successfully."
     else
@@ -338,6 +356,10 @@ do_pitr() {
         for item in "${sorted_incr[@]}"; do
             local file="${item#*|}"
             log "Applying incremental backup: $(basename "$file")"
+            if ! verify_backup_integrity "$file"; then
+                log "ERROR: Refusing to apply an unverified incremental backup: $file"
+                return 1
+            fi
             if gunzip -c "$file" | psql "$DB_URL"; then
                 log "Applied: $(basename "$file")"
             else

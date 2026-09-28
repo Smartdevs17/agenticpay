@@ -98,7 +98,7 @@ jobs:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
       - name: Upload Semgrep SARIF
-        if: always()
+        if: ${{ always() && hashFiles('security-reports/semgrep.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: ${{ env.SECURITY_REPORT_DIR }}/semgrep.sarif
@@ -172,7 +172,7 @@ jobs:
             --sarif-file-output=${{ env.SECURITY_REPORT_DIR }}/snyk.sarif
 
       - name: Upload Snyk SARIF
-        if: always()
+        if: ${{ always() && hashFiles('security-reports/snyk.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: ${{ env.SECURITY_REPORT_DIR }}/snyk.sarif
@@ -189,6 +189,11 @@ jobs:
           else
             echo "cargo not available — skipping"
           fi
+
+      - name: Enforce dependency security policy
+        env:
+          SECURITY_REPORT_DIR: ${{ env.SECURITY_REPORT_DIR }}
+        run: node scripts/security/aggregate-vulnerability-reports.mjs
 
       - name: Summarise dependency audit
         if: always()

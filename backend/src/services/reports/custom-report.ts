@@ -1,5 +1,6 @@
-import { prisma } from '../lib/prisma.js';
-import { AppError } from '../middleware/errorHandler.js';
+import { prisma } from '../../lib/prisma.js';
+import { AppError } from '../../middleware/errorHandler.js';
+import { buildReportRows, type ReportPayment } from './report-aggregation.js';
 
 export interface CreateReportInput {
   tenantId: string;
@@ -169,27 +170,24 @@ export class CustomReportService {
     const dimensions = report.dimensions;
     const dateRange = (report.dateRange as any) ?? {};
 
+    const presetDays = dateRange.preset === 'last7d' ? 7 : dateRange.preset === 'thisMonth' ? new Date().getDate() : 30;
     const dateFilter = dateRange.start && dateRange.end
-      ? { gte: new Date(dateRange.start), lte: new Date(dateRange.end) }
-      : { gte: new Date(Date.now() - 30 * 86400_000) };
-
-    const groupBy: any[] = [];
-    const select: any = {};
-
-    for (const dimension of dimensions) {
-      groupBy.push(dimension);
-      select[dimension] = true;
-    }
-
-    for (const metric of metrics) {
-      if (metric === 'request_count') {
-        select._count = { id: true };
-      } else if (metric === 'total_amount') {
-        select._sum = { amount: true };
-      } else if (metric === 'avg_latency') {
-        select._avg = { latencyMs: true };
-      }
-    }
+      ? { gte: new Date(dateRange.start), lte: new Date(`${dateRange.end}T23:59:59.999Z`) }
+      : { gte: new Date(Date.now() - presetDays * 86400_000) };
+    const filters = (report.filters as Record<string, string> | null) ?? {};
+    const payments = await prisma.payment.findMany({
+      where: {
+        tenantId: report.tenantId,
+        deletedAt: null,
+        createdAt: dateFilter,
+        ...(filters.status ? { status: filters.status as any } : {}),
+        ...(filters.network ? { network: filters.network } : {}),
+        ...(filters.currency ? { currency: filters.currency } : {}),
+        ...(filters.merchant ? { OR: [{ projectId: filters.merchant }, { toAddress: filters.merchant }] } : {}),
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 10_000,
+    });
 
     return {
       report: {
@@ -199,7 +197,7 @@ export class CustomReportService {
         metrics: report.metrics,
         dimensions: report.dimensions,
       },
-      data: [],
+      data: buildReportRows(payments as unknown as ReportPayment[], metrics, dimensions),
       generatedAt: new Date().toISOString(),
     };
   }

@@ -25,6 +25,7 @@ import {
   onSlowQuery,
   withQueryTimer,
 } from '../config/database.js';
+import metrics from '../observability/datadog.js';
 
 // ── Configuration ───────────────────────────────────────────────────────────-
 
@@ -179,8 +180,13 @@ export function createPrismaQueryListener() {
     metrics.totalQueries++;
     metrics.totalDurationMs += event.duration;
 
+    const tags = { target: event.target };
+    metrics.distribution('db.query.duration', event.duration, tags);
+    metrics.increment('db.queries', 1, tags);
+
     if (event.duration >= config.criticalThresholdMs) {
       metrics.criticalQueries++;
+      metrics.increment('db.queries.critical', 1, tags);
       const sig = querySignature(event.query);
 
       if (shouldAlert(sig)) {
@@ -201,6 +207,7 @@ export function createPrismaQueryListener() {
       }
     } else if (event.duration >= config.slowThresholdMs) {
       metrics.slowQueries++;
+      metrics.increment('db.queries.slow', 1, tags);
       if (metrics.slowQueries % 10 === 0) {
         console.warn(
           `[QueryLogger] SLOW (${event.duration.toFixed(0)}ms): ${event.query.slice(0, 150)}`,

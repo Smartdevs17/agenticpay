@@ -1,6 +1,7 @@
 import type http from 'node:http';
 import { WebSocketServer } from 'ws';
 import type WebSocket from 'ws';
+import { ManagedConnection } from './managedConnection.js';
 import type {
   WebSocketChannel,
   WebSocketClientMessage,
@@ -9,7 +10,6 @@ import type {
   WebSocketServerOptions,
 } from './types.js';
 import type { WebSocketScalingAdapter } from './scaling.js';
-import { WebSocketConnectionPool } from './pool.js';
 
 export type AgenticPayWebSocketServer = {
   wss: WebSocketServer;
@@ -72,7 +72,7 @@ export function attachWebSocketServer(params: {
 
   const metrics = createMetrics();
   const wss = new WebSocketServer({ noServer: true });
-  const pool = new WebSocketConnectionPool(metrics, options);
+  const connections = new Map<WebSocket, ManagedConnection>();
   const lastPongAt = new Map<WebSocket, number>();
   let unsubscribeScaling: (() => void) | undefined;
 
@@ -81,7 +81,7 @@ export function attachWebSocketServer(params: {
       const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
       if (url.pathname !== options.path) return;
 
-      if (!pool.canAccept()) {
+      if (metrics.activeConnections >= options.maxConnections) {
         metrics.rejectedConnections += 1;
         metrics.lastOverloadAtMs = Date.now();
         socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
@@ -98,14 +98,22 @@ export function attachWebSocketServer(params: {
   });
 
   wss.on('connection', (ws: WebSocket, req) => {
+    metrics.activeConnections += 1;
+    metrics.acceptedConnections += 1;
     const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
 
-    const managed = pool.addConnection({
+    const managed = new ManagedConnection({
       ws,
+      metrics,
+      maxQueueSize: options.maxQueueSizePerConnection,
+      maxBufferedAmountBytes: options.maxBufferedAmountBytes,
+      maxBatchSize: options.maxBatchSize,
+      defaultChannels: options.defaultChannels,
       authExpiresAtMs: parseAuthExpiry(url.searchParams.get('expiresAt'), options.maxAuthAgeMs),
       useBinary: options.enableBinaryProtocol && url.searchParams.get('proto') === '1',
     });
 
+    connections.set(ws, managed);
     lastPongAt.set(ws, Date.now());
 
     ws.on('pong', () => lastPongAt.set(ws, Date.now()));
@@ -129,25 +137,30 @@ export function attachWebSocketServer(params: {
     });
 
     ws.on('close', () => {
-      pool.removeConnection(ws);
+      managed.close();
+      connections.delete(ws);
       lastPongAt.delete(ws);
+      metrics.activeConnections = Math.max(0, metrics.activeConnections - 1);
+      metrics.closedConnections += 1;
     });
   });
 
   const flushTimer = setInterval(() => {
-    pool.flushAll();
+    for (const managed of connections.values()) {
+      managed.flush();
+    }
   }, options.flushIntervalMs);
 
   const pingTimer = setInterval(() => {
     const now = Date.now();
-    for (const ws of pool.sockets()) {
+    for (const ws of connections.keys()) {
       if (ws.readyState !== ws.OPEN) continue;
       const lastPong = lastPongAt.get(ws) ?? 0;
       if (now - lastPong > options.pingIntervalMs + options.pongTimeoutMs) {
         ws.terminate();
         continue;
       }
-      const managed = pool.getConnection(ws);
+      const managed = connections.get(ws);
       if (managed?.isAuthExpired(now)) {
         managed.enqueue({ type: 'auth.expired', priority: 'high' });
         ws.close(4001, 'Auth token expired');
@@ -158,7 +171,9 @@ export function attachWebSocketServer(params: {
   }, options.pingIntervalMs);
 
   const broadcastLocal = (message: WebSocketOutboundMessage) => {
-    pool.broadcast(message);
+    for (const managed of connections.values()) {
+      managed.enqueue(message);
+    }
   };
 
   const broadcast = (message: WebSocketOutboundMessage) => {
@@ -185,43 +200,8 @@ export function attachWebSocketServer(params: {
     clearInterval(flushTimer);
     clearInterval(pingTimer);
     unsubscribeScaling?.();
-    pool.closeAll();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
   };
 
   return { wss, metrics, broadcast, broadcastToChannel, close };
-}
-
-
-/**
- * #722: Event-Driven WebSocket Architecture Enhancement
- * Adds event emitter patterns for decoupled message handling
- */
-import { EventEmitter } from 'events';
-
-export class WebSocketEventBus extends EventEmitter {
-  private static instance: WebSocketEventBus;
-
-  static getInstance(): WebSocketEventBus {
-    if (!this.instance) {
-      this.instance = new WebSocketEventBus();
-    }
-    return this.instance;
-  }
-
-  emitConnection(connectionId: string, metadata: any): void {
-    this.emit('connection:opened', { connectionId, metadata, timestamp: Date.now() });
-  }
-
-  emitDisconnection(connectionId: string): void {
-    this.emit('connection:closed', { connectionId, timestamp: Date.now() });
-  }
-
-  emitMessage(connectionId: string, message: any): void {
-    this.emit('message:received', { connectionId, message, timestamp: Date.now() });
-  }
-
-  emitBroadcast(message: WebSocketOutboundMessage): void {
-    this.emit('broadcast', { message, timestamp: Date.now() });
-  }
 }

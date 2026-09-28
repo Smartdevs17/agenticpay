@@ -27,6 +27,10 @@ export interface CohortSummary {
   cohortSize: number;
 }
 
+export interface RetentionMatrixRow extends CohortSummary {
+  retentionByMonth: Array<number | null>;
+}
+
 export interface RetentionPoint {
   monthOffset: number;
   activeCustomers: number;
@@ -125,6 +129,37 @@ export class CohortAnalyticsService {
     return Array.from(sizes.entries())
       .map(([cohortMonth, cohortSize]) => ({ cohortMonth, cohortSize }))
       .sort((a, b) => a.cohortMonth.localeCompare(b.cohortMonth));
+  }
+
+  /**
+   * Returns an aligned retention matrix for dashboard heatmaps. Missing future
+   * offsets are represented by null rather than zero so they are not mistaken
+   * for churn.
+   */
+  getRetentionMatrix(): { maxMonthOffset: number; cohorts: RetentionMatrixRow[] } {
+    const summaries = this.getCohorts();
+    const curves = summaries.map((summary) => ({
+      summary,
+      curve: this.getRetentionCurve(summary.cohortMonth),
+    }));
+    const maxMonthOffset = curves.reduce(
+      (max, { curve }) => Math.max(max, curve.at(-1)?.monthOffset ?? 0),
+      0,
+    );
+
+    return {
+      maxMonthOffset,
+      cohorts: curves.map(({ summary, curve }) => {
+        const byOffset = new Map(curve.map((point) => [point.monthOffset, point.retentionPct]));
+        return {
+          ...summary,
+          retentionByMonth: Array.from(
+            { length: maxMonthOffset + 1 },
+            (_, offset) => byOffset.get(offset) ?? null,
+          ),
+        };
+      }),
+    };
   }
 
   /**

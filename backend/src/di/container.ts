@@ -1,26 +1,21 @@
 /**
- * DI Container — Issue #485
+ * container.ts — Issue #366
  *
- * Lightweight dependency injection container with:
- * - Lifecycle management: singleton, transient, scoped
- * - Per-domain module registration
- * - Startup validation (detects missing registrations)
- * - Mock injection for tests
- * - <1ms resolution overhead
+ * Dependency injection container for managing service instances
+ * Prevents circular dependencies and enables testability
  */
 
 import { ProjectRepository } from "../repositories/ProjectRepository.js";
 import { ProjectService } from "../services/ProjectService.js";
 import { ProjectController } from "../controllers/ProjectController.js";
-import { providerRegistry } from "../services/payments/provider-registry.js";
-import { registerDefaultPaymentProviders } from "../services/payments/bootstrap.js";
 
 export class DIContainer {
   private static instance: DIContainer;
-  private registry = new Map<string, Registration>();
+  private services: Map<string, unknown> = new Map();
 
-  // Private in production; exposed via createFresh() for test isolation
-  constructor() {}
+  private constructor() {
+    this.registerServices();
+  }
 
   static getInstance(): DIContainer {
     if (!DIContainer.instance) {
@@ -29,106 +24,47 @@ export class DIContainer {
     return DIContainer.instance;
   }
 
-  /** Create an isolated container for testing — does NOT share singleton state. */
-  static createFresh(): DIContainer {
-    return new DIContainer();
-  }
+  private registerServices(): void {
+    // Repositories
+    const projectRepository = new ProjectRepository();
+    this.services.set("ProjectRepository", projectRepository);
 
-  /** Register a factory with a lifecycle. */
-  register<T>(
-    token: string,
-    factory: (c: DIContainer, scope?: Map<string, unknown>) => T,
-    lifecycle: Lifecycle = 'singleton'
-  ): this {
-    this.registry.set(token, { factory, lifecycle });
-    return this;
-  }
+    // Services
+    const projectService = new ProjectService(projectRepository);
+    this.services.set("ProjectService", projectService);
 
-  /** Register a pre-built instance as a singleton. */
-  set(token: string, instance: unknown): this {
-    this.registry.set(token, {
-      factory: () => instance,
-      lifecycle: 'singleton',
-      singleton: instance,
-    });
-    return this;
-  }
-
-  /** Resolve a token. Optionally pass a scope Map for scoped lifecycles. */
-  get<T>(token: string, scope?: Map<string, unknown>): T {
-    const reg = this.registry.get(token);
-    if (!reg) throw new Error(`[DI] Token not registered: "${token}"`);
-
-    if (reg.lifecycle === 'singleton') {
-      if (reg.singleton === undefined) reg.singleton = reg.factory(this, scope);
-      return reg.singleton as T;
-    }
-
-    if (reg.lifecycle === 'scoped') {
-      const s = scope ?? new Map<string, unknown>();
-      if (!s.has(token)) s.set(token, reg.factory(this, s));
-      return s.get(token) as T;
-    }
-
-    // transient — new instance every time
-    return reg.factory(this, scope) as T;
-  }
-
-  initialize(): void {
-    const projectService = this.get<ProjectService>('ProjectService');
+    // Controllers
     const projectController = new ProjectController(projectService);
-    this.set("ProjectController", projectController);
-
-    registerDefaultPaymentProviders(providerRegistry);
-    this.set("PaymentProviderRegistry", providerRegistry);
+    this.services.set("ProjectController", projectController);
   }
 
-  /**
-   * Validate all registrations at startup.
-   * Throws if any token's factory throws on a dry-run resolve.
-   * Returns list of registered tokens.
-   */
-  validate(): string[] {
-    const tokens = Array.from(this.registry.keys());
-    for (const token of tokens) {
-      try {
-        this.get(token);
-      } catch (err) {
-        throw new Error(`[DI] Validation failed for token "${token}": ${(err as Error).message}`);
-      }
+  get<T>(serviceName: string): T {
+    const service = this.services.get(serviceName);
+    if (!service) {
+      throw new Error(`Service not found: ${serviceName}`);
     }
-    return tokens;
+    return service as T;
   }
 
-  /** Create a child container that inherits registrations but has its own scope. */
-  createScope(): Map<string, unknown> {
-    return new Map();
+  set(serviceName: string, service: unknown): void {
+    this.services.set(serviceName, service);
   }
 
-  /** Reset singleton cache (useful in tests). */
-  reset(): void {
-    for (const reg of this.registry.values()) {
-      delete reg.singleton;
-    }
+  has(serviceName: string): boolean {
+    return this.services.has(serviceName);
   }
 
-  /** Clear all registrations (useful in tests). */
-  clear(): void {
-    this.registry.clear();
+  // Convenience getters
+  getProjectController(): ProjectController {
+    return this.get<ProjectController>("ProjectController");
   }
 
-  // ── Convenience typed getters (backwards-compatible) ──────────────────────
-
-  getProjectController() {
-    return this.get<import('../controllers/ProjectController.js').ProjectController>('ProjectController');
+  getProjectService(): ProjectService {
+    return this.get<ProjectService>("ProjectService");
   }
 
-  getProjectService() {
-    return this.get<import('../services/ProjectService.js').ProjectService>('ProjectService');
-  }
-
-  getProjectRepository() {
-    return this.get<import('../repositories/ProjectRepository.js').ProjectRepository>('ProjectRepository');
+  getProjectRepository(): ProjectRepository {
+    return this.get<ProjectRepository>("ProjectRepository");
   }
 }
 

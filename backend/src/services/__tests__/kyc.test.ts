@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { KycService } from '../kyc.js';
 
 describe('KycService', () => {
@@ -6,6 +6,10 @@ describe('KycService', () => {
 
   beforeEach(() => {
     kycService = new KycService();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('submitDocument', () => {
@@ -76,16 +80,31 @@ describe('KycService', () => {
       expect(result!.verifiedAt).toBeDefined();
     });
 
+    it('records document status and rejection reasons', () => {
+      const doc = kycService.submitDocument('user-1', 'passport', 'https://example.com/passport.pdf');
+      expect(doc.status).toBe('pending');
+
+      const rejected = kycService.verifyDocument(doc.id, false, ['Document is illegible']);
+      expect(rejected!.status).toBe('rejected');
+      expect(rejected!.rejectionReasons).toEqual(['Document is illegible']);
+
+      const approved = kycService.verifyDocument(doc.id, true);
+      expect(approved!.status).toBe('approved');
+      expect(approved!.rejectionReasons).toBeUndefined();
+    });
+
     it('returns undefined for unknown documentId', () => {
       const result = kycService.verifyDocument('nonexistent-doc-id', true);
       expect(result).toBeUndefined();
     });
 
     it('updates profile updatedAt when verifying', () => {
+      vi.useFakeTimers();
       const doc = kycService.submitDocument('user-1', 'passport', 'https://example.com/passport.pdf');
       const profileBefore = kycService.getProfile('user-1');
       const updatedAtBefore = profileBefore!.updatedAt;
 
+      vi.advanceTimersByTime(1000);
       kycService.verifyDocument(doc.id, true);
 
       const profileAfter = kycService.getProfile('user-1');
@@ -246,10 +265,24 @@ describe('KycService', () => {
       expect(kycService.getProfile('user-1')!.expiresAt).toBeUndefined();
     });
 
+    it('records each change in the status history', () => {
+      kycService.submitDocument('user-1', 'passport', 'https://example.com/passport.pdf');
+      kycService.updateStatus('user-1', 'rejected', 'Document is illegible');
+
+      const history = kycService.getProfile('user-1')!.statusHistory;
+      expect(history.map(h => [h.from, h.to])).toEqual([
+        [null, 'under_review'],
+        ['under_review', 'rejected'],
+      ]);
+      expect(history[1].reason).toBe('Document is illegible');
+    });
+
     it('updates the updatedAt timestamp', () => {
+      vi.useFakeTimers();
       kycService.submitDocument('user-1', 'passport', 'https://example.com/passport.pdf');
       const before = kycService.getProfile('user-1')!.updatedAt;
 
+      vi.advanceTimersByTime(1000);
       kycService.updateStatus('user-1', 'approved');
       const after = kycService.getProfile('user-1')!.updatedAt;
 

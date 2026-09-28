@@ -124,8 +124,3 @@ export function getEventStats() {
     typeCounts,
   };
 }
-
-export function clearEventStore(): void {
-  streams.clear();
-  globalSequence.length = 0;
-}
