@@ -49,6 +49,7 @@ import { nfcRouter } from './routes/nfc.js';
 import { cacheRouter } from './routes/cache.js';
 import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlist.js';
 import { sessionMiddleware } from './middleware/session.js';
+import { auditSensitiveOperations } from './middleware/sensitiveAudit.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { auditRouter } from './routes/audit.js';
 import { hedgingRouter } from './routes/hedging.js';
@@ -219,6 +220,9 @@ const sandboxRateLimiter = tokenBucketRateLimit({
   keyPrefix: 'rl:sandbox',
   sandboxMode: env.NODE_ENV === 'sandbox' || env.NODE_ENV === 'development'
 });
+
+// Audit logging for sensitive operations — auth, payments, admin, identity (#793)
+app.use(auditSensitiveOperations());
 
 app.use('/api/', versionMiddleware);
 

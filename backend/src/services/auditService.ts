@@ -1,5 +1,8 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { randomUUID as uuidv4 } from 'node:crypto';
+
+/** Whether a sensitive operation succeeded or failed. */
+export type AuditOutcome = 'success' | 'failure';
 
 export interface AuditEntry {
   id: string;
@@ -8,6 +11,8 @@ export interface AuditEntry {
   action: string;
   resource: string;
   resourceId?: string;
+  /** Result of the operation — issue #793 requires an explicit outcome. */
+  outcome?: AuditOutcome;
   details?: Record<string, unknown>;
   beforeState?: Record<string, unknown>;
   afterState?: Record<string, unknown>;
@@ -67,6 +72,7 @@ export class AuditService {
       entry.action,
       entry.resource,
       entry.resourceId || '',
+      entry.outcome || '',
       JSON.stringify(entry.details || {}),
       JSON.stringify(entry.beforeState || {}),
       JSON.stringify(entry.afterState || {}),
@@ -83,6 +89,8 @@ export class AuditService {
     action: string;
     resource: string;
     resourceId?: string;
+    /** Explicit outcome; derived from `response.status` when omitted. */
+    outcome?: AuditOutcome;
     details?: Record<string, unknown>;
     beforeState?: Record<string, unknown>;
     afterState?: Record<string, unknown>;
@@ -99,7 +107,11 @@ export class AuditService {
   }): Promise<AuditEntry> {
     const id = uuidv4();
     const timestamp = Date.now();
-    
+
+    const status = params.response?.status;
+    const outcome: AuditOutcome | undefined =
+      params.outcome ?? (typeof status === 'number' ? (status >= 400 ? 'failure' : 'success') : undefined);
+
     const entry: Omit<AuditEntry, 'hash'> = {
       id,
       timestamp,
@@ -107,6 +119,7 @@ export class AuditService {
       action: params.action,
       resource: params.resource,
       resourceId: params.resourceId,
+      outcome,
       details: params.details,
       beforeState: params.beforeState,
       afterState: params.afterState,
@@ -204,7 +217,7 @@ export class AuditService {
   async exportToCSV(): Promise<string> {
     const headers = [
       'ID', 'Timestamp', 'User ID', 'Action', 'Resource', 'Resource ID',
-      'IP Address', 'Request Method', 'Request Path', 'Response Status',
+      'Outcome', 'IP Address', 'Request Method', 'Request Path', 'Response Status',
       'Previous Hash', 'Hash', 'Suspicious', 'Flags'
     ].join(',');
     
@@ -215,6 +228,7 @@ export class AuditService {
       entry.action,
       entry.resource,
       entry.resourceId || '',
+      entry.outcome || '',
       entry.ipAddress || '',
       entry.requestMethod || '',
       entry.requestPath || '',

@@ -1,14 +1,19 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { AuditService, auditService } from '../services/auditService.js';
+import { auditService } from '../services/auditService.js';
 
 export const auditRouter = Router();
 
 auditRouter.post('/log', asyncHandler(async (req: Request, res: Response) => {
-  const { userId, action, resource, resourceId, details, beforeState, afterState, ipAddress, userAgent, request, response } = req.body;
+  const { userId, action, resource, resourceId, outcome, details, beforeState, afterState, ipAddress, userAgent, request, response } = req.body;
 
   if (!action || !resource) {
     res.status(400).json({ error: 'Action and resource are required' });
+    return;
+  }
+
+  if (outcome !== undefined && outcome !== 'success' && outcome !== 'failure') {
+    res.status(400).json({ error: "Outcome must be 'success' or 'failure'" });
     return;
   }
 
@@ -17,6 +22,7 @@ auditRouter.post('/log', asyncHandler(async (req: Request, res: Response) => {
     action,
     resource,
     resourceId,
+    outcome,
     details,
     beforeState,
     afterState,
@@ -47,7 +53,7 @@ auditRouter.get('/entries', asyncHandler(async (req: Request, res: Response) => 
 }));
 
 auditRouter.get('/entries/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = String(req.params.id);
   const entry = await auditService.getEntry(id);
 
   if (!entry) {
@@ -64,7 +70,7 @@ auditRouter.get('/verify', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 auditRouter.post('/flag/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = String(req.params.id);
   const { reasons } = req.body;
 
   if (!reasons || !Array.isArray(reasons)) {
