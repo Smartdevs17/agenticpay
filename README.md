@@ -75,7 +75,10 @@ Express.js API server providing:
 For one-click setup with Node.js, Rust, Soroban CLI, Postgres, and Redis, see [docs/DEVCONTAINER.md](docs/DEVCONTAINER.md).
 
 ```bash
-# Or start only backend services on the host:
+# One-command stack: Postgres, Redis, backend, and frontend
+scripts/devcontainer.sh up
+
+# Or start only the infra (Postgres + Redis) on the host:
 docker compose up -d
 ```
 

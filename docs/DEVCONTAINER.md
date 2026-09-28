@@ -34,6 +34,34 @@ On the host machine (without devcontainer), start the same stack:
 docker compose up -d
 ```
 
+## One-command stack (no IDE required)
+
+To run Postgres, Redis, the backend, and the frontend together without opening
+VS Code:
+
+```bash
+scripts/devcontainer.sh up
+```
+
+Under the hood this starts the `backend`, `frontend`, and one-time `deps` install
+services behind the `app` Compose profile, so they are **not** started when the
+devcontainer opens (you run the dev servers yourself in that flow) — only when
+you ask for them:
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml --profile app up -d --build
+```
+
+| Service | URL / address |
+|---------|---------------|
+| Frontend | http://localhost:3000 |
+| Backend API | http://localhost:3001/api/v1 |
+| Postgres | `localhost:5432` (postgres/postgres) |
+| Redis | `localhost:6379` |
+
+`scripts/devcontainer.sh` also supports `down`, `logs [service]`, `ps`,
+`restart [service]`, `shell`, and `config` (validate the Compose file).
+
 ## Environment Variables
 
 The devcontainer sets safe defaults in `devcontainer.json`. Copy and customize for secrets:
