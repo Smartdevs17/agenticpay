@@ -13,6 +13,7 @@
 
 import {
   useCallback,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -40,6 +41,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownContent } from '@/components/markdown/MarkdownContent';
+import { markdownToHtml } from '@/lib/markdown/to-html';
 import { cn } from '@/lib/utils';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -86,6 +88,8 @@ export interface RichTextEditorProps {
   maxLength?: number;
   /** Allow inserting images (URL or drag/drop). Defaults to true. */
   allowImages?: boolean;
+  /** Also surface the description as HTML (see the HTML view toggle, issue #90). */
+  showHtmlToggle?: boolean;
   onBlur?: () => void;
   'aria-invalid'?: boolean;
   'aria-describedby'?: string;
@@ -146,12 +150,15 @@ export function RichTextEditor({
   className,
   maxLength,
   allowImages = true,
+  showHtmlToggle = true,
   onBlur,
   'aria-invalid': ariaInvalid,
   'aria-describedby': ariaDescribedBy,
 }: RichTextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [showHtml, setShowHtml] = useState(false);
+  const [copiedHtml, setCopiedHtml] = useState(false);
   const [showImageForm, setShowImageForm] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
   const [imageAlt, setImageAlt] = useState('');
@@ -305,6 +312,18 @@ export function RichTextEditor({
     }
   };
 
+  // The HTML rendition of the description, i.e. what "save as HTML" persists.
+  const html = useMemo(() => markdownToHtml(value, { allowImages }), [value, allowImages]);
+
+  const handleCopyHtml = () => {
+    const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+    if (!clipboard) return;
+    void clipboard.writeText(html).then(
+      () => setCopiedHtml(true),
+      () => setCopiedHtml(false),
+    );
+  };
+
   const sourceLength = value.length;
 
   return (
@@ -354,6 +373,27 @@ export function RichTextEditor({
             {showPreview ? <Pencil className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             {showPreview ? 'Edit' : 'Preview'}
           </Button>
+
+          {showHtmlToggle && (
+            <Button
+              type="button"
+              size="sm"
+              variant={showHtml ? 'default' : 'ghost'}
+              className="h-8 gap-1 px-2 text-xs"
+              aria-pressed={showHtml}
+              aria-label="View HTML"
+              title="View the generated HTML"
+              disabled={disabled}
+              onClick={() => {
+                setShowHtml((open) => !open);
+                setShowPreview(false);
+                setCopiedHtml(false);
+              }}
+            >
+              <Code className="h-3.5 w-3.5" />
+              HTML
+            </Button>
+          )}
         </div>
       </div>
 
@@ -405,7 +445,29 @@ export function RichTextEditor({
         </div>
       )}
 
-      {showPreview ? (
+      {showHtml ? (
+        <div className="space-y-2 p-3" data-testid="rich-text-html">
+          {value.trim() ? (
+            <>
+              <textarea
+                readOnly
+                rows={8}
+                aria-label="HTML output"
+                className="w-full resize-y rounded-md border bg-muted/40 p-2 font-mono text-xs"
+                value={html}
+              />
+              <div className="flex items-center gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={handleCopyHtml}>
+                  Copy HTML
+                </Button>
+                {copiedHtml && <span className="text-xs text-muted-foreground">Copied</span>}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nothing to convert yet.</p>
+          )}
+        </div>
+      ) : showPreview ? (
         <div className="min-h-[120px] p-3" data-testid="rich-text-preview">
           {value.trim() ? (
             <MarkdownContent content={value} previewMode={false} />

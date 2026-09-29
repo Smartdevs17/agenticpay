@@ -23,6 +23,7 @@ import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
 import { ConfirmModal } from '@/components/transaction/ConfirmModal';
 import { RichTextEditor } from '@/components/markdown/RichTextEditor';
+import { serializeWorkDescription } from '@/lib/projects/work-description';
 import { parseEther } from 'viem';
 
 type PendingTransaction = {
@@ -197,10 +198,13 @@ export default function CreateProjectPage() {
       // or just use description. The contract takes `_workDescription`.
       // Let's use JSON format for better structure if we want to include milestones later, 
       // but for now just a string.
-      const workDesc = JSON.stringify({
+      // Descriptions are authored as markdown (issue #795) and persisted as
+      // both markdown and HTML (issue #90) so consumers that cannot render
+      // markdown can display the description directly.
+      const workDesc = serializeWorkDescription({
         title: data.title,
         description: data.description,
-        repo: data.githubRepo
+        repo: data.githubRepo,
       });
 
       const prepared = await prepareTransaction('createProject', [
