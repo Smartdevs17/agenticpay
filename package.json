@@ -33,7 +33,6 @@
     "lighthouse:ci": "lhci autorun --config=./lighthouse/lighthouse.config.json",
     "log-viewer": "node packages/log-viewer/dist/cli.js",
     "release": "semantic-release"
-    "dev": "turbo run dev"
   },
   "devDependencies": {
     "turbo": "^1.10.16"
