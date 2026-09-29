@@ -1,4 +1,4 @@
-# Devcontainer services: dev environment + Postgres + Redis.
+# Devcontainer services: dev environment + Postgres + Redis + local chains.
 # Used by VS Code / Cursor "Reopen in Container". Root docker-compose.yml
 # provides the same Postgres/Redis stack for local (non-container) development.
 #
@@ -9,6 +9,14 @@
 #
 #   scripts/devcontainer.sh up
 #   # or: docker compose -f .devcontainer/docker-compose.yml --profile app up
+#
+# Resource allocation controls (issue #238) are env-driven so a machine under
+# load can be dialled down without editing this file:
+#
+#   DEV_POSTGRES_MEMORY=1G DEV_STELLAR_CPUS=2 docker compose ... up -d
+#
+# Apple Silicon: every image below publishes arm64 except the EVM node, which
+# runs via Rosetta/QEMU emulation. Set DEV_EVM_PLATFORM=linux/arm64 to skip it.
 
 services:
   devcontainer:
@@ -23,9 +31,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      stellar:
+        condition: service_started
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agenticpay
       REDIS_URL: redis://redis:6379
+      STELLAR_RPC_URL: http://stellar:8000/soroban/rpc
+      SOROBAN_RPC_URL: http://stellar:8000/soroban/rpc
+    deploy:
+      resources:
+        limits:
+          cpus: '${DEV_DEVCONTAINER_CPUS:-4.0}'
+          memory: ${DEV_DEVCONTAINER_MEMORY:-6G}
 
   postgres:
     image: postgres:16-alpine
@@ -41,6 +58,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '${DEV_POSTGRES_CPUS:-1.0}'
+          memory: ${DEV_POSTGRES_MEMORY:-512M}
+        reservations:
+          cpus: '${DEV_POSTGRES_CPUS_RESERVED:-0.25}'
+          memory: ${DEV_POSTGRES_MEMORY_RESERVED:-128M}
 
   redis:
     image: redis:7-alpine
@@ -53,6 +78,76 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '${DEV_REDIS_CPUS:-0.5}'
+          memory: ${DEV_REDIS_MEMORY:-256M}
+        reservations:
+          cpus: '${DEV_REDIS_CPUS_RESERVED:-0.1}'
+          memory: ${DEV_REDIS_MEMORY_RESERVED:-64M}
+
+  # Local Stellar/Soroban chain (issue #238 — "Local blockchain node").
+  # Mirrors the sandbox stack in docker-compose.sandbox.yml so contract
+  # behaviour is identical between sandbox and devcontainer workflows.
+  stellar:
+    image: stellar/stellar-quickstart:latest
+    restart: unless-stopped
+    ports:
+      - '${DEV_STELLAR_RPC_PORT:-8000}:8000'
+      - '${DEV_STELLAR_CORE_PORT:-7001}:7001'
+    environment:
+      SOROBAN_RPC_HOST: 0.0.0.0
+      SOROBAN_RPC_PORT: 8000
+      PUBNET: 'false'
+      TESTNET: 'false'
+    volumes:
+      # Ledger state survives `down`/`up` so deployed contracts are not lost.
+      - stellar-data:/opt/stellar
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', 'http://localhost:8000/health']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '${DEV_STELLAR_CPUS:-2.0}'
+          memory: ${DEV_STELLAR_MEMORY:-2G}
+        reservations:
+          cpus: '${DEV_STELLAR_CPUS_RESERVED:-0.5}'
+          memory: ${DEV_STELLAR_MEMORY_RESERVED:-512M}
+
+  # Local EVM chain for the Solidity contracts. Opt-in because the image is
+  # large and most work only needs Postgres/Redis/Soroban:
+  #   scripts/devcontainer.sh evm
+  evm:
+    profiles: ['evm', 'app']
+    image: node:22-bookworm-slim
+    working_dir: /workspaces/agenticpay/contracts
+    platform: ${DEV_EVM_PLATFORM:-linux/amd64}
+    command: sh -c "npm install --no-audit --no-fund && npx hardhat node --hostname 0.0.0.0"
+    ports:
+      - '${DEV_EVM_PORT:-8545}:8545'
+    environment:
+      NODE_ENV: development
+      HARDHAT_NETWORK: localhost
+    volumes:
+      - ..:/workspaces/agenticpay:cached
+      - node-modules:/workspaces/agenticpay/node_modules
+      - hardhat-cache:/workspaces/agenticpay/contracts/.hardhat
+    healthcheck:
+      test: ['CMD', 'node', '-e', 'require("net").connect(8545).end()']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '${DEV_EVM_CPUS:-1.0}'
+          memory: ${DEV_EVM_MEMORY:-1G}
 
   # One-time dependency install shared by the backend/frontend services.
   deps:
@@ -76,6 +171,8 @@ services:
     volumes:
       - ..:/workspaces/agenticpay:cached
       - node-modules:/workspaces/agenticpay/node_modules
+      # Persist the Rust/Soroban build cache between restarts.
+      - contract-target:/workspaces/agenticpay/contracts/target
     environment:
       NODE_ENV: development
       PORT: '3001'
@@ -86,8 +183,12 @@ services:
       QUEUE_ENABLED: 'false'
       OPENAI_API_KEY: sk-dev-placeholder-replace-me
       CORS_ALLOWED_ORIGINS: 'http://localhost:3000,http://localhost:3001'
+      STELLAR_RPC_URL: http://stellar:8000/soroban/rpc
+      SOROBAN_RPC_URL: http://stellar:8000/soroban/rpc
+      STELLAR_NETWORK: local
     ports:
       - '3001:3001'
+      - '${DEV_BACKEND_DEBUG_PORT:-9229}:9229'
     depends_on:
       deps:
         condition: service_completed_successfully
@@ -95,6 +196,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '${DEV_BACKEND_CPUS:-2.0}'
+          memory: ${DEV_BACKEND_MEMORY:-2G}
 
   frontend:
     profiles: ['app']
@@ -118,8 +224,16 @@ services:
         condition: service_completed_successfully
       backend:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: '${DEV_FRONTEND_CPUS:-2.0}'
+          memory: ${DEV_FRONTEND_MEMORY:-2G}
 
 volumes:
   postgres-data:
   redis-data:
   node-modules:
+  stellar-data:
+  hardhat-cache:
+  contract-target:
