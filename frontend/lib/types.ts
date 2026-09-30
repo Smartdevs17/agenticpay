@@ -30,6 +30,8 @@ export interface Project {
   rawStatus?: number; // Enum index
   milestones: Milestone[];
   createdAt: string;
+  /** ISO 8601 project deadline as stored on-chain (issue #65). */
+  deadline?: string;
   githubRepo?: string;
   invoiceUri?: string; // Added invoiceUri
 }

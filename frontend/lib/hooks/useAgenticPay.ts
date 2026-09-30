@@ -260,6 +260,7 @@ const formatProjectData = (data: RawProjectData): Project => {
         rawDepositedAmount: data.depositedAmount,
         rawStatus: Number(data.status),
         createdAt: new Date(Number(data.createdAt) * 1000).toISOString(),
+        deadline: new Date(Number(data.deadline) * 1000).toISOString(),
         githubRepo: data.githubRepo,
         invoiceUri: data.invoiceUri, // Pass invoiceUri
         milestones: milestones,

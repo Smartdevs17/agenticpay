@@ -23,6 +23,7 @@ import { MarkdownContent } from '@/components/markdown/MarkdownContent';
 import { CopyButton } from '@/components/ui/copy-button';
 import { parseEther } from 'viem';
 import { generateICS, downloadICS } from '@/lib/generateICS';
+import { buildProjectCalendarEvents, buildProjectCalendarFilename } from '@/lib/project-calendar';
 
 type PendingTransaction = {
   functionName: string;
@@ -115,21 +116,24 @@ export default function ProjectDetailPage() {
   };
 
   const handleAddToCalendar = () => {
-    const events = project.milestones
-      .filter((m) => m.dueDate)
-      .map((m) => ({
-        uid: `milestone-${m.id}@agenticpay`,
-        summary: `${project.title} — ${m.title}`,
-        description: m.description ?? undefined,
-        start: new Date(m.dueDate!),
-      }));
+    // Shared with the localized page so both export identical, RFC 5545-correct
+    // calendars covering milestone dates and the project deadline (issue #65).
+    const events = buildProjectCalendarEvents({
+      projectId: project.id,
+      projectTitle: project.title,
+      currency: project.currency,
+      githubRepo: project.githubRepo,
+      deadline: project.deadline,
+      milestones: project.milestones,
+    });
 
     if (events.length === 0) {
-      toast.info('No milestone due dates to export.');
+      toast.info('No project or milestone dates to export.');
       return;
     }
 
-    downloadICS(`${project.title.replace(/\s+/g, '-')}.ics`, generateICS(events));
+    downloadICS(buildProjectCalendarFilename(project.title), generateICS(events));
+    toast.success('Calendar file downloaded.');
   };
 
   return (
