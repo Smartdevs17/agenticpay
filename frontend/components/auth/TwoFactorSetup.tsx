@@ -10,7 +10,7 @@ import { useSetup2FA, useConfirm2FA } from '@/lib/hooks/use2fa';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import QRCode from 'qrcode.react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { toast } from 'sonner';
 import { AlertCircle, CheckCircle, Copy } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -148,7 +148,7 @@ export function TwoFactorSetup({ userId, onSuccess }: TwoFactorSetupProps) {
           <CardContent className="space-y-6">
             <div className="flex flex-col items-center gap-4">
               <div className="bg-white p-4 rounded-lg border">
-                <QRCode value={qrCode} size={256} level="H" />
+                <QRCodeCanvas value={qrCode} size={256} level="H" />
               </div>
 
               <div>

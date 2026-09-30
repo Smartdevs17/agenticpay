@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/useAuthStore';
 
-export default function OAuthCallbackPage() {
+function OAuthCallbackContent() {
   const router = useRouter();
   const params = useSearchParams();
   const setAuth = useAuthStore((state) => state.setAuth);
@@ -34,11 +34,26 @@ export default function OAuthCallbackPage() {
   }, [params, router, setAuth]);
 
   return (
+    <div className="flex items-center gap-3 text-sm text-gray-600">
+      <Loader2 className="h-5 w-5 animate-spin" />
+      Completing sign in...
+    </div>
+  );
+}
+
+export default function OAuthCallbackPage() {
+  return (
     <div className="flex min-h-screen items-center justify-center">
-      <div className="flex items-center gap-3 text-sm text-gray-600">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        Completing sign in...
-      </div>
+      <Suspense
+        fallback={
+          <div className="flex items-center gap-3 text-sm text-gray-600">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Completing sign in...
+          </div>
+        }
+      >
+        <OAuthCallbackContent />
+      </Suspense>
     </div>
   );
 }

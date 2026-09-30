@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { api } from '@/frontend/lib/api';
+import { api } from '@/lib/api';
 
 interface ExchangeRateDisplayProps {
   sessionId: string;

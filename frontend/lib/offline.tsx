@@ -1,3 +1,5 @@
+'use client';
+
 const OFFLINE_QUEUE_STORAGE_KEY = 'agenticpay-offline-queue';
 const OFFLINE_QUEUE_EVENT = 'agenticpay:offline-queue-updated';
 
