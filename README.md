@@ -208,7 +208,7 @@ NEXT_PUBLIC_APP_NAME=AgenticPay
 | Variable | Default | Description | Required |
 |---|---|---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:3001/api/v1` | Backend API URL | No |
-| `NEXT_PUBLIC_BACKEND_URL` | `https://agentpay-backend-mu.vercel.app` | Fallback backend URL | No |
+| `NEXT_PUBLIC_BACKEND_URL` | `http://localhost:3001/api/v1` | Fallback backend URL (used if `NEXT_PUBLIC_API_URL` is unset) | No |
 | `NEXT_PUBLIC_WEB3AUTH_CLIENT_ID` | - | Web3Auth client ID | **Yes** |
 | `NEXT_PUBLIC_CONTRACT_ADDRESS` | - | Deployed Soroban contract address | **Yes** |
 
