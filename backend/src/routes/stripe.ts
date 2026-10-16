@@ -296,17 +296,21 @@ stripeRouter.get('/rates', asyncHandler(async (req, res) => {
   res.json({ from, to, rate, updatedAt: new Date().toISOString() });
 }));
 
-stripeRouter.post('/convert/lock-rate', asyncHandler(async (req, res) => {
+stripeRouter.post('/convert/lock-rate', asyncHandler(async (req: any, res) => {
   const { fromCurrency = 'USD', toAsset = 'USDC', amount } = req.body;
   if (!amount) return res.status(400).json({ error: 'amount required' });
-  const lock = await lockRate(fromCurrency, toAsset, amount);
+  const userId = req.user?.id ?? req.headers['x-actor-id']?.toString();
+  if (!userId) return res.status(401).json({ error: 'authentication required' });
+  const lock = await lockRate(userId, fromCurrency, toAsset, amount);
   res.json(lock);
 }));
 
-stripeRouter.post('/convert/confirm', asyncHandler(async (req, res) => {
+stripeRouter.post('/convert/confirm', asyncHandler(async (req: any, res) => {
   const { rateLockId, stripePaymentIntentId } = req.body;
   if (!rateLockId || !stripePaymentIntentId) return res.status(400).json({ error: 'rateLockId and stripePaymentIntentId required' });
-  const conversion = await confirmConversion(rateLockId, stripePaymentIntentId);
+  const userId = req.user?.id ?? req.headers['x-actor-id']?.toString();
+  if (!userId) return res.status(401).json({ error: 'authentication required' });
+  const conversion = await confirmConversion(rateLockId, userId, stripePaymentIntentId);
   res.json(conversion);
 }));
 

@@ -48,6 +48,8 @@ export interface WebhookDeliveryLog {
 type WorkerState = {
   timer?: NodeJS.Timeout;
   running: boolean;
+  /** True while a pass over due deliveries is in flight, so the 1s ticker never overlaps itself. */
+  processing: boolean;
 };
 
 const MAX_ATTEMPTS = 5;
@@ -60,7 +62,7 @@ const deliveries = new Map<string, WebhookDeliveryLog>();
 const idempotencyIndex = new Map<string, string>();
 const deadLetterQueue: WebhookDeliveryLog[] = [];
 
-const worker: WorkerState = { running: false };
+const worker: WorkerState = { running: false, processing: false };
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -254,7 +256,16 @@ export function startWebhookWorker(): void {
   if (worker.running) return;
   worker.running = true;
   worker.timer = setInterval(() => {
-    void processDueDeliveries();
+    // A pass that is still in flight (e.g. a slow endpoint, or a backlog bigger
+    // than one tick can clear) must finish before another one starts. Without
+    // this guard, the next 1s tick starts a second, overlapping pass that can
+    // pick up and deliver the same still-"pending"/"retrying" delivery a
+    // second time before the first pass has marked it "processing".
+    if (worker.processing) return;
+    worker.processing = true;
+    void processDueDeliveries().finally(() => {
+      worker.processing = false;
+    });
   }, 1_000);
 }
 
@@ -262,6 +273,7 @@ export function stopWebhookWorker(): void {
   if (worker.timer) clearInterval(worker.timer);
   worker.timer = undefined;
   worker.running = false;
+  worker.processing = false;
 }
 
 export function listWebhookDeliveries(): WebhookDeliveryLog[] {

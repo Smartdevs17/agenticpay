@@ -6,12 +6,15 @@ export type ConversionStatus = 'pending' | 'rate_locked' | 'completed' | 'failed
 
 export interface RateLock {
   id: string;
+  userId: string;
   fromCurrency: string;
   toAsset: string;
   rate: number;
   amount: number;
   expiresAt: number;
   locked: boolean;
+  /** Set once this lock has been consumed by `confirmConversion`, so it cannot be reused. */
+  consumedAt?: number;
 }
 
 export interface ConversionRecord {
@@ -44,10 +47,11 @@ function getCurrentRate(fromCurrency: string, toAsset: string): number {
   return 1.0;
 }
 
-export async function lockRate(fromCurrency: string, toAsset: string, amount: number): Promise<RateLock> {
+export async function lockRate(userId: string, fromCurrency: string, toAsset: string, amount: number): Promise<RateLock> {
   const rate = getCurrentRate(fromCurrency, toAsset);
   const lock: RateLock = {
     id: randomUUID(),
+    userId,
     fromCurrency,
     toAsset,
     rate,
@@ -59,15 +63,23 @@ export async function lockRate(fromCurrency: string, toAsset: string, amount: nu
   return lock;
 }
 
-export async function confirmConversion(rateLockId: string, stripePaymentIntentId: string): Promise<ConversionRecord> {
+export async function confirmConversion(rateLockId: string, userId: string, stripePaymentIntentId: string): Promise<ConversionRecord> {
   const lock = rateLocks.get(rateLockId);
   if (!lock) throw new Error('Rate lock not found');
+  // A lock belongs to whoever created it, and can be spent exactly once -- otherwise
+  // one locked rate could be confirmed repeatedly (duplicate conversions from a single
+  // amount) or confirmed by a user who never created it.
+  if (lock.userId !== userId) throw new Error('Rate lock not found');
+  if (lock.consumedAt !== undefined) throw new Error('Rate lock has already been used');
   if (Date.now() > lock.expiresAt) throw new Error('Rate lock has expired');
+
+  lock.consumedAt = Date.now();
+  rateLocks.set(lock.id, lock);
 
   const cryptoAmount = (lock.amount * lock.rate).toFixed(7);
   const conversion: ConversionRecord = {
     id: randomUUID(),
-    userId: 'user_default',
+    userId: lock.userId,
     fromCurrency: lock.fromCurrency,
     toAsset: lock.toAsset,
     fiatAmount: lock.amount,
