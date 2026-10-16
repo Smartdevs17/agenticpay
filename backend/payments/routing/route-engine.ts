@@ -3,11 +3,34 @@ import { scoreAllNetworks } from './scoring-engine';
 import { getBridgeContract, getAllNetworkIds } from './network-registry';
 import { getNetworkStatus } from './network-monitor';
 
-interface RoutingContext {
+export interface RoutingContext {
   amountUsd: number;
   tokenAddress?: string;
   fromAddress: string;
   toAddress: string;
+}
+
+export function validateRoutingRequest(
+  context: RoutingContext,
+  preferences: UserPreferences
+): string | null {
+  if (!Number.isFinite(context.amountUsd) || context.amountUsd <= 0) {
+    return 'amountUsd must be a finite positive number';
+  }
+  if (!context.fromAddress || !context.toAddress) {
+    return 'fromAddress and toAddress are required';
+  }
+  if (context.fromAddress === context.toAddress) {
+    return 'fromAddress and toAddress must be different';
+  }
+  if (!['cost', 'speed', 'reliability'].includes(preferences.priority)) {
+    return 'priority must be cost, speed, or reliability';
+  }
+  if (preferences.maxFeeUsd !== undefined &&
+      (!Number.isFinite(preferences.maxFeeUsd) || preferences.maxFeeUsd < 0)) {
+    return 'maxFeeUsd must be a finite non-negative number';
+  }
+  return null;
 }
 
 function determineBridgeRequirement(
@@ -66,6 +89,9 @@ export async function calculateOptimalRoute(
   preferences: UserPreferences,
   metrics: NetworkMetrics[]
 ): Promise<PaymentRoute> {
+  const validationError = validateRoutingRequest(context, preferences);
+  if (validationError) throw new Error(validationError);
+
   let scores = scoreAllNetworks(metrics, preferences);
 
   // Apply user preferences
@@ -128,7 +154,8 @@ async function checkLiquidity(networkId: NetworkId, context: RoutingContext): Pr
 export async function executeWithFallback(
   route: PaymentRoute,
   executeFn: (networkId: NetworkId) => Promise<string>,
-  onFallback?: (from: NetworkId, to: NetworkId, error: Error) => void
+  onFallback?: (from: NetworkId, to: NetworkId, error: Error) => void,
+  timeoutMs = 30_000
 ): Promise<{ txHash: string; networkUsed: NetworkId; attempts: number }> {
   const networksToTry = [route.primary, ...route.fallbacks];
   let lastError: Error | undefined;
@@ -136,7 +163,15 @@ export async function executeWithFallback(
   for (let i = 0; i < networksToTry.length; i++) {
     const networkId = networksToTry[i];
     try {
-      const txHash = await executeFn(networkId);
+      const txHash = await Promise.race([
+        executeFn(networkId),
+        new Promise<string>((_, reject) => {
+          setTimeout(() => reject(new Error(`Execution timed out after ${timeoutMs}ms`)), timeoutMs);
+        }),
+      ]);
+      if (!txHash || typeof txHash !== 'string') {
+        throw new Error('Execution returned an empty transaction hash');
+      }
       return { txHash, networkUsed: networkId, attempts: i + 1 };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));

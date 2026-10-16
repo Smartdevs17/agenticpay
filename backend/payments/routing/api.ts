@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { calculateOptimalRoute, executeWithFallback } from './route-engine';
+import { calculateOptimalRoute, executeWithFallback, validateRoutingRequest } from './route-engine';
 import { getAllNetworkMetrics, getAllNetworkStatuses } from './network-monitor';
 import { notifyRoutingDecision, notifyFallback } from './notification-service';
 import { recordRoutingEvent, generateRoutingReport } from './analytics';
@@ -30,6 +30,13 @@ router.post('/route', async (req, res) => {
     }
 
     const userPrefs: UserPreferences = preferences || { priority: 'cost' };
+    const validationError = validateRoutingRequest(
+      { amountUsd, tokenAddress, fromAddress, toAddress },
+      userPrefs
+    );
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
 
     // Fetch real-time metrics
     const metrics = await getAllNetworkMetrics();
