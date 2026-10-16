@@ -9,7 +9,8 @@
   ],
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "npm run test:docs && turbo run test",
+    "test:docs": "node --test scripts/docs-index.test.mjs",
     "lint": "turbo run lint",
     "dev": "turbo run dev",
     "sandbox:up": "docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d && npm run sandbox:seed",

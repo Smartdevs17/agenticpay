@@ -45,6 +45,14 @@ export interface PayoutEngineOptions {
 
 const APPROVER_ROLES: readonly PayoutApproverRole[] = ['finance_approver', 'admin'];
 
+function snapshotBatch(batch: PayoutBatch): PayoutBatch {
+  return { ...batch, createdAt: new Date(batch.createdAt) };
+}
+
+function snapshotAuditEntry(entry: PayoutAuditEntry): PayoutAuditEntry {
+  return { ...entry, timestamp: new Date(entry.timestamp) };
+}
+
 function resolveApprovalThreshold(explicit?: number): number {
   const fromEnv = Number(process.env.PAYOUT_APPROVAL_THRESHOLD);
   const threshold = explicit ?? (fromEnv > 0 ? fromEnv : DEFAULT_PAYOUT_APPROVAL_THRESHOLD);
@@ -66,6 +74,9 @@ export class PayoutEngine {
   }
 
   setPendingAmount(merchantId: string, amount: number) {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new Error('INVALID_PENDING_PAYOUT_AMOUNT');
+    }
     this.pendingAmounts.set(merchantId, amount);
   }
 
@@ -107,7 +118,7 @@ export class PayoutEngine {
         this.pendingAmounts.set(schedule.merchantId, 0);
         this.batches.push(batch);
         this.record(batch.id, 'created', 'system', requiresApproval ? 'Awaiting approval' : 'Auto-approved');
-        executedBatches.push(batch);
+        executedBatches.push(snapshotBatch(batch));
       }
     }
 
@@ -154,11 +165,12 @@ export class PayoutEngine {
   }
 
   getPayoutHistory(): PayoutBatch[] {
-    return this.batches;
+    return this.batches.map(snapshotBatch);
   }
 
   getAuditTrail(batchId?: string): PayoutAuditEntry[] {
-    return batchId ? this.auditTrail.filter(entry => entry.batchId === batchId) : [...this.auditTrail];
+    const entries = batchId ? this.auditTrail.filter(entry => entry.batchId === batchId) : this.auditTrail;
+    return entries.map(snapshotAuditEntry);
   }
 
   private assertApprover(approver: PayoutApprover): void {

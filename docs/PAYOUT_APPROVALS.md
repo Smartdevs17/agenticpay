@@ -11,6 +11,9 @@ A payout batch is created with status `pending` when either condition is true:
 
 Otherwise the batch is auto-approved and marked `completed`.
 
+Pending balances must be finite and non-negative. The engine rejects invalid balance updates with
+`INVALID_PENDING_PAYOUT_AMOUNT` so a negative value, `NaN`, or infinity cannot poison future evaluations.
+
 ## Configuring the threshold
 
 Set `PAYOUT_APPROVAL_THRESHOLD` (see [ENV_VARS.md](../ENV_VARS.md)). If it is unset, the default is `10000`.
@@ -42,6 +45,9 @@ so the rejection cannot be bypassed.
 
 Every decision is recorded with the batch ID, action (`created`, `approved`, `rejected`, `retried`),
 actor ID, timestamp, and optional details. Query it with `PayoutEngine.getAuditTrail(batchId?)`.
+
+History and audit APIs return defensive snapshots. Changing a returned object or its `Date` values
+does not alter the engine's stored payout state.
 
 ## Reserved funds
 

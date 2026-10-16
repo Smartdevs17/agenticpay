@@ -81,7 +81,7 @@ describe('Payout Engine (Issue 457)', () => {
 
     const approved = await engine.approveManualPayout(batches[0].id, { id: 'fin_1', role: 'finance_approver' });
     expect(approved).toBe(true);
-    expect(batches[0].status).toBe('completed');
+    expect(engine.getPayoutHistory()[0].status).toBe('completed');
   });
 });
 

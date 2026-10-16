@@ -504,7 +504,7 @@ For issues, questions, or suggestions:
 
 - **Issues**: GitHub Issues
 - **Discussions**: GitHub Discussions
-- **Documentation**: See [docs/](./docs) folder
+- **Documentation**: Start with the [documentation index](docs/README.md)
 
 ---
 

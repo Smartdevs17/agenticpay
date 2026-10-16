@@ -1,77 +1,44 @@
-# PR: Implement funnel, ML forecasting, A/B testing, customer health (#852 #853 #854 #855)
+# Docs, payment correctness, payout reliability, and withdrawal security (#1258–#1261)
 
-**Branch:** `feat/issues-852-853-854-855`  
-**Base:** `main`  
-**Commits:**
-- `bfc5bb0` feat: add funnel conversion tracking, ML forecasting, A/B testing, customer health (#852 #853 #854 #855)
-- `05ac260` docs: add integration docs for funnel, ML forecast, AB testing, health
+Closes #1258
+Closes #1259
+Closes #1260
+Closes #1261
 
-Closes #852
-Closes #853
-Closes #854
-Closes #855
+## Scope
 
-## Summary
-This PR implements all four requested features:
+This PR delivers one focused increment for each issue, in issue order:
 
-### #853 Add funnel conversion tracking
-- Service `backend/src/services/funnel-tracking.ts` with `FunnelTrackingService`
-- Custom funnel definitions, step ordering, conversion window, per-step stats (entered, conversionRate, stepConversionRate, dropOff, avg/median/p95 time to next)
-- User journey tracking with completion and conversion time
-- Routes `backend/src/routes/funnel-tracking.ts` mounted at `/api/v1/funnels`
-- Tests `backend/src/services/__tests__/funnel-tracking.test.ts` (9 cases)
-- Docs `backend/docs/FUNNEL_TRACKING.md`
+### #1258 — Documentation discovery
 
-### #854 Implement revenue forecasting with ML
-- Service `backend/src/services/ml-forecast.ts` with `MLForecastService`
-- Ensemble: linear regression, polynomial (degree 2 via 3x3 solve), exponential smoothing, Holt-Winters seasonal, moving average
-- Cross-validated model selection (80/20 holdout, RMSE), confidence intervals (1.96*RMSE), seasonality detection via autocorrelation, trend analysis
-- Routes `backend/src/routes/ml-forecast.ts` mounted at `/api/v1/forecast/ml`
-- Tests `backend/src/services/__tests__/ml-forecast.test.ts`
-- Docs `backend/docs/ML_FORECAST.md`
+- Adds `docs/README.md` as a curated entry point for contributor, payment, SDK, operations, and security guides.
+- Links the root README to the index.
+- Adds a dependency-free Node test that verifies every local link in the index exists, and runs it from the root `test` command.
 
-### #852 Build A/B testing framework
-- Service `backend/src/services/ab-testing.ts` with `ABTestingService`
-- Deterministic MD5 bucket assignment, weighted variants, traffic allocation, lifecycle (draft/running/paused/completed/archived)
-- Statistical: two-proportion z-test, Wilson interval, Bayesian prob, sample size calculator
-- Routes `backend/src/routes/ab-testing.ts` mounted at `/api/v1/ab-tests`
-- Tests `backend/src/services/__tests__/ab-testing.test.ts`
-- Docs `backend/docs/AB_TESTING.md`
+### #1259 — Payment amount correctness
 
-### #855 Build customer health score system
-- Service `backend/src/services/customer-health.ts` with `CustomerHealthService`
-- Composite 0-100 score: payment_health 30% + frequency 20% + recency 20% + engagement 15% + support 15%, with penalties for churn signals
-- Levels champion/healthy/at_risk/critical, trend, riskReasons, recommendations, history, distribution, at-risk listing
-- Routes `backend/src/routes/customer-health.ts` mounted at `/api/v1/customer-health`
-- Tests `backend/src/services/__tests__/customer-health.test.ts`
-- Docs `backend/docs/CUSTOMER_HEALTH.md`
+- Rejects non-finite, zero, and negative amounts at the shared payment-provider router boundary.
+- Returns `INVALID_PAYMENT_AMOUNT` with status `400` before invoking or recording metrics for any provider.
+- Documents amount validation and provider selection/fallback behavior.
 
-## API Registration
-Updated `backend/src/index.ts` to mount all new routers and fix missing `allowancesRouter` import.
+### #1260 — Payout state reliability
 
-## How to create PR (when GitHub auth available)
-```bash
-git push -u origin feat/issues-852-853-854-855
-gh pr create --title "feat: add funnel conversion tracking, ML forecasting, A/B testing, customer health (#852 #853 #854 #855)" \
-  --body "Closes #852, Closes #853, Closes #854, Closes #855" \
-  --base main --head feat/issues-852-853-854-855
-```
-Or fork first:
-```bash
-gh repo fork Smartdevs17/agenticpay --clone=false
-git remote add fork https://github.com/<your-user>/agenticpay.git
-git push -u fork feat/issues-852-853-854-855
-gh pr create --repo Smartdevs17/agenticpay --head <your-user>:feat/issues-852-853-854-855
-```
+- Rejects negative and non-finite pending payout balances.
+- Returns defensive copies from payout evaluation, history, and audit APIs, including cloned `Date` values.
+- Prevents callers from corrupting authoritative payout status, amount, or audit state by mutating returned objects.
+- Updates the payout approval guide with the new state-integrity guarantees.
 
-## Testing
-Tests are vitest-based, run with:
-```bash
-cd backend && npm test src/services/__tests__/funnel-tracking.test.ts src/services/__tests__/ml-forecast.test.ts src/services/__tests__/ab-testing.test.ts src/services/__tests__/customer-health.test.ts
-```
+### #1261 — Withdrawal decision security
 
-All services expose `resetForTests()` for isolation.
+- Applies the configured approver allowlist to rejection as well as approval.
+- Fails closed when a non-allowlisted withdrawal has no configured approvers.
+- Documents approver configuration, the API identity trust boundary, and velocity controls.
 
-## Verification
-- `git log --oneline bfc5bb0..HEAD`
-- `git diff main..HEAD --stat`
+## Tests
+
+- `npm run test:docs`
+- `npm --workspace backend test -- src/services/payments/__tests__/payment-router.test.ts src/services/payouts/__tests__/payout-engine.test.ts src/services/__tests__/issues-456-459.test.ts src/services/__tests__/withdrawal-allowlist.test.ts`
+- `npm run lint`
+- `npm run build`
+
+New regression coverage includes invalid payment amounts, invalid payout balances, mutation isolation for payout/audit snapshots, missing withdrawal approvers, unauthorized withdrawal rejection, and documentation link integrity.

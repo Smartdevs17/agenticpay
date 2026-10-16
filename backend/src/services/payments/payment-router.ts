@@ -25,6 +25,10 @@ export class ProviderPaymentRouter extends BaseService {
   }
 
   async route(input: PaymentInput, preferredProviderId?: string): Promise<Result<PaymentOutput>> {
+    if (!Number.isFinite(input.amount) || input.amount <= 0) {
+      return this.fail('Payment amount must be a finite number greater than zero', 400, 'INVALID_PAYMENT_AMOUNT');
+    }
+
     const primaryId = selectProviderId(input, preferredProviderId, this.registry);
     const candidateIds = [primaryId, ...this.registry.list().filter((id) => id !== primaryId)];
 

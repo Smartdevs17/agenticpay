@@ -54,6 +54,28 @@ describe('PayoutEngine approval workflow', () => {
     expect(engine.getPayoutHistory()).toHaveLength(1);
   });
 
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid pending amount %s', (amount) => {
+    const engine = engineWithSchedule();
+
+    expect(() => engine.setPendingAmount('merch_1', amount)).toThrow('INVALID_PENDING_PAYOUT_AMOUNT');
+    expect(engine.getPendingAmount('merch_1')).toBe(0);
+  });
+
+  it('returns snapshots that cannot mutate stored payout state', async () => {
+    const engine = engineWithSchedule({ autoApproveLimit: 500 });
+    engine.setPendingAmount('merch_1', 600);
+    const [created] = await engine.evaluatePayouts();
+
+    created.status = 'completed';
+    created.amount = 1;
+    created.createdAt.setUTCFullYear(1999);
+
+    const [stored] = engine.getPayoutHistory();
+    expect(stored.status).toBe('pending');
+    expect(stored.amount).toBe(600);
+    expect(stored.createdAt.getUTCFullYear()).not.toBe(1999);
+  });
+
   it('rejects approval from callers without an approver role', async () => {
     const engine = engineWithSchedule({ autoApproveLimit: 500 });
     engine.setPendingAmount('merch_1', 600);
@@ -92,5 +114,11 @@ describe('PayoutEngine approval workflow', () => {
     const trail = engine.getAuditTrail(batch.id);
     expect(trail.map((entry) => entry.action)).toEqual(['created', 'approved']);
     expect(trail[1].actorId).toBe('fin_1');
+
+    trail[0].actorId = 'tampered';
+    trail[0].timestamp.setUTCFullYear(1999);
+    const stored = engine.getAuditTrail(batch.id)[0];
+    expect(stored.actorId).toBe('system');
+    expect(stored.timestamp.getUTCFullYear()).not.toBe(1999);
   });
 });
