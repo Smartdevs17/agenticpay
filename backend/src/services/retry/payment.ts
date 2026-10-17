@@ -1,9 +1,12 @@
 import { retryService, RetryResult, RetryConfig, createRetryConfig, RetryMetrics } from './index.js';
+import { quotaService } from '../quota.js';
 
 export interface PaymentRetryConfig extends RetryConfig {
   paymentType: string;
+  providerId?: string;
   enableCircuitBreaker: boolean;
   notifyOnFailure: boolean;
+  respectQuota?: boolean;
 }
 
 export interface PaymentAttempt {
@@ -47,30 +50,37 @@ const DEFAULT_PAYMENT_CONFIGS: Record<string, Partial<PaymentRetryConfig>> = {
     backoffMultiplier: 2,
     enableCircuitBreaker: true,
     notifyOnFailure: true,
+    respectQuota: true,
   },
   usdc: {
     maxRetries: 3,
     initialDelayMs: 10000,
     maxDelayMs: 180000,
     backoffMultiplier: 2,
+    providerId: 'stripe',
     enableCircuitBreaker: true,
     notifyOnFailure: true,
+    respectQuota: true,
   },
   xlm: {
     maxRetries: 2,
     initialDelayMs: 5000,
     maxDelayMs: 60000,
     backoffMultiplier: 1.5,
+    providerId: 'stellar',
     enableCircuitBreaker: true,
     notifyOnFailure: true,
+    respectQuota: true,
   },
   stripe: {
     maxRetries: 3,
     initialDelayMs: 2000,
     maxDelayMs: 30000,
     backoffMultiplier: 2,
+    providerId: 'stripe',
     enableCircuitBreaker: false,
     notifyOnFailure: true,
+    respectQuota: true,
   },
 };
 
@@ -141,6 +151,30 @@ class PaymentRetryService {
       return { success: true, attempts: 0, totalTimeMs: 0 };
     }
 
+    // Check provider quota before attempting retry
+    if (config.respectQuota && config.providerId && !quotaService.canMakeRequest(config.providerId)) {
+      state.status = 'exhausted';
+      state.error = `Provider quota exhausted for ${config.providerId}`;
+
+      if (config.notifyOnFailure) {
+        this.sendFailureNotification(paymentId, state);
+      }
+
+      this.emit({
+        type: 'retry_exhausted',
+        paymentId,
+        timestamp: new Date(),
+        data: { error: `Provider quota exhausted for ${config.providerId}` },
+      });
+
+      return {
+        success: false,
+        attempts: state.attempts.length,
+        totalTimeMs: 0,
+        error: new Error(state.error),
+      };
+    }
+
     if (!manualOverride && this.manualRetryQueue.has(paymentId)) {
       this.manualRetryQueue.delete(paymentId);
     }
@@ -159,6 +193,11 @@ class PaymentRetryService {
       maxDelayMs: config.maxDelayMs,
       backoffMultiplier: config.backoffMultiplier,
     });
+
+    // Record quota usage on attempt
+    if (config.respectQuota && config.providerId) {
+      quotaService.recordRequest(config.providerId, result.attempts > 1);
+    }
 
     const attempt: PaymentAttempt = {
       paymentId,
@@ -184,11 +223,11 @@ class PaymentRetryService {
       if (result.attempts >= maxAttempts) {
         state.status = 'exhausted';
         state.error = result.error?.message;
-        
+
         if (config.notifyOnFailure) {
           this.sendFailureNotification(paymentId, state);
         }
-        
+
         this.emit({
           type: 'retry_exhausted',
           paymentId,
@@ -199,7 +238,7 @@ class PaymentRetryService {
         state.status = 'pending';
         const delay = config.initialDelayMs * Math.pow(config.backoffMultiplier, result.attempts - 1);
         state.nextRetryTime = new Date(Date.now() + delay);
-        
+
         this.emit({
           type: 'retry_attempt',
           paymentId,
