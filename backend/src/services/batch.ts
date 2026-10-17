@@ -3,6 +3,7 @@ import * as StellarSdk from '@stellar/stellar-sdk';
 import { config } from '../config/env.js';
 import { featureFlags } from '../config/featureFlags.js';
 import { server, getNonceManager, getGasEstimator, UnitOfWorkError } from './stellar.js';
+import { CRYPTO_DECIMALS, sumAmounts } from './money.js';
 
 const NETWORK = config().STELLAR_NETWORK;
 const networkPassphrase =
@@ -151,17 +152,8 @@ export function getBatchReport(id: string): object | undefined {
   if (!record) return undefined;
 
   const successRate = record.total > 0 ? ((record.succeeded / record.total) * 100).toFixed(2) : '0.00';
-  const totalAmount = record.results
-    .filter((r) => r.status === 'success')
-    .reduce((sum, r) => sum + parseFloat(r.amount), 0)
-    .toFixed(7);
-
-  const byAsset = record.results
-    .filter((r) => r.status === 'success')
-    .reduce<Record<string, number>>((acc, r) => {
-      acc[r.asset] = (acc[r.asset] ?? 0) + parseFloat(r.amount);
-      return acc;
-    }, {});
+  const byAsset = sumByAsset(record.results.filter((r) => r.status === 'success'));
+  const totalAmount = singleAssetTotal(byAsset);
 
   return {
     batchId: record.id, label: record.label, status: record.status,
@@ -186,7 +178,8 @@ export function generateCSVTemplate(): string {
 
 export interface BatchEstimate {
   totalPayments: number;
-  totalAmount: string;
+  /** Null when the batch spans more than one asset: incomparable assets are never summed. */
+  totalAmount: string | null;
   byAsset: Record<string, string>;
   estimatedGasUnits: number;
   duplicateCount: number;
@@ -194,31 +187,44 @@ export interface BatchEstimate {
   estimatedDurationMs: number;
 }
 
+/** Sums amounts per asset in exact decimal arithmetic. */
+function sumByAsset(items: readonly Pick<BatchPaymentItem, 'asset' | 'amount'>[]): Record<string, string> {
+  const grouped: Record<string, string[]> = {};
+  for (const item of items) {
+    (grouped[item.asset] ??= []).push(item.amount);
+  }
+  const totals: Record<string, string> = {};
+  for (const [asset, amounts] of Object.entries(grouped)) {
+    totals[asset] = sumAmounts(amounts, CRYPTO_DECIMALS);
+  }
+  return totals;
+}
+
+/** Returns the total only when there is exactly one asset to total. */
+function singleAssetTotal(byAsset: Record<string, string>): string | null {
+  const assets = Object.keys(byAsset);
+  return assets.length === 1 ? byAsset[assets[0]] : null;
+}
+
 export function estimateBatch(payments: BatchPaymentItem[]): BatchEstimate {
-  const byAsset: Record<string, number> = {};
-  let totalAmount = 0;
   let invalidCount = 0;
+  const valid: BatchPaymentItem[] = [];
 
   for (const p of payments) {
     if (!/^G[A-Z2-7]{55}$/.test(p.recipient)) {
       invalidCount++;
       continue;
     }
-    const amount = parseFloat(p.amount) || 0;
-    totalAmount += amount;
-    byAsset[p.asset] = (byAsset[p.asset] ?? 0) + amount;
+    valid.push(p);
   }
 
+  const byAsset = sumByAsset(valid);
   const duplicateIndices = detectDuplicates(payments);
-  const byAssetStrings: Record<string, string> = {};
-  for (const [k, v] of Object.entries(byAsset)) {
-    byAssetStrings[k] = v.toFixed(7);
-  }
 
   return {
     totalPayments: payments.length,
-    totalAmount: totalAmount.toFixed(7),
-    byAsset: byAssetStrings,
+    totalAmount: singleAssetTotal(byAsset),
+    byAsset,
     estimatedGasUnits: payments.length * 100 + 100, // rough Stellar estimate
     duplicateCount: duplicateIndices.length,
     invalidAddressCount: invalidCount,

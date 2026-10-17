@@ -74,6 +74,7 @@ import { zapierRouter } from './routes/zapier.js';
 import { intercomRouter } from './routes/intercom.js';
 import { allowancesRouter } from './routes/allowances.js';
 import { payoutsRouter } from './routes/payouts.js';
+import { startPayoutRetryWorker } from './services/payouts/retry-worker.js';
 import { getPrismaReplicaClient } from './db/PrismaReplicaClient.js';
 import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { churnPredictionRouter } from './routes/churn-prediction.js';
@@ -507,6 +508,9 @@ server.listen(config.server.port, () => {
   setImmediate(() => {
     // Load Sentry profiling integration now that the process is warm
     loadProfilingIntegration();
+
+    // Payout retry worker: drives backed-off payout retries without a manual call
+    startPayoutRetryWorker();
 
     // Job scheduler
     if (config.jobs.enabled) {

@@ -62,3 +62,8 @@ and default to the constants above when omitted.
 8. Add comprehensive verification logging
 9. Update webhook routes to use verification
 10. Create admin interface for webhook management
+
+## Replay window and signature comparison
+
+- A timestamp that does not parse as a date is rejected with `Timestamp is not a valid date`. An invalid date yields `NaN` in the tolerance check, and `NaN > tolerance` is false, so it previously passed the replay window.
+- Digests are compared with `crypto.timingSafeEqual` over the decoded bytes. A non-hex or wrong-length signature fails closed without throwing.

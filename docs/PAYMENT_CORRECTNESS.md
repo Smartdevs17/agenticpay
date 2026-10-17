@@ -106,6 +106,15 @@ scheduled job to reclaim expired entries.
 
 Only responses below `500` are cached: a `5xx` may be transient.
 
+## Batch totals are exact and never span assets
+
+`estimateBatch` and `getBatchReport` (`backend/src/services/batch.ts`) sum amounts with
+`sumAmounts` at seven decimals (Stellar precision), not with `parseFloat`. Binary floating
+point turned `0.1 + 0.2` into `0.30000000000000004` in reports shown to operators.
+
+Totals are per asset. A batch that pays both XLM and USDC reports `totalAmount: null` and
+lists each asset under `byAsset`, because XLM and USDC are not comparable.
+
 ## Unknown states are programming errors, not branches
 
 `PayoutBatch.status` is only ever changed through the engine's transition table. A
