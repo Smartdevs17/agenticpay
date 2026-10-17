@@ -1,7 +1,9 @@
 // Issue #1155: Improve payout reliability (iteration 5)
 // Implements payout queue management with dead letter queue and health monitoring
+// Issue #1024: Integrated quota tracking to prevent provider quota exhaustion
 
 import { EventEmitter } from 'events';
+import { quotaService } from './quota.js';
 
 /**
  * Payout request structure
@@ -12,6 +14,7 @@ export interface PayoutRequest {
   amount: string;
   currency: string;
   merchantId: string;
+  providerId?: string;
   createdAt: string;
   attempts: number;
   lastAttemptAt?: string;
@@ -48,6 +51,8 @@ export interface PayoutReliabilityConfig {
   healthCheckIntervalMs: number;
   /** Concurrent payout processing limit */
   concurrencyLimit: number;
+  /** Respect provider quotas (Issue #1024) */
+  respectQuota?: boolean;
 }
 
 /**
@@ -61,6 +66,7 @@ export const DEFAULT_PAYOUT_CONFIG: PayoutReliabilityConfig = {
   enableDeadLetterQueue: true,
   healthCheckIntervalMs: 60000,
   concurrencyLimit: 10,
+  respectQuota: true,
 };
 
 /**
@@ -162,10 +168,27 @@ export class PayoutReliabilityService extends EventEmitter {
     const startTime = Date.now();
 
     try {
+      // Check provider quota before attempting (Issue #1024)
+      if (this.config.respectQuota && request.providerId) {
+        if (!quotaService.canMakeRequest(request.providerId)) {
+          await this.handleFailure(request, {
+            success: false,
+            error: `Provider quota exhausted for ${request.providerId}`,
+            retriable: true,
+          });
+          return;
+        }
+      }
+
       const result = await this.processor.process(request);
       const processingTime = Date.now() - startTime;
 
       this.recordProcessingTime(processingTime);
+
+      // Record quota usage (Issue #1024)
+      if (this.config.respectQuota && request.providerId) {
+        quotaService.recordRequest(request.providerId, request.attempts > 1);
+      }
 
       if (result.success) {
         await this.handleSuccess(request, result);
