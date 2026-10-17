@@ -26,6 +26,7 @@ import { hmacAuthMiddleware, HEADER_SIGNATURE } from './hmac-auth.js';
 import { tokenAuthMiddleware } from './token-auth.js';
 import { getSession } from '../services/session.js';
 import { lookupApiKeyRecord } from '../services/api-key-registry.js';
+import type { AccessTokenClaims } from '../auth/jwt.js';
 
 export type AuthMethod = 'session' | 'hmac' | 'token' | 'apiKey';
 
@@ -42,6 +43,10 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthPrincipal;
+      /** Raw bearer token, set by `tokenAuthMiddleware` once verified. */
+      accessToken?: string;
+      /** Verified JWT claims, set by `tokenAuthMiddleware`. */
+      accessTokenClaims?: AccessTokenClaims;
     }
   }
 }
@@ -106,19 +111,20 @@ export const hmacStrategy: AuthStrategy = {
   },
 };
 
-/** `Authorization: Bearer at_...` header — delegates to the existing token format validator. */
+/** `Authorization: Bearer <jwt>` header — delegates to the JWT access-token verifier. */
 export const tokenStrategy: AuthStrategy = {
   name: 'token',
   applies: (req) => Boolean(req.headers.authorization?.startsWith('Bearer ')),
   async authenticate(req, res) {
     const result = await runMiddleware(tokenAuthMiddleware, req, res);
     if (!result.ok) throw result.error;
-    const token = (req as Request & { accessToken?: string }).accessToken;
-    if (!token) throw new AppError(401, 'Malformed access token', 'TOKEN_MALFORMED');
+    const claims = req.accessTokenClaims;
+    if (!claims) throw new AppError(401, 'Malformed access token', 'TOKEN_MALFORMED');
+    // Identity comes from the verified claims, never from caller-supplied headers.
     return {
-      id: token,
-      tenantId: getHeader(req, 'x-tenant-id') ?? 'default',
-      role: 'user',
+      id: claims.sub,
+      tenantId: claims.tenantId,
+      role: claims.role ?? 'user',
       method: 'token',
     };
   },

@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { quantizeNumber } from '../money.js';
+import {
+  moneyMovementAuditLog,
+  type MoneyMovementAuditLog,
+  type MoneyMovementOperation,
+} from '../../audit/money-movement-audit.js';
+import { payoutAnomalyDetector, type PayoutAnomalyDetector } from './payout-anomaly-detector.js';
 
 export const DEFAULT_PAYOUT_APPROVAL_THRESHOLD = 10_000;
 
@@ -148,6 +154,13 @@ export interface PayoutEngineOptions {
   onEvent?: PayoutEventSink;
   /** Injectable randomness for retry jitter. */
   random?: () => number;
+  /** Tamper-evident log every money movement is written to (#1011). */
+  auditLog?: MoneyMovementAuditLog;
+  /**
+   * Scores each new batch (#1013). A flagged batch always needs approval, and cannot be
+   * approved until its flags have been reviewed.
+   */
+  anomalyDetector?: PayoutAnomalyDetector;
   /** Clock injection point for tests. */
   now?: () => Date;
 }
@@ -236,6 +249,8 @@ export class PayoutEngine {
   private readonly retryMaxMs: number;
   private readonly executor: PayoutExecutor;
   private readonly onEvent?: PayoutEventSink;
+  private readonly auditLog?: MoneyMovementAuditLog;
+  private readonly anomalyDetector?: PayoutAnomalyDetector;
   private readonly random: () => number;
   private readonly now: () => Date;
 
@@ -260,6 +275,8 @@ export class PayoutEngine {
 
     this.executor = options.executor ?? defaultExecutor;
     this.onEvent = options.onEvent;
+    this.auditLog = options.auditLog;
+    this.anomalyDetector = options.anomalyDetector;
     this.random = options.random ?? Math.random;
     this.now = options.now ?? (() => new Date());
   }
@@ -275,11 +292,21 @@ export class PayoutEngine {
     this.sequence = 0;
   }
 
-  setPendingAmount(merchantId: string, amount: number) {
+  setPendingAmount(merchantId: string, amount: number, actorId = 'system') {
     if (!Number.isFinite(amount) || amount < 0) {
       throw new Error('INVALID_PENDING_PAYOUT_AMOUNT');
     }
+    const previous = this.getPendingAmount(merchantId);
     this.pendingAmounts.set(merchantId, amount);
+    this.auditLog?.record({
+      actor: actorId,
+      operation: 'balance.set',
+      amount,
+      asset: this.schedules.find((s) => s.merchantId === merchantId)?.preferredAsset ?? 'unspecified',
+      reference: `balance:${merchantId}`,
+      merchantId,
+      metadata: { previousAmount: previous },
+    });
   }
 
   getPendingAmount(merchantId: string): number {
@@ -404,8 +431,11 @@ export class PayoutEngine {
     this.assertApprover(approver);
     const batch = this.batches.find((b) => b.id === batchId);
     if (!batch || batch.status !== 'pending') return false;
+    // A flagged batch must have its anomaly flags reviewed before anyone can push it through.
+    if (this.anomalyDetector?.hasOpenFlags(batch.id)) throw new Error('PAYOUT_ANOMALY_REVIEW_PENDING');
 
     this.record(batch.id, 'approved', approver.id);
+    this.audit('payout.approved', batch, approver.id);
     await this.settle(batch, approver.id);
     return true;
   }
@@ -418,8 +448,9 @@ export class PayoutEngine {
     this.transition(batch, 'failed');
     batch.errorMessage = 'Rejected by manual review';
     batch.rejectedBy = approver.id;
+    this.audit('payout.rejected', batch, approver.id);
     // Return the reserved funds to the merchant's pending balance.
-    this.releaseFunds(batch);
+    this.releaseFunds(batch, approver.id);
     this.record(batch.id, 'rejected', approver.id, batch.errorMessage);
     this.emit('payout.failed', batch, batch.errorMessage);
     return true;
@@ -454,7 +485,7 @@ export class PayoutEngine {
     const batch = this.batches.find((b) => b.id === batchId);
     if (!batch || batch.status !== 'failed' || batch.fundsReleased) return false;
 
-    this.releaseFunds(batch);
+    this.releaseFunds(batch, approver.id);
     this.record(batch.id, 'released', approver.id, `Released ${batch.amount} ${batch.asset} reservation`);
     return true;
   }
@@ -568,10 +599,20 @@ export class PayoutEngine {
     }
 
     const createdAt = this.now();
-    const requiresApproval = amount > schedule.autoApproveLimit || amount >= this.approvalThreshold;
+    const batchId = `po_${randomUUID()}`;
+    const anomalyFlags =
+      this.anomalyDetector?.evaluate({
+        reference: batchId,
+        merchantId: schedule.merchantId,
+        amount,
+        asset: schedule.preferredAsset,
+        at: createdAt,
+      }) ?? [];
+    const requiresApproval =
+      amount > schedule.autoApproveLimit || amount >= this.approvalThreshold || anomalyFlags.length > 0;
 
     const batch: PayoutBatch = {
-      id: `po_${randomUUID()}`,
+      id: batchId,
       idempotencyKey: `po_${randomUUID()}`,
       merchantId: schedule.merchantId,
       scheduleId: schedule.id,
@@ -591,6 +632,14 @@ export class PayoutEngine {
     // Reserve the funds for every batch so the next evaluation cannot create a duplicate payout.
     this.pendingAmounts.set(schedule.merchantId, 0);
     this.batches.push(batch);
+    this.audit('payout.reserved', batch, 'system', {
+      requiresApproval,
+      cycleKey,
+      ...(anomalyFlags.length > 0 ? { anomalyFlags: anomalyFlags.map((flag) => flag.rule) } : {}),
+    });
+    if (anomalyFlags.length > 0) {
+      this.record(batch.id, 'created', 'system', `Held for anomaly review: ${anomalyFlags.map((f) => f.rule).join(', ')}`);
+    }
 
     if (!requiresApproval) {
       this.record(batch.id, 'created', 'system', 'Auto-approved');
@@ -632,12 +681,18 @@ export class PayoutEngine {
       batch.settledAt = result.settledAt ?? this.now();
       delete batch.nextAttemptAt;
       this.record(batch.id, 'settled', actorId, result.transactionHash);
+      this.audit('payout.settled', batch, actorId, { transactionHash: result.transactionHash, attempt: batch.attempts });
       this.emit('payout.completed', batch, result.transactionHash);
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Unknown payout execution error';
       this.transition(batch, 'failed');
       batch.errorMessage = detail;
       batch.errorCode = 'PAYOUT_EXECUTION_FAILED';
+      this.audit('payout.failed', batch, actorId, {
+        error: detail,
+        attempt: batch.attempts,
+        final: batch.attempts >= batch.maxAttempts,
+      });
 
       if (batch.attempts >= batch.maxAttempts) {
         // Terminal failure. The reservation is deliberately kept: returning the funds to
@@ -666,9 +721,10 @@ export class PayoutEngine {
   }
 
   /** Returns a batch's reserved amount to the merchant's pending balance exactly once. */
-  private releaseFunds(batch: PayoutBatch): void {
+  private releaseFunds(batch: PayoutBatch, actorId = 'system'): void {
     if (batch.fundsReleased) return;
     batch.fundsReleased = true;
+    this.audit('payout.released', batch, actorId);
     this.pendingAmounts.set(batch.merchantId, quantizeNumber(this.getPendingAmount(batch.merchantId) + batch.amount, assetDecimals(batch.asset)));
     this.record(batch.id, 'released', 'system', `Returned ${batch.amount} ${batch.asset} to pending balance`);
   }
@@ -692,6 +748,23 @@ export class PayoutEngine {
     this.auditTrail.push({ batchId, action, actorId, timestamp: this.now(), details });
   }
 
+  private audit(
+    operation: MoneyMovementOperation,
+    batch: PayoutBatch,
+    actorId: string,
+    metadata: Record<string, unknown> = {},
+  ): void {
+    this.auditLog?.record({
+      actor: actorId,
+      operation,
+      amount: batch.amount,
+      asset: batch.asset,
+      reference: batch.id,
+      merchantId: batch.merchantId,
+      metadata: { scheduleId: batch.scheduleId, ...metadata },
+    });
+  }
+
   private emit(type: PayoutEventType, batch: PayoutBatch, detail?: string): void {
     if (!this.onEvent) return;
     try {
@@ -711,4 +784,7 @@ export class PayoutEngine {
   }
 }
 
-export const payoutEngine = new PayoutEngine();
+export const payoutEngine = new PayoutEngine({
+  auditLog: moneyMovementAuditLog,
+  anomalyDetector: payoutAnomalyDetector,
+});

@@ -4,11 +4,16 @@
 // - Token family tracking; reuse of a rotated token revokes the entire family
 // - Absolute TTL (configurable, default 30 days) + sliding expiration (default 7 days)
 // - Redis blacklist for immediate family revocation
+// - Access tokens are short-lived signed JWTs bound to their refresh family (#1014);
+//   revoking a refresh token, a family or a user also revokes the access tokens minted
+//   from it via the access-token revocation list.
 
 import { randomBytes, createHash } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 import { auditService } from '../services/auditService.js';
 import { getSharedRateLimitRedis } from '../config/rate-limit-redis.js';
+import { getJwtService } from './jwt.js';
+import { accessTokenRevocationList } from './access-token-revocation.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -67,6 +72,9 @@ async function revokeFamily(familyId: string, reason: string): Promise<void> {
     }
   } catch { /* continue to DB update */ }
 
+  // Access tokens minted from this family must stop working now, not at their expiry.
+  await accessTokenRevocationList.revokeFamily(familyId);
+
   await prisma.refreshToken.updateMany({
     where: { familyId, revoked: false },
     data: { revoked: true, revokedAt: new Date(), revokeReason: 'family_revoked' },
@@ -79,8 +87,13 @@ async function revokeFamily(familyId: string, reason: string): Promise<void> {
 
 export interface IssuedTokens {
   accessToken: string;
+  accessTokenExpiresAt: Date;
   refreshToken: string;
   refreshTokenExpiresAt: Date;
+}
+
+function issueAccessToken(userId: string, tenantId: string, familyId: string) {
+  return getJwtService().issue({ userId, tenantId, familyId });
 }
 
 /** Issue the first token pair when a user authenticates. */
@@ -114,8 +127,10 @@ export async function issueTokenFamily(
     details: { familyId, tenantId },
   });
 
+  const access = issueAccessToken(userId, tenantId, familyId);
   return {
-    accessToken: `at_${randomBytes(32).toString('hex')}`,
+    accessToken: access.token,
+    accessTokenExpiresAt: access.expiresAt,
     refreshToken: rawRefresh,
     refreshTokenExpiresAt: slidingExpiresAt,
   };
@@ -124,6 +139,7 @@ export async function issueTokenFamily(
 export interface RotateResult {
   ok: true;
   accessToken: string;
+  accessTokenExpiresAt: Date;
   refreshToken: string;
   refreshTokenExpiresAt: Date;
 }
@@ -201,9 +217,11 @@ export async function rotateRefreshToken(
     details: { familyId: existing.familyId, newTokenId: newToken.id, tenantId: existing.tenantId },
   });
 
+  const access = issueAccessToken(existing.userId, existing.tenantId, existing.familyId);
   return {
     ok: true,
-    accessToken: `at_${randomBytes(32).toString('hex')}`,
+    accessToken: access.token,
+    accessTokenExpiresAt: access.expiresAt,
     refreshToken: rawNew,
     refreshTokenExpiresAt: slidingExpiresAt,
   };
@@ -219,6 +237,8 @@ export async function revokeToken(rawToken: string, userId?: string): Promise<bo
     where: { tokenHash },
     data: { revoked: true, revokedAt: new Date(), revokeReason: 'manual_revocation' },
   });
+  // Logging out a session also ends the access tokens minted for it.
+  await accessTokenRevocationList.revokeFamily(token.familyId);
 
   void auditService.logAction({
     userId: userId ?? token.userId,
@@ -242,6 +262,8 @@ export async function revokeAllUserTokens(userId: string, tenantId: string): Pro
   for (const { familyId } of families) {
     await revokeFamily(familyId, 'sign_out_all');
   }
+  // Also covers access tokens whose family record was already pruned.
+  await accessTokenRevocationList.revokeSubject(userId);
 
   const result = await prisma.refreshToken.updateMany({
     where: { userId, tenantId, revoked: false },

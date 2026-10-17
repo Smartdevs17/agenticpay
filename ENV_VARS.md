@@ -15,6 +15,20 @@
 | WS_ENABLED           | Enable/disable WebSocket support    | true    | No       |
 | WS_PORT              | WebSocket port                      | 3001    | No       |
 | PAYOUT_APPROVAL_THRESHOLD | Payouts at or above this amount require approval | 10000 | No |
+| JWT_SECRET | HS256 signing secret for access tokens (min 32 chars). Required in production; dev/test fall back to a per-process random secret | - | Prod |
+| JWT_SECRET_PREVIOUS | Previous signing secret, still accepted for verification during key rotation | - | No |
+| JWT_ACCESS_TOKEN_TTL_SECONDS | Access token lifetime, clamped to 60–3600 | 900 | No |
+| JWT_ISSUER / JWT_AUDIENCE | Expected `iss` / `aud` claims | agenticpay / agenticpay-api | No |
+| PAYOUT_ANOMALY_DETECTION_ENABLED | Set to `false` to stop raising payout anomaly flags | true | No |
+| PAYOUT_ANOMALY_SINGLE_THRESHOLD | A single payout at or above this amount is flagged | 50000 | No |
+| PAYOUT_ANOMALY_VELOCITY_WINDOW_MS | Window for payout velocity rules | 3600000 | No |
+| PAYOUT_ANOMALY_VELOCITY_MAX_COUNT | Payouts per merchant per window before flagging | 20 | No |
+| PAYOUT_ANOMALY_VELOCITY_MAX_AMOUNT | Payout volume per merchant per window before flagging | 100000 | No |
+| PAYOUT_ANOMALY_BASELINE_MULTIPLIER | Flag payouts this many times the merchant's rolling average | 5 | No |
+| PAYOUT_ANOMALY_BASELINE_MIN_SAMPLES | Payouts needed before the baseline rule applies | 5 | No |
+| PAYOUT_ANOMALY_BASELINE_SAMPLE_SIZE | Payouts kept per merchant for the rolling baseline | 50 | No |
+| PAYOUT_BATCH_MAX_SIZE | Maximum payouts sent in one provider call | 100 | No |
+| PAYOUT_PROVIDER_FEE_PER_CALL | Flat provider fee per call, used for the fees-saved estimate in batch reports | 0 | No |
 
 ## Frontend
 

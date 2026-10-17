@@ -56,6 +56,8 @@ import {
   listUserTokenFamilies,
   pruneExpiredTokens,
 } from '../../auth/token-rotation.js';
+import { getJwtService } from '../../auth/jwt.js';
+import { accessTokenRevocationList } from '../../auth/access-token-revocation.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -111,12 +113,21 @@ describe('Token Rotation Service — Issue #804', () => {
       expect(result).toHaveProperty('refreshTokenExpiresAt');
     });
 
-    it('accessToken should start with "at_"', async () => {
+    it('accessToken should be a signed JWT bound to the user, tenant and family (#1014)', async () => {
       vi.mocked(prisma.refreshToken.create).mockResolvedValue(makeMockToken() as any);
 
-      const { accessToken } = await issueTokenFamily(USER_ID, TENANT_ID);
+      const { accessToken, accessTokenExpiresAt } = await issueTokenFamily(USER_ID, TENANT_ID);
 
-      expect(accessToken).toMatch(/^at_/);
+      expect(accessToken.split('.')).toHaveLength(3);
+      const verified = getJwtService().verify(accessToken);
+      expect(verified.ok).toBe(true);
+      if (verified.ok) {
+        expect(verified.claims.sub).toBe(USER_ID);
+        expect(verified.claims.tenantId).toBe(TENANT_ID);
+        expect(verified.claims.fid).toMatch(/^[0-9a-f]{32}$/);
+      }
+      // Short-lived: 15 minutes by default.
+      expect(accessTokenExpiresAt.getTime() - Date.now()).toBeLessThanOrEqual(15 * 60 * 1000 + 1000);
     });
 
     it('refreshToken should be a 64-char hex string (32 raw bytes)', async () => {
@@ -193,7 +204,7 @@ describe('Token Rotation Service — Issue #804', () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.accessToken).toMatch(/^at_/);
+        expect(getJwtService().verify(result.accessToken).ok).toBe(true);
         expect(result.refreshToken).toMatch(/^[0-9a-f]{64}$/);
         expect(result.refreshTokenExpiresAt).toBeInstanceOf(Date);
       }
@@ -709,5 +720,79 @@ describe('Token Rotation Service — Issue #804', () => {
 
       expect(mockRedis.set).toHaveBeenCalled();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #1014 — access tokens die with their refresh session
+// ---------------------------------------------------------------------------
+
+describe('Access token revocation on refresh-token events — Issue #1014', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Earlier suites revoke USER_ID wholesale; start each case from a clean list.
+    accessTokenRevocationList.clear();
+    vi.mocked(getSharedRateLimitRedis).mockResolvedValue(null);
+    vi.mocked(prisma.refreshToken.create).mockResolvedValue(makeMockToken() as any);
+    vi.mocked(prisma.refreshToken.updateMany).mockResolvedValue({ count: 1 } as any);
+    vi.mocked(prisma.refreshToken.update).mockResolvedValue(makeMockToken() as any);
+  });
+
+  function familyOf(accessToken: string): string {
+    const verified = getJwtService().verify(accessToken);
+    if (!verified.ok || !verified.claims.fid) throw new Error('expected a family-bound token');
+    return verified.claims.fid;
+  }
+
+  it('rotation issues a fresh access token in the same family', async () => {
+    const issued = await issueTokenFamily(USER_ID, TENANT_ID);
+    const familyId = familyOf(issued.accessToken);
+    vi.mocked(prisma.refreshToken.findUnique).mockResolvedValue(makeMockToken({ familyId }) as any);
+    vi.mocked(prisma.refreshToken.count).mockResolvedValue(0);
+    vi.mocked(prisma.$transaction).mockResolvedValue([makeMockToken({ id: 'rt-new', familyId }), {}] as any);
+
+    const rotated = await rotateRefreshToken('raw-token');
+
+    expect(rotated.ok).toBe(true);
+    if (rotated.ok) {
+      expect(rotated.accessToken).not.toBe(issued.accessToken);
+      expect(familyOf(rotated.accessToken)).toBe(familyId);
+    }
+  });
+
+  it('refresh-token replay revokes the access tokens of the compromised family', async () => {
+    const victim = await issueTokenFamily(USER_ID, TENANT_ID);
+    const bystander = await issueTokenFamily(USER_ID, TENANT_ID);
+    const familyId = familyOf(victim.accessToken);
+    vi.mocked(prisma.refreshToken.findUnique).mockResolvedValue(makeMockToken({ familyId, revoked: true }) as any);
+
+    const result = await rotateRefreshToken('replayed-token');
+
+    expect(result).toEqual({ ok: false, reason: 'family_compromised' });
+    expect(getJwtService().verify(victim.accessToken)).toEqual({ ok: false, reason: 'revoked' });
+    expect(getJwtService().verify(bystander.accessToken).ok).toBe(true);
+  });
+
+  it('revoking a refresh token ends its access tokens', async () => {
+    const session = await issueTokenFamily(USER_ID, TENANT_ID);
+    vi.mocked(prisma.refreshToken.findUnique).mockResolvedValue(
+      makeMockToken({ familyId: familyOf(session.accessToken) }) as any,
+    );
+
+    expect(await revokeToken('raw-token')).toBe(true);
+    expect(getJwtService().verify(session.accessToken)).toEqual({ ok: false, reason: 'revoked' });
+  });
+
+  it('sign out everywhere revokes every access token of the user', async () => {
+    const a = await issueTokenFamily('user-signout', TENANT_ID);
+    const b = await issueTokenFamily('user-signout', TENANT_ID);
+    const other = await issueTokenFamily('someone-else', TENANT_ID);
+    vi.mocked(prisma.refreshToken.findMany).mockResolvedValue([] as any);
+
+    await revokeAllUserTokens('user-signout', TENANT_ID);
+
+    expect(getJwtService().verify(a.accessToken).ok).toBe(false);
+    expect(getJwtService().verify(b.accessToken).ok).toBe(false);
+    expect(getJwtService().verify(other.accessToken).ok).toBe(true);
   });
 });
