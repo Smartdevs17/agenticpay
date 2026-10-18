@@ -15,6 +15,7 @@ Use this page as the entry point for the repository's maintained guides. API-spe
 
 - [Instant transfers](INSTANT_TRANSFERS.md)
 - [Marketplace escrow](MARKETPLACE_ESCROW.md)
+- [Nano (XNO) settle rail](NANO_SETTLE_RAIL.md)
 - [Payment links](PAYMENT_LINKS.md)
 - [Payment correctness](PAYMENT_CORRECTNESS.md)
 - [Payment provider routing](PAYMENT_ROUTING.md)
