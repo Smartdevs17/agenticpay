@@ -75,10 +75,11 @@ router.get('/delivery-logs/export.csv', (req: Request, res: Response) => {
 
 router.get('/dlq', (req: Request, res: Response) => {
   syncDLQFromDeliveryLogs();
-  const { merchantId, endpointId, failureCategory } = req.query as Record<string, string>;
+  const { merchantId, endpointId, eventType, failureCategory } = req.query as Record<string, string>;
   const entries = listDLQ({
     merchantId,
     endpointId,
+    eventType,
     failureCategory: failureCategory as Parameters<typeof listDLQ>[0]['failureCategory'],
   });
   res.json({ count: entries.length, entries });
