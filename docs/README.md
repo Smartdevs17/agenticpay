@@ -43,6 +43,7 @@ Use this page as the entry point for the repository's maintained guides. API-spe
 - [Provider credentials encryption](security/provider-credentials-encryption.md)
 - [AML transaction monitoring](AML_TRANSACTION_MONITORING.md)
 - [Sanctions screening](SANCTIONS_SCREENING.md)
+- [PCI DSS compliance dashboard](PCI_DSS_DASHBOARD.md)
 - [Configuration reference](config/CONFIGURATION.md)
 
 ## Keeping this index healthy
