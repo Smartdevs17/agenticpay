@@ -41,6 +41,7 @@ Use this page as the entry point for the repository's maintained guides. API-spe
 - [Security policy](security-policy.md)
 - [Audit logging](security/audit-logging.md)
 - [Provider credentials encryption](security/provider-credentials-encryption.md)
+- [AML transaction monitoring](AML_TRANSACTION_MONITORING.md)
 - [Configuration reference](config/CONFIGURATION.md)
 
 ## Keeping this index healthy
