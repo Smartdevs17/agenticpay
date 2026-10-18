@@ -19,8 +19,10 @@ Use this page as the entry point for the repository's maintained guides. API-spe
 - [Payment correctness](PAYMENT_CORRECTNESS.md)
 - [Payment provider routing](PAYMENT_ROUTING.md)
 - [Payout approvals](PAYOUT_APPROVALS.md)
+- [Payout idempotency](PAYOUT_IDEMPOTENCY.md)
 - [Payout reliability](PAYOUT_RELIABILITY.md)
 - [Subscription usage billing](SUBSCRIPTION_USAGE_BILLING.md)
+- [Multi-currency balances](MULTI_CURRENCY_BALANCES.md)
 - [Wallet payments](WALLET_PAYMENTS.md)
 - [Withdrawal approval security](WITHDRAWAL_SECURITY.md)
 
@@ -38,6 +40,7 @@ Use this page as the entry point for the repository's maintained guides. API-spe
 - [Logging](logging.md)
 - [Security policy](security-policy.md)
 - [Audit logging](security/audit-logging.md)
+- [Provider credentials encryption](security/provider-credentials-encryption.md)
 - [Configuration reference](config/CONFIGURATION.md)
 
 ## Keeping this index healthy

@@ -318,6 +318,9 @@ function asValidationError(error: unknown): AppError {
   if (code === 'PAYOUT_ANOMALY_ALREADY_REVIEWED') {
     return new AppError(409, 'Anomaly flag has already been reviewed', 'ALREADY_REVIEWED');
   }
+  if (code === 'IDEMPOTENCY_KEY_REUSE_MISMATCH') {
+    return new AppError(409, 'Idempotency-Key was reused with a different request body', code);
+  }
   if (!/^[A-Z_]+$/.test(code)) return new AppError(400, 'Invalid request', 'VALIDATION_ERROR');
   return new AppError(400, code.toLowerCase().replace(/_/g, ' '), code);
 }
@@ -341,6 +344,10 @@ payoutsRouter.post(
     if (typeof asset !== 'string' || !SUPPORTED_ASSETS.includes(asset)) {
       throw new AppError(400, `asset must be one of: ${SUPPORTED_ASSETS.join(', ')}`, 'VALIDATION_ERROR');
     }
+    // The service-level idempotency store (#1005) outlives the middleware cache; pass
+    // the header through so a retry after an eviction still returns the original payout.
+    const idempotencyKey =
+      (req.get('Idempotency-Key') as string | undefined) ?? (req.get('X-Idempotency-Key') as string | undefined);
     try {
       const payout = payoutBatcher.schedule({
         merchantId: requireId(merchantId, 'merchantId'),
@@ -350,6 +357,7 @@ payoutsRouter.post(
         scheduledFor: optionalDate(scheduledFor, 'scheduledFor'),
         ...(provider !== undefined ? { provider } : {}),
         ...(reference !== undefined ? { reference } : {}),
+        ...(idempotencyKey ? { idempotencyKey } : {}),
         actorId: principal.id,
       });
       res.status(201).json({ data: payout });

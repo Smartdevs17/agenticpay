@@ -9,6 +9,7 @@ import {
   verifyGithubProviderWebhook,
   verifyPaypalProviderWebhook,
   verifyCustomProviderWebhook,
+  verifyBankPartnerWebhook,
   type ProviderVerificationResult,
 } from '../services/webhooks/providers.js';
 import { isReplayEvent } from '../services/webhooks/replay.js';
@@ -49,10 +50,18 @@ const providerVerifiers: Record<WebhookProvider, ProviderVerifier> = {
 };
 
 export function verifyWebhookProvider(provider: WebhookProvider) {
+  return createWebhookVerifier(provider, providerVerifiers[provider]);
+}
+
+/**
+ * Builds a verification middleware around any provider verifier. Extracted so
+ * additional partners (e.g. the bank-partner payout webhook, #1006) can reuse the
+ * same store/replay/queue behaviour without widening the `WebhookProvider` enum.
+ */
+export function createWebhookVerifier(provider: WebhookProvider, verify: ProviderVerifier) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawBody = req.rawBody ?? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {}));
-      const verify = providerVerifiers[provider];
       const result = verify(req, rawBody);
 
       storeWebhookPayload({
@@ -62,6 +71,7 @@ export function verifyWebhookProvider(provider: WebhookProvider) {
         signature: (req.headers['stripe-signature'] ||
           req.headers['x-hub-signature-256'] ||
           req.headers['x-signature'] ||
+          req.headers['x-bank-signature'] ||
           '') as string,
         verified: result.isValid,
         error: result.error,
@@ -116,3 +126,6 @@ export const webhookVerifiers = {
   github: verifyWebhookProvider('github'),
   custom: verifyWebhookProvider('custom'),
 };
+
+/** Bank-partner payout webhooks use the shared replay/queue machinery (#1006). */
+export const bankPartnerWebhookVerifier = createWebhookVerifier('custom', verifyBankPartnerWebhook);

@@ -194,6 +194,23 @@ export function verifyCustomProviderWebhook(req: Request, rawBody: string): Prov
   };
 }
 
+/**
+ * Bank-partner payout webhooks (#1006).
+ *
+ * Partners sign the raw body with HMAC-SHA256 and send it in `x-bank-signature`
+ * alongside `x-bank-timestamp`. Signatures are verified against the registered
+ * secret set with the same replay tolerance as the other providers.
+ */
+export function verifyBankPartnerWebhook(req: Request, rawBody: string): ProviderVerificationResult {
+  return verifyGenericProviderWebhook(
+    'custom',
+    req,
+    rawBody,
+    'x-bank-signature',
+    'x-bank-timestamp',
+  );
+}
+
 /** Dev/test helper: sign outbound webhooks with AgenticPay format */
 export function signTestWebhook(payload: string, secret: string, timestamp: string): string {
   return generateWebhookSignature(payload, secret, timestamp);

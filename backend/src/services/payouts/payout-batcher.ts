@@ -26,6 +26,11 @@ import {
   type PayoutAnomalyDetector,
   type PayoutAnomalyFlag,
 } from './payout-anomaly-detector.js';
+import {
+  DEFAULT_PAYOUT_IDEMPOTENCY_TTL_MS,
+  PayoutIdempotencyStore,
+  fingerprintPayoutRequest,
+} from './payout-idempotency.js';
 
 export const DEFAULT_PAYOUT_PROVIDER = 'default';
 export const DEFAULT_MAX_BATCH_SIZE = 100;
@@ -45,6 +50,11 @@ export interface ScheduleScheduledPayoutInput {
   /** Caller reference, echoed back in reports. */
   reference?: string;
   actorId?: string;
+  /**
+   * Idempotency key (#1005). Scheduling twice with the same key and body returns the
+   * original payout; the same key with a different body is rejected.
+   */
+  idempotencyKey?: string;
 }
 
 export interface ScheduledPayout {
@@ -146,6 +156,8 @@ export interface PayoutBatcherOptions {
   feePerProviderCall?: number;
   auditLog?: MoneyMovementAuditLog;
   anomalyDetector?: PayoutAnomalyDetector;
+  /** How long a payout-creation idempotency key is remembered. Defaults to 24h. */
+  idempotencyTtlMs?: number;
   now?: () => Date;
 }
 
@@ -178,6 +190,7 @@ export class PayoutBatcher {
   private readonly providers: Record<string, PayoutBatchProvider>;
   private readonly auditLog?: MoneyMovementAuditLog;
   private readonly anomalyDetector?: PayoutAnomalyDetector;
+  private readonly idempotency: PayoutIdempotencyStore<ScheduledPayout>;
   private readonly now: () => Date;
   private runInFlight = false;
 
@@ -202,6 +215,13 @@ export class PayoutBatcher {
     this.auditLog = options.auditLog;
     this.anomalyDetector = options.anomalyDetector;
     this.now = options.now ?? (() => new Date());
+    // Share the batcher clock with the idempotency store so an injected `now` drives
+    // key expiry as well as payout timestamps.
+    this.idempotency = new PayoutIdempotencyStore<ScheduledPayout>(
+      options.idempotencyTtlMs ?? DEFAULT_PAYOUT_IDEMPOTENCY_TTL_MS,
+      undefined,
+      () => this.now().getTime(),
+    );
     this.anomalyDetector?.onReview((flag) => this.onAnomalyReviewed(flag));
   }
 
@@ -219,6 +239,28 @@ export class PayoutBatcher {
     const scheduledFor = input.scheduledFor ?? this.now();
     if (!(scheduledFor instanceof Date) || Number.isNaN(scheduledFor.getTime())) {
       throw new Error('INVALID_PAYOUT_SCHEDULED_FOR');
+    }
+
+    // Idempotency (#1005): replay an earlier scheduling result verbatim, and reject a
+    // key that is being reused with a different body rather than silently paying twice.
+    const idempotencyKey =
+      input.idempotencyKey !== undefined
+        ? requireText(input.idempotencyKey, 'INVALID_PAYOUT_IDEMPOTENCY_KEY')
+        : undefined;
+    const fingerprint = fingerprintPayoutRequest({
+      merchantId,
+      recipient,
+      asset,
+      provider,
+      amount: input.amount,
+      reference: input.reference,
+      scheduledFor: input.scheduledFor ? scheduledFor.toISOString() : undefined,
+    });
+
+    if (idempotencyKey) {
+      const existing = this.idempotency.lookup(idempotencyKey, fingerprint);
+      if (existing.status === 'mismatch') throw new Error('IDEMPOTENCY_KEY_REUSE_MISMATCH');
+      if (existing.status === 'replay') return snapshotPayout(existing.value);
     }
 
     const createdAt = this.now();
@@ -255,7 +297,14 @@ export class PayoutBatcher {
       this.audit('system', 'payout.held', payout, { rules: flags.map((flag) => flag.rule) });
     }
 
-    return snapshotPayout(payout);
+    const snapshot = snapshotPayout(payout);
+    if (idempotencyKey) this.idempotency.save(idempotencyKey, fingerprint, snapshot);
+    return snapshot;
+  }
+
+  /** Drops expired payout-creation idempotency keys. Call from a scheduled job. */
+  purgeExpiredIdempotencyKeys(): number {
+    return this.idempotency.purgeExpired();
   }
 
   /** Cancels a payout that has not been sent yet. */
@@ -342,6 +391,7 @@ export class PayoutBatcher {
     this.payouts.clear();
     this.batches.clear();
     this.runs.clear();
+    this.idempotency.clear();
   }
 
   // ── internals ──────────────────────────────────────────────────────────────

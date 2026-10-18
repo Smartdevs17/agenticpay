@@ -26,6 +26,7 @@ import { formsRouter } from './routes/forms.js';
 import { twoFactorAuthRouter } from './routes/2fa.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import { webhookHandlersRouter } from './routes/webhookHandlers.js';
+import { webhookJsonParser } from './middleware/webhookVerification.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { batchProcessor } from './services/batch.js';
 import { featureFlags } from './config/featureFlags.js';
@@ -134,6 +135,7 @@ import { getScheduledTasks } from './config/scheduled-tasks.js';
 import { bullMQMonitorRouter } from './routes/bullmq-monitor.js';
 import { fileUploadRouter } from './routes/file-upload.js';
 import { credentialRotationRouter } from './routes/credential-rotation.js';
+import { providerCredentialsRouter } from './routes/provider-credentials.js';
 import zkIdentityRouter from './routes/zk-identity.js';
 import { coldStartMonitorRouter } from './routes/cold-start-monitor.js';
 import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
@@ -229,6 +231,10 @@ app.use(httpLogger);
 
 // Incoming webhooks: raw body capture before global JSON parser (#393)
 app.use('/webhooks', webhookHandlersRouter);
+
+// Bank-partner payout webhooks need the raw body for HMAC verification (#1006).
+// Mounted before the global JSON parser so `req.rawBody` is populated.
+app.use('/api/v1/fiat-payments/webhooks', webhookJsonParser);
 
 // KYC document uploads carry base64 file contents (up to 10 MB decoded) (#921)
 app.use('/api/v1/kyc', express.json({ limit: '15mb' }));
@@ -392,6 +398,7 @@ app.use('/api/v1/uploads', fileUploadRouter);
 
 // Credential rotation management with dual-key overlap and audit trail (Issue #395)
 app.use('/api/v1/credentials', credentialRotationRouter);
+app.use('/api/v1/provider-credentials', providerCredentialsRouter);
 
 // Microservices service mesh — registry, discovery, circuit breakers
 app.use('/api/v1/service-mesh', serviceMeshRouter);
