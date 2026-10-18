@@ -22,6 +22,31 @@ export type SandboxPaymentResult = {
   timestamp: string;
 };
 
+export const SANDBOX_MOCK_PAYMENTS: SandboxPaymentResult[] = [
+  {
+    transactionHash: 'mock_tx_0001',
+    status: 'success',
+    ledger: 1_000_001,
+    timestamp: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    transactionHash: 'mock_tx_0002',
+    status: 'success',
+    ledger: 1_000_002,
+    timestamp: '2026-01-02T00:00:00.000Z',
+  },
+];
+
+/** Build a deterministic mock payment result for offline sandbox tests. */
+export function createMockPaymentResult(input: SandboxPaymentInput, ledger = 1_000_000): SandboxPaymentResult {
+  return {
+    transactionHash: `mock_${input.from}_${input.to}_${input.amount}_${input.currency}`,
+    status: 'success',
+    ledger,
+    timestamp: new Date(0).toISOString(),
+  };
+}
+
 export class SandboxApi {
   constructor(private readonly client: AgenticPayClient) {}
 
