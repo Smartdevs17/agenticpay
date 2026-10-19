@@ -14,9 +14,8 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { createWriteStream, createReadStream, existsSync, mkdirSync } from 'node:fs';
-import { unlink, stat, readdir, rm } from 'node:fs/promises';
+import { unlink, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import type { Request, Response, NextFunction } from 'express';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -54,13 +53,13 @@ export interface UploadedFile {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const CATEGORY_MAX_BYTES: Record<UploadCategory, number> = {
+export const CATEGORY_MAX_BYTES: Record<UploadCategory, number> = {
   kyc: 10 * 1024 * 1024,      // 10 MB
   dispute: 20 * 1024 * 1024,  // 20 MB
   general: 5 * 1024 * 1024,   //  5 MB
 };
 
-const CATEGORY_ALLOWED_TYPES: Record<UploadCategory, string[]> = {
+export const CATEGORY_ALLOWED_TYPES: Record<UploadCategory, string[]> = {
   kyc: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
   dispute: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf', 'video/mp4'],
   general: ['image/jpeg', 'image/png', 'image/gif', 'application/pdf', 'text/plain'],
@@ -94,7 +93,7 @@ function detectMimeFromBytes(buffer: Buffer): string | undefined {
   return undefined;
 }
 
-function validateMagicBytes(buffer: Buffer, declaredMime: string): boolean {
+export function validateMagicBytes(buffer: Buffer, declaredMime: string): boolean {
   const sig = MAGIC_SIGNATURES.find((s) => s.mimes.includes(declaredMime));
   if (!sig) return false; // unknown type → reject
   if (sig.magic.length === 0) return true; // text/plain — skip magic check

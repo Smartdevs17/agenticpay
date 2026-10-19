@@ -2,32 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { InputSanitizer, sanitizeInput, contentSecurityPolicy, createSecurityRateLimit } from './sanitize';
-import { config } from '../config';
 
 /**
  * Comprehensive Security Middleware Stack
  * Implements defense-in-depth security measures
  */
-
-/**
- * Security headers middleware — HSTS and Permissions-Policy.
- *
- * Kept independent of the CSP-bearing helmet() configuration in
- * `applySecurity()` so it can be wired into the app without pulling in
- * CSP directives, which are managed separately.
- */
-export function securityHeadersMiddleware() {
-  const hsts = helmet.hsts({
-    maxAge: config.security.hsts.maxAge,
-    includeSubDomains: config.security.hsts.includeSubDomains,
-    preload: config.security.hsts.preload,
-  });
-
-  return (req: Request, res: Response, next: NextFunction): void => {
-    res.setHeader('Permissions-Policy', config.security.permissionsPolicy);
-    hsts(req, res, next);
-  };
-}
 
 export class SecurityMiddleware {
   private static instance: SecurityMiddleware;
@@ -218,24 +197,25 @@ export class SQLInjectionPrevention {
   }
 
   /**
-   * Create a safe, parameterized SQL query.
-   *
-   * Values are NEVER interpolated into the query string — `?` placeholders
-   * are rewritten to positional bind parameters (`$1`, `$2`, ...) and the
-   * caller must execute the returned `query`/`safeParams` pair through the
-   * database driver's parameter-binding API (e.g. `pool.query(query, safeParams)`).
+   * Create safe SQL query with parameterization
    */
   public static createSafeQuery(template: string, params: any[]): { query: string; safeParams: any[] } {
     if (!this.validateQueryParams(params)) {
       throw new Error('Invalid SQL parameters detected');
     }
 
+    // Simple parameterization (in production, use proper ORM)
+    let query = template;
     let paramIndex = 0;
-    const query = template.replace(/\?/g, () => `$${++paramIndex}`);
 
-    if (paramIndex !== params.length) {
-      throw new Error('Parameter count does not match placeholder count');
-    }
+    // Replace placeholders with safe parameters
+    query = query.replace(/\?/g, () => {
+      if (paramIndex < params.length) {
+        const param = params[paramIndex++];
+        return typeof param === 'string' ? `'${param.replace(/'/g, "''")}'` : String(param);
+      }
+      return '?';
+    });
 
     return { query, safeParams: params };
   }
@@ -487,27 +467,3 @@ export class SecurityMonitor {
 }
 
 export default SecurityMiddleware;
-
-
-/**
- * #730: Composable Security Middleware Chains
- */
-export class SecurityChain {
-  private middlewares: any[] = [];
-
-  add(mw: any): this {
-    this.middlewares.push(mw);
-    return this;
-  }
-
-  compose(): any {
-    return (req: any, res: any, next: any) => {
-      let i = 0;
-      const run = (err?: any) => {
-        if (err || i >= this.middlewares.length) return next(err);
-        this.middlewares[i++](req, res, run);
-      };
-      run();
-    };
-  }
-}

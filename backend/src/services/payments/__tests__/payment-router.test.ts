@@ -53,6 +53,23 @@ describe('ProviderPaymentRouter', () => {
     if (result.ok) expect(result.value.providerId).toBe('soroban');
   });
 
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid amount %s before invoking a provider',
+    async (amount) => {
+      const provider = new MockPaymentProvider('soroban');
+      registry.register(provider);
+
+      const result = await router.route({ ...baseInput, amount });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('INVALID_PAYMENT_AMOUNT');
+        expect(result.error.statusCode).toBe(400);
+      }
+      expect(registry.getMetrics('soroban')).toMatchObject({ successCount: 0, errorCount: 0 });
+    },
+  );
+
   it('falls back to another healthy strategy when the primary one fails', async () => {
     registry.register(new MockPaymentProvider('soroban', { shouldFail: true }));
     registry.register(new MockPaymentProvider('evm'));

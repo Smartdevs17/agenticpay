@@ -89,6 +89,19 @@
     "coverage": "Coverage",
     "namespace": "Namespace"
   },
+  "upload": {
+    "dragDrop": "Drag and drop your file here",
+    "clickSelect": "or click to select a file",
+    "fileTooLarge": "File is too large",
+    "success": "File uploaded successfully",
+    "error": "Failed to upload file"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "noNotifications": "No notifications",
+    "markAsRead": "Mark as read",
+    "clear": "Clear all"
+  },
   "metadata": {
     "title": "AgenticPay - Get Paid Instantly for Your Work",
     "description": "Secure, fast, and transparent payments for freelancers powered by blockchain technology."

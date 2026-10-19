@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useState } from 'react';
 import { useAllowancesStore, TokenAllowance, ApprovalHistoryItem } from '@/store/useAllowancesStore';
 import { useAuthStore } from '@/store/useAuthStore';

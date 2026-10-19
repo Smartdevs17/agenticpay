@@ -1,220 +1,150 @@
 import { Router, Request, Response } from 'express';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
-import { validate } from '../middleware/validate.js';
-import { requirePermission, resolveWorkspace } from '../middleware/rbac.js';
-import {
-    createWorkspace,
-    getWorkspace,
-    getWorkspaceBySlug,
-    updateWorkspace,
-    deleteWorkspace,
-    listWorkspaces,
-    addMember,
-    updateMemberRole,
-    removeMember,
-    getMembers,
-    createInvitation,
-    acceptInvitation,
-    declineInvitation,
-    listInvitations,
-    getMemberRole,
-} from '../services/workspaces.js';
+import { randomUUID } from 'node:crypto';
+import { asyncHandler } from '../middleware/errorHandler.js';
+import { prisma } from '../config/database.js';
 
 export const workspacesRouter = Router();
 
-// ── Workspace CRUD ───────────────────────────────────────────────────────────
+interface WorkspaceRequest extends Request {
+  tenantId?: string;
+}
 
-workspacesRouter.post(
-    '/',
-    asyncHandler(async (req: Request, res: Response) => {
-        const { name, description, logoUrl, settings } = req.body;
-        const userId = (req as any).user?.id || req.body.userId;
-        if (!userId) {
-            throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
-        }
-        const workspace = createWorkspace({ name, description, logoUrl, ownerId: userId, settings });
-        res.status(201).json({ data: workspace });
-    }),
-);
+workspacesRouter.post('/', asyncHandler(async (req: WorkspaceRequest, res: Response) => {
+  const { name, description, type = 'standard' } = req.body;
 
-workspacesRouter.get(
-    '/',
-    asyncHandler(async (req: Request, res: Response) => {
-        const userId = (req as any).user?.id || req.query.userId as string;
-        if (!userId) {
-            throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
-        }
-        const workspaces = listWorkspaces(userId);
-        res.json({ data: workspaces, count: workspaces.length });
-    }),
-);
+  if (!name) {
+    res.status(400).json({ error: 'Workspace name is required' });
+    return;
+  }
 
-workspacesRouter.get(
-    '/:workspaceId',
-    resolveWorkspace,
-    asyncHandler(async (req: Request, res: Response) => {
-        const workspaceId = req.params.workspaceId;
-        const workspace = getWorkspace(workspaceId);
-        if (!workspace) {
-            throw new AppError(404, 'Workspace not found', 'NOT_FOUND');
-        }
-        res.json({ data: workspace });
-    }),
-);
+  const workspaceId = randomUUID();
+  const metadata = {
+    type,
+    createdBy: req.tenantId,
+    createdAt: new Date().toISOString(),
+  };
 
-workspacesRouter.patch(
-    '/:workspaceId',
-    resolveWorkspace,
-    requirePermission('workspace:update'),
-    asyncHandler(async (req: Request, res: Response) => {
-        const workspaceId = req.params.workspaceId;
-        const { name, description, logoUrl, settings } = req.body;
-        const updated = updateWorkspace(workspaceId, { name, description, logoUrl, settings });
-        if (!updated) {
-            throw new AppError(404, 'Workspace not found', 'NOT_FOUND');
-        }
-        res.json({ data: updated });
-    }),
-);
+  res.status(201).json({
+    id: workspaceId,
+    name,
+    description,
+    type,
+    metadata,
+  });
+}));
 
-workspacesRouter.delete(
-    '/:workspaceId',
-    resolveWorkspace,
-    requirePermission('workspace:delete'),
-    asyncHandler(async (req: Request, res: Response) => {
-        const workspaceId = req.params.workspaceId;
-        const deleted = deleteWorkspace(workspaceId);
-        if (!deleted) {
-            throw new AppError(404, 'Workspace not found', 'NOT_FOUND');
-        }
-        res.json({ data: { message: 'Workspace deleted' } });
-    }),
-);
+workspacesRouter.get('/', asyncHandler(async (req: WorkspaceRequest, res: Response) => {
+  const { limit = '50', offset = '0' } = req.query;
 
-// ── Member Management ────────────────────────────────────────────────────────
+  const projects = await prisma.project.findMany({
+    where: { tenantId: req.tenantId },
+    take: Math.min(Number(limit), 100),
+    skip: Number(offset),
+    orderBy: { createdAt: 'desc' },
+  });
 
-workspacesRouter.get(
-    '/:workspaceId/members',
-    resolveWorkspace,
-    requirePermission('workspace:read'),
-    asyncHandler(async (req: Request, res: Response) => {
-        const workspaceId = req.params.workspaceId;
-        const members = getMembers(workspaceId);
-        res.json({ data: members, count: members.length });
-    }),
-);
+  const total = await prisma.project.count({ where: { tenantId: req.tenantId } });
 
-workspacesRouter.post(
-    '/:workspaceId/members',
-    resolveWorkspace,
-    requirePermission('workspace:manage_members'),
-    asyncHandler(async (req: Request, res: Response) => {
-        const workspaceId = req.params.workspaceId;
-        const { userId, role } = req.body;
-        if (!userId) {
-            throw new AppError(400, 'userId is required', 'VALIDATION_ERROR');
-        }
-        const member = addMember(workspaceId, userId, role || 'member');
-        if (!member) {
-            throw new AppError(404, 'Workspace not found', 'NOT_FOUND');
-        }
-        res.status(201).json({ data: member });
-    }),
-);
+  res.status(200).json({
+    total,
+    limit: Number(limit),
+    offset: Number(offset),
+    workspaces: projects.map(p => ({
+      id: p.id,
+      name: p.title,
+      description: p.description,
+      status: p.status,
+      createdAt: p.createdAt,
+    })),
+  });
+}));
 
-workspacesRouter.patch(
-    '/:workspaceId/members/:userId',
-    resolveWorkspace,
-    requirePermission('workspace:manage_members'),
-    asyncHandler(async (req: Request, res: Response) => {
-        const { workspaceId, userId } = req.params;
-        const { role } = req.body;
-        if (!role) {
-            throw new AppError(400, 'role is required', 'VALIDATION_ERROR');
-        }
-        const updated = updateMemberRole(workspaceId, userId, role);
-        if (!updated) {
-            throw new AppError(404, 'Member not found', 'NOT_FOUND');
-        }
-        res.json({ data: updated });
-    }),
-);
+workspacesRouter.get('/:workspaceId', asyncHandler(async (req: WorkspaceRequest, res: Response) => {
+  const { workspaceId } = req.params;
 
-workspacesRouter.delete(
-    '/:workspaceId/members/:userId',
-    resolveWorkspace,
-    requirePermission('workspace:manage_members'),
-    asyncHandler(async (req: Request, res: Response) => {
-        const { workspaceId, userId } = req.params;
-        const removed = removeMember(workspaceId, userId);
-        if (!removed) {
-            throw new AppError(404, 'Member not found', 'NOT_FOUND');
-        }
-        res.json({ data: { message: 'Member removed' } });
-    }),
-);
+  const workspace = await prisma.project.findFirst({
+    where: { id: workspaceId, tenantId: req.tenantId },
+    include: { milestones: true, payments: true },
+  });
 
-// ── Invitations ──────────────────────────────────────────────────────────────
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
 
-workspacesRouter.post(
-    '/:workspaceId/invitations',
-    resolveWorkspace,
-    requirePermission('workspace:manage_members'),
-    asyncHandler(async (req: Request, res: Response) => {
-        const workspaceId = req.params.workspaceId;
-        const { email, role } = req.body;
-        const invitedBy = (req as any).user?.id || req.body.invitedBy;
-        if (!email) {
-            throw new AppError(400, 'email is required', 'VALIDATION_ERROR');
-        }
-        const invitation = createInvitation({ workspaceId, email, role: role || 'member', invitedBy });
-        res.status(201).json({ data: invitation });
-    }),
-);
+  res.status(200).json({
+    id: workspace.id,
+    name: workspace.title,
+    description: workspace.description,
+    status: workspace.status,
+    totalAmount: workspace.totalAmount,
+    currency: workspace.currency,
+    clientAddress: workspace.clientAddress,
+    freelancerAddress: workspace.freelancerAddress,
+    milestonesCount: workspace.milestones.length,
+    paymentsCount: workspace.payments.length,
+    createdAt: workspace.createdAt,
+    updatedAt: workspace.updatedAt,
+  });
+}));
 
-workspacesRouter.get(
-    '/:workspaceId/invitations',
-    resolveWorkspace,
-    requirePermission('workspace:manage_members'),
-    asyncHandler(async (req: Request, res: Response) => {
-        const workspaceId = req.params.workspaceId;
-        const invitations = listInvitations(workspaceId);
-        res.json({ data: invitations, count: invitations.length });
-    }),
-);
+workspacesRouter.put('/:workspaceId', asyncHandler(async (req: WorkspaceRequest, res: Response) => {
+  const { workspaceId } = req.params;
+  const { name, description, status } = req.body;
 
-workspacesRouter.post(
-    '/invitations/:token/accept',
-    asyncHandler(async (req: Request, res: Response) => {
-        const token = req.params.token;
-        const userId = (req as any).user?.id || req.body.userId;
-        if (!userId) {
-            throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
-        }
-        const member = acceptInvitation(token, userId);
-        res.json({ data: member });
-    }),
-);
+  const workspace = await prisma.project.findFirst({
+    where: { id: workspaceId, tenantId: req.tenantId },
+  });
 
-workspacesRouter.post(
-    '/invitations/:token/decline',
-    asyncHandler(async (req: Request, res: Response) => {
-        const token = req.params.token;
-        const invitation = declineInvitation(token);
-        res.json({ data: invitation });
-    }),
-);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
 
-// ── Slug Lookup ──────────────────────────────────────────────────────────────
+  const updated = await prisma.project.update({
+    where: { id: workspaceId },
+    data: {
+      ...(name && { title: name }),
+      ...(description && { description }),
+      ...(status && { status: status as any }),
+      updatedAt: new Date(),
+    },
+  });
 
-workspacesRouter.get(
-    '/slug/:slug',
-    asyncHandler(async (req: Request, res: Response) => {
-        const slug = req.params.slug;
-        const workspace = getWorkspaceBySlug(slug);
-        if (!workspace) {
-            throw new AppError(404, 'Workspace not found', 'NOT_FOUND');
-        }
-        res.json({ data: workspace });
-    }),
-);
+  res.status(200).json({
+    id: updated.id,
+    name: updated.title,
+    description: updated.description,
+    status: updated.status,
+    updatedAt: updated.updatedAt,
+  });
+}));
+
+workspacesRouter.get('/:workspaceId/members', asyncHandler(async (req: WorkspaceRequest, res: Response) => {
+  const { workspaceId } = req.params;
+
+  const workspace = await prisma.project.findFirst({
+    where: { id: workspaceId, tenantId: req.tenantId },
+  });
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  res.status(200).json({
+    workspaceId,
+    members: [
+      {
+        address: workspace.clientAddress,
+        role: 'client',
+        joinedAt: workspace.createdAt,
+      },
+      {
+        address: workspace.freelancerAddress,
+        role: 'freelancer',
+        joinedAt: workspace.createdAt,
+      },
+    ],
+  });
+}));

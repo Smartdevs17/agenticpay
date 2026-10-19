@@ -144,3 +144,47 @@ describe('fiatPaymentsService', () => {
     expect(report.byMethod.ach.count).toBe(1);
   });
 });
+describe('fiatPaymentsService payment correctness', () => {
+  beforeEach(() => {
+    fiatPaymentsService.resetForTests();
+  });
+
+  const createVerifiedAccount = () =>
+    fiatPaymentsService.createBankAccount({
+      accountHolderName: 'Correctness Co',
+      bankName: 'Chase',
+      accountNumberMasked: '****2222',
+      routingNumber: '021000021',
+      verificationMethod: 'plaid',
+      countryCode: 'US',
+    });
+
+  const paymentInput = (bankAccountId: string, amount: number) => ({
+    method: 'ach' as const,
+    bankAccountId,
+    recipient: {
+      name: 'Vendor LLC',
+      accountNumberMasked: '****4444',
+      routingNumber: '021000021',
+      bankName: 'Wells Fargo',
+      countryCode: 'US',
+    },
+    amount,
+    currency: 'USD',
+    isInternational: false,
+    description: 'Invoice payout',
+  });
+
+  it.each([0, -50, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid amount %s', (amount) => {
+    const account = createVerifiedAccount();
+    expect(() => fiatPaymentsService.createPayment(paymentInput(account.id, amount))).toThrow('INVALID_PAYMENT_AMOUNT');
+  });
+
+  it('keeps no payments from a batch when one of its payments is invalid', () => {
+    const account = createVerifiedAccount();
+    const inputs = [paymentInput(account.id, 100), paymentInput(account.id, 0)];
+
+    expect(() => fiatPaymentsService.createBatch('batch-ref', inputs)).toThrow('INVALID_PAYMENT_AMOUNT');
+    expect(fiatPaymentsService.listPayments()).toHaveLength(0);
+  });
+});

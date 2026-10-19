@@ -212,6 +212,15 @@ export function listWithdrawalRequests(walletId?: string): WithdrawalRequest[] {
 
 export class WithdrawalApprovalError extends Error {}
 
+function assertAuthorizedApprover(config: WalletWithdrawalConfig, approver: string): void {
+  if (config.approvers.length === 0) {
+    throw new WithdrawalApprovalError('No approvers are configured for this wallet');
+  }
+  if (!config.approvers.includes(approver)) {
+    throw new WithdrawalApprovalError(`'${approver}' is not an authorized approver for this wallet`);
+  }
+}
+
 export function approveWithdrawal(id: string, approver: string): WithdrawalRequest {
   const request = withdrawalRequests.get(id);
   if (!request) throw new WithdrawalApprovalError('Withdrawal request not found');
@@ -220,9 +229,7 @@ export function approveWithdrawal(id: string, approver: string): WithdrawalReque
   }
 
   const cfg = getOrCreateConfig(request.walletId);
-  if (cfg.approvers.length > 0 && !cfg.approvers.includes(approver)) {
-    throw new WithdrawalApprovalError(`'${approver}' is not an authorized approver for this wallet`);
-  }
+  assertAuthorizedApprover(cfg, approver);
   if (!request.approvals.includes(approver)) {
     request.approvals.push(approver);
   }
@@ -241,6 +248,9 @@ export function rejectWithdrawal(id: string, approver: string): WithdrawalReques
   if (request.status !== 'pending_approval') {
     throw new WithdrawalApprovalError(`Cannot reject a request in status '${request.status}'`);
   }
+
+  const cfg = getOrCreateConfig(request.walletId);
+  assertAuthorizedApprover(cfg, approver);
 
   request.rejections.push(approver);
   request.status = 'rejected';

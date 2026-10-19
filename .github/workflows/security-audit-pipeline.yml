@@ -234,11 +234,6 @@ jobs:
     if: >-
       ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         && (github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'dast' || github.event_name != 'workflow_dispatch') }}
-    services:
-      backend:
-        image: node:20-alpine
-        ports:
-          - 3001:3001
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -106,7 +106,7 @@ export default function TaxReportsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 invoice-print-page">
       <div>
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -206,7 +206,7 @@ export default function TaxReportsPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
               >
-                <Card className="hover:shadow-lg transition-all border border-gray-200">
+                <Card className="hover:shadow-lg transition-all border border-gray-200 invoice-print-card">
                   <CardContent className="p-6">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">

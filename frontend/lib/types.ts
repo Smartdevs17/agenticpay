@@ -1,19 +1,3 @@
-import type {
-  Invoice as CanonicalInvoice,
-  Milestone as CanonicalMilestone,
-  Payment as CanonicalPayment,
-  Project as CanonicalProject,
-  User as CanonicalUser,
-} from "@agenticpay/types";
-
-export type {
-  CanonicalInvoice,
-  CanonicalMilestone,
-  CanonicalPayment,
-  CanonicalProject,
-  CanonicalUser,
-};
-
 export interface User {
   name: string;
   address: string;
@@ -46,6 +30,8 @@ export interface Project {
   rawStatus?: number; // Enum index
   milestones: Milestone[];
   createdAt: string;
+  /** ISO 8601 project deadline as stored on-chain (issue #65). */
+  deadline?: string;
   githubRepo?: string;
   invoiceUri?: string; // Added invoiceUri
 }
@@ -80,3 +66,4 @@ export interface Payment {
   timestamp: string;
   escrowId?: string;
 }
+

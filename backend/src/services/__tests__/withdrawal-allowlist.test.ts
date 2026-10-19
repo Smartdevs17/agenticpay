@@ -5,6 +5,7 @@ import {
   removeFromAllowlist,
   isAllowlisted,
   createWithdrawalRequest,
+  getWithdrawalRequest,
   approveWithdrawal,
   rejectWithdrawal,
   markExecuted,
@@ -63,6 +64,33 @@ describe('withdrawal allowlist service', () => {
     });
 
     expect(() => approveWithdrawal(request.id, 'eve')).toThrow(WithdrawalApprovalError);
+  });
+
+  it('fails closed when no withdrawal approvers are configured', () => {
+    const request = createWithdrawalRequest({
+      walletId: 'wallet-unconfigured',
+      toAddress: 'GADDR_UNKNOWN',
+      amount: 50,
+      currency: 'XLM',
+      requestedBy: 'owner',
+    });
+
+    expect(() => approveWithdrawal(request.id, 'owner')).toThrow(/No approvers are configured/);
+    expect(() => rejectWithdrawal(request.id, 'owner')).toThrow(/No approvers are configured/);
+  });
+
+  it('rejects rejection attempts from non-authorized approvers', () => {
+    configureWallet('wallet-reject', { approvalThreshold: 1, approvers: ['alice'] });
+    const request = createWithdrawalRequest({
+      walletId: 'wallet-reject',
+      toAddress: 'GADDR_UNKNOWN',
+      amount: 50,
+      currency: 'XLM',
+      requestedBy: 'owner',
+    });
+
+    expect(() => rejectWithdrawal(request.id, 'eve')).toThrow(WithdrawalApprovalError);
+    expect(getWithdrawalRequest(request.id)?.status).toBe('pending_approval');
   });
 
   it('rejects a withdrawal request and prevents further approval', () => {

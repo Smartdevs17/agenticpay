@@ -9,7 +9,8 @@
   ],
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "npm run test:docs && turbo run test",
+    "test:docs": "node --test scripts/docs-index.test.mjs",
     "lint": "turbo run lint",
     "dev": "turbo run dev",
     "sandbox:up": "docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d && npm run sandbox:seed",
@@ -20,6 +21,8 @@
     "test:integration": "docker compose -f docker-compose.integration.yml run --rm integration-tests",
     "test:integration:down": "docker compose -f docker-compose.integration.yml down -v",
     "test:smoke": "node scripts/smoke/production.mjs",
+    "load:k6": "k6 run tests/load/k6/payment-flow.js",
+    "load:k6:smoke": "k6 run tests/load/k6/smoke.js",
     "test:mutation": "npm --workspace backend run test:mutation",
     "sandbox:faucet": "node scripts/sandbox/faucet.js",
     "dev:contracts": "bash scripts/dev/watch-contracts.sh",
@@ -33,26 +36,25 @@
     "release": "semantic-release"
   },
   "devDependencies": {
-    "turbo": "^1.10.16",
-    "@commitlint/cli": "^18.4.3",
-    "@commitlint/config-conventional": "^18.4.3",
-    "husky": "^8.0.3",
-    "lint-staged": "^15.2.0"
+    "turbo": "^1.10.16"
   },
   "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.62.2",
-    "lightningcss-linux-x64-gnu": "^1.32.0"
+    "@rollup/rollup-linux-x64-gnu": "4.60.2",
+    "@rollup/rollup-linux-x64-musl": "4.60.2",
+    "@tailwindcss/oxide-linux-x64-gnu": "4.2.4",
+    "@tailwindcss/oxide-linux-x64-musl": "4.2.4",
+    "lightningcss-linux-x64-gnu": "1.32.0",
+    "lightningcss-linux-x64-musl": "1.32.0"
   },
-  "dependencies": {
-    "lightningcss": "^1.32.0"
-  },
-  "lint-staged": {
-    "*.{js,jsx,ts,tsx}": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "*.{json,md,yml,yaml}": [
-      "prettier --write"
-    ]
+  "overrides": {
+    "rollup": "4.60.2",
+    "@rollup/rollup-linux-x64-gnu": "4.60.2",
+    "@rollup/rollup-linux-x64-musl": "4.60.2",
+    "@tailwindcss/oxide": "4.2.4",
+    "@tailwindcss/oxide-linux-x64-gnu": "4.2.4",
+    "@tailwindcss/oxide-linux-x64-musl": "4.2.4",
+    "lightningcss": "1.32.0",
+    "lightningcss-linux-x64-gnu": "1.32.0",
+    "lightningcss-linux-x64-musl": "1.32.0"
   }
 }

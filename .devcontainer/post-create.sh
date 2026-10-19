@@ -7,6 +7,21 @@ cd "$ROOT"
 
 echo "==> AgenticPay devcontainer post-create"
 
+# Debug configurations and tasks (Issue #238). `.vscode/` is gitignored, so the
+# templates live in `.devcontainer/vscode/` and are copied in on create. Existing
+# user files are never overwritten.
+mkdir -p "$ROOT/.vscode"
+for template in "$ROOT"/.devcontainer/vscode/*.json; do
+  [ -e "$template" ] || continue
+  target="$ROOT/.vscode/$(basename "$template")"
+  if [ -e "$target" ]; then
+    echo "==> Keeping existing .vscode/$(basename "$template")"
+  else
+    cp "$template" "$target"
+    echo "==> Installed .vscode/$(basename "$template")"
+  fi
+done
+
 # Rust WASM target (Soroban contracts)
 if command -v rustup >/dev/null 2>&1; then
   echo "==> Adding wasm32-unknown-unknown target"

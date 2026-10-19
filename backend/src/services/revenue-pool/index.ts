@@ -53,6 +53,9 @@ export interface RecordDistributionInput {
   amount: string;
 }
 
+/** Basis points in a full allocation. Recipients of one pool may not exceed this in total. */
+export const TOTAL_SHARE_BPS = 10_000;
+
 // ─── Service ────────────────────────────────────────────────────────────────────
 
 export class RevenuePoolService extends BaseService {
@@ -168,14 +171,25 @@ export class RevenuePoolService extends BaseService {
       });
       if (!pool) return this.notFoundFailure('RevenuePool', poolId);
 
-      if (input.ratioBps <= 0 || input.ratioBps > 10_000) {
-        return this.validationFailure('ratioBps must be between 1 and 10_000');
+      if (input.ratioBps <= 0 || input.ratioBps > TOTAL_SHARE_BPS) {
+        return this.validationFailure('ratioBps must be between 1 and 10000');
       }
 
       const existing = await prisma.revenueRecipient.findUnique({
         where: { poolId_wallet: { poolId, wallet: input.wallet } },
       });
       if (existing) return this.conflictFailure('Recipient already exists in this pool');
+
+      // Rejecting only per-recipient overshoot still lets a pool be configured to pay
+      // out more than it receives (e.g. three recipients at 5000 bps each). Enforce
+      // the invariant across the whole pool.
+      const allocated = await this.allocatedBps(poolId);
+      if (allocated + input.ratioBps > TOTAL_SHARE_BPS) {
+        return this.validationFailure(
+          `Recipient shares would total ${allocated + input.ratioBps} bps, exceeding the ${TOTAL_SHARE_BPS} bps a pool can allocate`,
+          { allocatedBps: allocated, requestedBps: input.ratioBps, maxBps: TOTAL_SHARE_BPS },
+        );
+      }
 
       const recipient = await prisma.revenueRecipient.create({
         data: {
@@ -203,8 +217,22 @@ export class RevenuePoolService extends BaseService {
       });
       if (!pool) return this.notFoundFailure('RevenuePool', poolId);
 
-      if (input.ratioBps <= 0 || input.ratioBps > 10_000) {
-        return this.validationFailure('ratioBps must be between 1 and 10_000');
+      if (input.ratioBps <= 0 || input.ratioBps > TOTAL_SHARE_BPS) {
+        return this.validationFailure('ratioBps must be between 1 and 10000');
+      }
+
+      const current = await prisma.revenueRecipient.findUnique({
+        where: { poolId_wallet: { poolId, wallet } },
+      });
+      if (!current) return this.notFoundFailure('RevenueRecipient', wallet);
+
+      const allocated = await this.allocatedBps(poolId);
+      const projected = allocated - current.ratioBps + input.ratioBps;
+      if (projected > TOTAL_SHARE_BPS) {
+        return this.validationFailure(
+          `Recipient shares would total ${projected} bps, exceeding the ${TOTAL_SHARE_BPS} bps a pool can allocate`,
+          { allocatedBps: allocated, requestedBps: input.ratioBps, maxBps: TOTAL_SHARE_BPS },
+        );
       }
 
       const recipient = await prisma.revenueRecipient.update({
@@ -227,6 +255,11 @@ export class RevenuePoolService extends BaseService {
         where: { id: poolId, tenantId, deletedAt: null },
       });
       if (!pool) return this.notFoundFailure('RevenuePool', poolId);
+
+      const existing = await prisma.revenueRecipient.findUnique({
+        where: { poolId_wallet: { poolId, wallet } },
+      });
+      if (!existing) return this.notFoundFailure('RevenueRecipient', wallet);
 
       await prisma.revenueRecipient.delete({
         where: { poolId_wallet: { poolId, wallet } },
@@ -280,6 +313,15 @@ export class RevenuePoolService extends BaseService {
 
   // ── Distributions ───────────────────────────────────────────────────────────
 
+  /** Total basis points currently allocated across a pool's recipients. */
+  private async allocatedBps(poolId: string): Promise<number> {
+    const aggregate = await prisma.revenueRecipient.aggregate({
+      where: { poolId },
+      _sum: { ratioBps: true },
+    });
+    return aggregate._sum.ratioBps ?? 0;
+  }
+
   async recordDistribution(
     poolId: string,
     tenantId: string,
@@ -291,14 +333,22 @@ export class RevenuePoolService extends BaseService {
       });
       if (!pool) return this.notFoundFailure('RevenuePool', poolId);
 
-      if (!input.txHash.trim()) {
+      const txHash = input.txHash.trim();
+      if (!txHash) {
         return this.validationFailure('Transaction hash is required');
       }
+
+      // A chain reorg or a retried indexer replays the same transaction. Recording it
+      // twice would double-count the distribution against every recipient's balance.
+      const duplicate = await prisma.revenueDistribution.findFirst({
+        where: { poolId, txHash },
+      });
+      if (duplicate) return this.ok(duplicate);
 
       const distribution = await prisma.revenueDistribution.create({
         data: {
           poolId,
-          txHash: input.txHash.trim(),
+          txHash,
           amount: input.amount,
           status: 'pending',
         },

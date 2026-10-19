@@ -72,6 +72,11 @@ export class CategoriesController {
     res.status(201).json(result);
   };
 
+  suggestCategories = async (req: Request, res: Response): Promise<void> => {
+    const suggestions = this.service.suggestCategories(req.body ?? {});
+    res.json({ suggestions });
+  };
+
   removeAssignment = async (req: Request, res: Response): Promise<void> => {
     await this.service.removeAssignment(req.params.paymentId, req.params.categoryId);
     res.status(204).end();

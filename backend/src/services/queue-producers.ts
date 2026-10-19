@@ -3,10 +3,11 @@
  * Provides convenient methods to enqueue specific types of jobs
  */
 
-import { messageQueue, QueueJob, JobPriority } from './queue.js';
+import { messageQueue, QueueJob } from './queue.js';
 
-export { messageQueue };
-
+/**
+ * Email job data structure
+ */
 export interface EmailJobData {
   to: string;
   subject: string;
@@ -17,6 +18,9 @@ export interface EmailJobData {
   bcc?: string[];
 }
 
+/**
+ * Notification job data structure
+ */
 export interface NotificationJobData {
   userId: string;
   type: 'info' | 'success' | 'warning' | 'error';
@@ -25,6 +29,9 @@ export interface NotificationJobData {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Webhook job data structure
+ */
 export interface WebhookJobData {
   url: string;
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -33,29 +40,31 @@ export interface WebhookJobData {
   timeout?: number;
 }
 
-export interface EnqueueOptions {
-  priority?: JobPriority;
-  tags?: string[];
-  enqueuedBy?: string;
-  maxAttempts?: number;
+/**
+ * Queue an email to be sent asynchronously
+ */
+export async function queueEmail(emailData: EmailJobData, maxAttempts?: number): Promise<QueueJob> {
+  return messageQueue.enqueue('email', emailData, maxAttempts || 3);
 }
 
-export async function queueEmail(emailData: EmailJobData, options?: EnqueueOptions): Promise<QueueJob> {
-  return messageQueue.enqueue('email', emailData, { maxAttempts: options?.maxAttempts ?? 3, priority: options?.priority, tags: options?.tags, enqueuedBy: options?.enqueuedBy });
-}
-
+/**
+ * Queue a notification to be delivered asynchronously
+ */
 export async function queueNotification(
   notificationData: NotificationJobData,
-  options?: EnqueueOptions
+  maxAttempts?: number
 ): Promise<QueueJob> {
-  return messageQueue.enqueue('notifications', notificationData, { maxAttempts: options?.maxAttempts ?? 5, priority: options?.priority, tags: options?.tags, enqueuedBy: options?.enqueuedBy });
+  return messageQueue.enqueue('notifications', notificationData, maxAttempts || 5);
 }
 
+/**
+ * Queue a webhook call to be delivered asynchronously
+ */
 export async function queueWebhook(
   webhookData: WebhookJobData,
-  options?: EnqueueOptions
+  maxAttempts?: number
 ): Promise<QueueJob> {
-  return messageQueue.enqueue('webhooks', webhookData, { maxAttempts: options?.maxAttempts ?? 5, priority: options?.priority, tags: options?.tags, enqueuedBy: options?.enqueuedBy });
+  return messageQueue.enqueue('webhooks', webhookData, maxAttempts || 5);
 }
 
 /**

@@ -199,6 +199,9 @@ class FiatPaymentsService {
   }
 
   createPayment(input: CreatePaymentInput): FiatPaymentRecord {
+    if (!Number.isFinite(input.amount) || input.amount <= 0) {
+      throw new Error('INVALID_PAYMENT_AMOUNT');
+    }
     const bankAccount = this.bankAccounts.get(input.bankAccountId);
     if (!bankAccount) {
       throw new Error('BANK_ACCOUNT_NOT_FOUND');
@@ -283,7 +286,19 @@ class FiatPaymentsService {
   }
 
   createBatch(reference: string, inputs: CreatePaymentInput[]): { batchId: string; reference: string; payments: FiatPaymentRecord[] } {
-    const payments = inputs.map((input) => this.createPayment(input));
+    // All-or-nothing: if any payment in the batch is rejected, none of the batch is kept.
+    const paymentIdsBefore = new Set(this.payments.keys());
+    const eventCountBefore = this.events.length;
+    let payments: FiatPaymentRecord[];
+    try {
+      payments = inputs.map((input) => this.createPayment(input));
+    } catch (error) {
+      for (const id of [...this.payments.keys()]) {
+        if (!paymentIdsBefore.has(id)) this.payments.delete(id);
+      }
+      this.events.length = eventCountBefore;
+      throw error;
+    }
     return {
       batchId: randomUUID(),
       reference,
@@ -438,7 +453,7 @@ class FiatPaymentsService {
         },
       },
       byStatus,
-      discrepancies,
+      discreancies,
     };
   }
 

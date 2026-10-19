@@ -28,15 +28,16 @@ jobs:
 
       - name: Build bundle
         run: npm run build
+        working-directory: frontend
         env:
           NODE_ENV: production
           ANALYZE: 'false'
+          NEXT_TELEMETRY_DISABLED: '1'
 
       - name: Check bundle size
         run: |
           BUNDLE_SIZE=$(du -sb frontend/.next/static | awk '{print $1}')
-          BUNDLE_SIZE_MB=$(echo "scale=2; $BUNDLE_SIZE / 1048576" | bc)
-          MAX_SIZE_MB=5.0
+          BUNDLE_SIZE_MB=$(echo "scale=2; $BUNDLE_SIZE / 1048576" | bc)          MAX_SIZE_MB=5.0
 
           echo "Bundle Size: ${BUNDLE_SIZE_MB}MB"
 
@@ -49,7 +50,7 @@ jobs:
 
       - name: Analyze bundle with lighthouse
         run: |
-          npm install -g @lhci/cli@0.11.x
+          npm install -g @lhci/cli@0.14.x
           lhci autorun --config=./lighthouse/lighthouse.config.json || true
         continue-on-error: true
 

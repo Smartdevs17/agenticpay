@@ -15,6 +15,8 @@ export interface APIKey {
   description?: string;
   expiresAt?: Date;
   isActive: boolean;
+  /** Issue #824: granular permissions, validated by src/lib/api-key-scopes.ts. */
+  scopes?: string[];
   createdAt: Date;
   updatedAt: Date;
   revokedAt?: Date;

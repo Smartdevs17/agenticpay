@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { customReportService } from '../services/reports/custom-report.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { exportReportRows, type ReportExportFormat } from '../services/reports/report-export.js';
 
 export const reportsRouter = Router();
 
@@ -77,4 +78,19 @@ reportsRouter.get('/templates/list', asyncHandler(async (_req, res) => {
 reportsRouter.get('/:id/data', asyncHandler(async (req, res) => {
   const data = await customReportService.generateReportData(req.params.id);
   res.json(data);
+}));
+
+reportsRouter.get('/:id/export', asyncHandler(async (req, res) => {
+  const format = req.query.format as ReportExportFormat | undefined;
+  if (format !== 'csv' && format !== 'json' && format !== 'excel') {
+    throw new AppError(400, 'format must be csv, json, or excel', 'INVALID_EXPORT_FORMAT');
+  }
+
+  const generated = await customReportService.generateReportData(req.params.id);
+  const exported = exportReportRows(generated.data as Record<string, unknown>[], format);
+  const safeName = generated.report.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'report';
+
+  res.setHeader('Content-Type', exported.contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${safeName}.${exported.extension}"`);
+  res.send(exported.content);
 }));

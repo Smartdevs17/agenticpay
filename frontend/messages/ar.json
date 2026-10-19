@@ -89,6 +89,19 @@
     "coverage": "التغطية",
     "namespace": "مساحة الاسم"
   },
+  "upload": {
+    "dragDrop": "اسحب أفلتِ ملفك هنا",
+    "clickSelect": "أو انقر لتحديد ملف",
+    "fileTooLarge": "الملف كبير جدًا",
+    "success": "تم تحميل الملف بنجاح",
+    "error": "فشل تحميل الملف"
+  },
+  "notifications": {
+    "title": "الإشعارات",
+    "noNotifications": "لا توجد إشعارات",
+    "markAsRead": "وضع علامة كمقروء",
+    "clear": "مسح الكل"
+  },
   "metadata": {
     "title": "AgenticPay - احصل على أجرك فورًا مقابل عملك",
     "description": "مدفوعات آمنة وسريعة وشفافة للمستقلين مدعومة بتقنية البلوكشين."

@@ -14,6 +14,7 @@ import {
   FiatPaymentStatus,
   fiatPaymentsService,
 } from '../services/fiat-payments.js';
+import { bankPartnerWebhookVerifier } from '../middleware/webhookVerification.js';
 
 export const fiatPaymentsRouter = Router();
 
@@ -168,6 +169,7 @@ fiatPaymentsRouter.get(
 
 fiatPaymentsRouter.post(
   '/webhooks/bank-partner',
+  bankPartnerWebhookVerifier,
   validate(bankWebhookSchema),
   asyncHandler(async (req, res) => {
     const payment = fiatPaymentsService.handleWebhook(req.body);

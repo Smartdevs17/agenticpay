@@ -34,6 +34,7 @@ import {
   getConversion,
   listConversions,
   getRate,
+  isSupportedFiatPair,
 } from '../services/fiat-crypto.js';
 
 export const stripeRouter = Router();
@@ -292,21 +293,34 @@ stripeRouter.post('/connect/payment-intents', asyncHandler(async (req, res) => {
 
 stripeRouter.get('/rates', asyncHandler(async (req, res) => {
   const { from = 'USD', to = 'USDC' } = req.query;
-  const rate = getRate(from as string, to as string);
-  res.json({ from, to, rate, updatedAt: new Date().toISOString() });
+  try {
+    const rate = getRate(from as string, to as string);
+    res.json({ from, to, rate, updatedAt: new Date().toISOString() });
+  } catch {
+    throw new AppError(400, `Unsupported rate pair: ${from}/${to}`, 'UNSUPPORTED_FIAT_PAIR');
+  }
 }));
 
-stripeRouter.post('/convert/lock-rate', asyncHandler(async (req, res) => {
+stripeRouter.post('/convert/lock-rate', asyncHandler(async (req: any, res) => {
   const { fromCurrency = 'USD', toAsset = 'USDC', amount } = req.body;
   if (!amount) return res.status(400).json({ error: 'amount required' });
-  const lock = await lockRate(fromCurrency, toAsset, amount);
-  res.json(lock);
+  const userId = req.user?.id ?? req.headers['x-actor-id']?.toString();
+  if (!userId) return res.status(401).json({ error: 'authentication required' });
+  try {
+    const lock = await lockRate(userId, fromCurrency, toAsset, amount);
+    res.json(lock);
+  } catch (error) {
+    const code = error instanceof Error ? error.message.split(':')[0] : 'LOCK_RATE_FAILED';
+    throw new AppError(400, code, code);
+  }
 }));
 
-stripeRouter.post('/convert/confirm', asyncHandler(async (req, res) => {
+stripeRouter.post('/convert/confirm', asyncHandler(async (req: any, res) => {
   const { rateLockId, stripePaymentIntentId } = req.body;
   if (!rateLockId || !stripePaymentIntentId) return res.status(400).json({ error: 'rateLockId and stripePaymentIntentId required' });
-  const conversion = await confirmConversion(rateLockId, stripePaymentIntentId);
+  const userId = req.user?.id ?? req.headers['x-actor-id']?.toString();
+  if (!userId) return res.status(401).json({ error: 'authentication required' });
+  const conversion = await confirmConversion(rateLockId, userId, stripePaymentIntentId);
   res.json(conversion);
 }));
 
@@ -315,6 +329,9 @@ stripeRouter.post('/convert/settle', asyncHandler(async (req, res) => {
   if (!conversionId || !destinationAddress) return res.status(400).json({ error: 'conversionId and destinationAddress required' });
   const conversion = await getConversion(conversionId);
   if (!conversion) return res.status(404).json({ error: 'Conversion not found' });
+  if (!isSupportedFiatPair(conversion.fromCurrency, conversion.toAsset)) {
+    throw new AppError(409, 'Conversion references an unquoted rate pair', 'UNSUPPORTED_FIAT_PAIR');
+  }
   const txHash = await settleToStellar(destinationAddress, conversion.cryptoAmount, conversion.toAsset);
   res.json({ txHash, status: 'settled' });
 }));

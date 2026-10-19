@@ -51,7 +51,6 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
     }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.messageQueue = void 0;
 exports.queueEmail = queueEmail;
 exports.queueNotification = queueNotification;
 exports.queueWebhook = queueWebhook;
@@ -60,7 +59,6 @@ exports.processNotificationJob = processNotificationJob;
 exports.processWebhookJob = processWebhookJob;
 exports.registerDefaultProcessors = registerDefaultProcessors;
 var queue_js_1 = require("./queue.js");
-Object.defineProperty(exports, "messageQueue", { enumerable: true, get: function () { return queue_js_1.messageQueue; } });
 /**
  * Queue an email to be sent asynchronously
  */

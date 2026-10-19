@@ -15,7 +15,11 @@ import { PaymentQRModal } from "@/components/payment/QRCode";
 import { PaymentCardSkeleton } from "@/components/ui/loading-skeletons";
 import { EmptyState } from "@/components/empty/EmptyState";
 import { TransactionList } from "@/components/transaction/TransactionList";
+import { usePaginatedList } from "@/src/hooks/use-paginated-list";
 import { formatDateTimeInTimeZone } from "@/lib/utils";
+
+/** Transactions revealed per scroll page. */
+const PAGE_SIZE = 20;
 
 export default function PaymentsPage() {
   const router = useRouter();
@@ -23,6 +27,13 @@ export default function PaymentsPage() {
   const address = useAuthStore((state) => state.address);
   const timezone = useAuthStore((state) => state.timezone);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+
+  // The payments feed is assembled client-side, so it is paged in memory and
+  // appended as the user scrolls rather than painted all at once.
+  const { visibleItems, hasMore, loadMore } = usePaginatedList({
+    items: payments,
+    pageSize: PAGE_SIZE,
+  });
 
   if (loading) {
     return (
@@ -83,10 +94,14 @@ export default function PaymentsPage() {
         </Card>
       ) : (
         <TransactionList
-          payments={payments}
+          payments={visibleItems}
           timezone={timezone}
           formatDateTime={formatDateTimeInTimeZone}
+          // Derived from the total count, not the revealed page, so the
+          // container does not resize and shift the scroll position mid-scroll.
           height={Math.min(720, Math.max(400, payments.length * 8))}
+          hasMore={hasMore}
+          onLoadMore={loadMore}
         />
       )}
 

@@ -1,6 +1,17 @@
 name: Formal Verification
 
-on: workflow_dispatch
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/formal-verification.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/formal-verification.yml'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

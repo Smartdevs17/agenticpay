@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,6 +22,8 @@ import { toast } from 'sonner';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
 import { ConfirmModal } from '@/components/transaction/ConfirmModal';
+import { RichTextEditor } from '@/components/markdown/RichTextEditor';
+import { serializeWorkDescription } from '@/lib/projects/work-description';
 import { parseEther } from 'viem';
 
 type PendingTransaction = {
@@ -136,6 +138,7 @@ export default function CreateProjectPage() {
 
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors },
     watch,
@@ -195,10 +198,13 @@ export default function CreateProjectPage() {
       // or just use description. The contract takes `_workDescription`.
       // Let's use JSON format for better structure if we want to include milestones later, 
       // but for now just a string.
-      const workDesc = JSON.stringify({
+      // Descriptions are authored as markdown (issue #795) and persisted as
+      // both markdown and HTML (issue #90) so consumers that cannot render
+      // markdown can display the description directly.
+      const workDesc = serializeWorkDescription({
         title: data.title,
         description: data.description,
-        repo: data.githubRepo
+        repo: data.githubRepo,
       });
 
       const prepared = await prepareTransaction('createProject', [
@@ -248,10 +254,19 @@ export default function CreateProjectPage() {
 
               <div>
                 <Label htmlFor="description">Description</Label>
-                <Input
-                  id="description"
-                  {...register('description')}
-                  placeholder="Brief description of work"
+                <Controller
+                  name="description"
+                  control={control}
+                  render={({ field }) => (
+                    <RichTextEditor
+                      id="description"
+                      value={field.value ?? ''}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      maxLength={5000}
+                      placeholder="Describe the work — supports **markdown**, images, and formatting"
+                    />
+                  )}
                 />
               </div>
 

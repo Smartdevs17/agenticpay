@@ -1,6 +1,9 @@
 name: Canary Deployment
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, dev]
 
 jobs:
   canary-10:
@@ -39,6 +42,7 @@ jobs:
 
   rollback:
     name: Auto-Rollback
+    needs: [canary-10, canary-50, production-rollout]
     if: failure()
     runs-on: ubuntu-latest
     steps:

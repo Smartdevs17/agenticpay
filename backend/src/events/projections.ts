@@ -42,13 +42,7 @@ function now(): string {
   return new Date().toISOString();
 }
 
-let projectionsRegistered = false;
-
-export function registerProjections(): void {
-  if (projectionsRegistered) return;
-  projectionsRegistered = true;
-
-  subscribe('payment.created', (event: StoredEvent) => {
+subscribe('payment.created', (event: StoredEvent) => {
   const p = event.payload as { from: string; to: string; amount: number; asset: string };
   paymentProjection.set(event.aggregateId, {
     paymentId: event.aggregateId,
@@ -153,13 +147,6 @@ subscribe('verification.failed', (event: StoredEvent) => {
       updatedAt: now(),
     });
 });
-}
-
-registerProjections();
-
-export function resetProjectionsRegistration(): void {
-  projectionsRegistered = false;
-}
 
 export function getPaymentReadModel(paymentId: string): PaymentReadModel | undefined {
   return paymentProjection.get(paymentId);
@@ -183,10 +170,4 @@ export function getVerificationReadModel(verificationId: string): VerificationRe
 
 export function getAllVerifications(): VerificationReadModel[] {
   return Array.from(verificationProjection.values());
-}
-
-export function clearProjections(): void {
-  paymentProjection.clear();
-  projectProjection.clear();
-  verificationProjection.clear();
 }

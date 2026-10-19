@@ -54,9 +54,27 @@ export interface TokenBalance {
 
 export interface AggregatedBalance {
   totalUSD: number;
+  /** Balances isolated per currency, aggregated across chains (#1009). */
+  byCurrency: CurrencyBalance[];
   chains: WalletBalance[];
   topAssets: TokenBalance[];
   lastUpdated: string;
+}
+
+/**
+ * Balance for a single currency, isolated from every other currency (#1009).
+ * Tokens with the same symbol on different chains are summed only when they are
+ * genuinely the same currency; the contributing chains are reported so callers can
+ * split them apart again if they need to.
+ */
+export interface CurrencyBalance {
+  currency: string;
+  /** Summed units across every chain that holds this currency. */
+  amount: number;
+  balanceUSD: number;
+  chains: ChainType[];
+  /** True when this entry includes a native (gas) balance. */
+  includesNative: boolean;
 }
 
 export interface CrossChainTransaction {
@@ -263,6 +281,10 @@ export class WalletAggregationService {
     const totalUSD = chainBalances.reduce((sum, b) => sum + b.nativeBalanceUSD, 0) +
       chainBalances.reduce((sum, b) => sum + b.tokens.reduce((ts, t) => ts + t.balanceUSD, 0), 0);
 
+    // Per-currency isolation: every currency keeps its own amount instead of being
+    // folded into a single USD total (#1009).
+    const byCurrency = this.aggregateByCurrency(chainBalances);
+
     // Aggregate top assets across all chains
     const assetMap = new Map<string, TokenBalance>();
     for (const chain of chainBalances) {
@@ -282,10 +304,71 @@ export class WalletAggregationService {
 
     return {
       totalUSD: Number(totalUSD.toFixed(2)),
+      byCurrency,
       chains: chainBalances,
       topAssets,
       lastUpdated: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Per-currency report for a user (#1009): each currency's amount and USD value,
+   * plus the aggregate USD total so a caller can still show a single headline figure.
+   */
+  static async getBalancesByCurrency(userId: string): Promise<{
+    currencies: CurrencyBalance[];
+    totalUSD: number;
+    lastUpdated: string;
+  }> {
+    const aggregated = await this.getAggregatedBalance(userId);
+    return {
+      currencies: aggregated.byCurrency,
+      totalUSD: aggregated.totalUSD,
+      lastUpdated: aggregated.lastUpdated,
+    };
+  }
+
+  /**
+   * Isolated balance for one currency. `undefined` when the user holds none, so a
+   * caller cannot accidentally treat "no balance" as zero of another currency.
+   */
+  static async getCurrencyBalance(userId: string, currency: string): Promise<CurrencyBalance | undefined> {
+    const upper = currency.toUpperCase();
+    const { currencies } = await this.getBalancesByCurrency(userId);
+    return currencies.find((entry) => entry.currency === upper);
+  }
+
+  /** Groups native and token balances by currency code, preserving one bucket each. */
+  private static aggregateByCurrency(chainBalances: WalletBalance[]): CurrencyBalance[] {
+    const buckets = new Map<string, CurrencyBalance>();
+
+    const add = (currency: string, amount: number, balanceUSD: number, chain: ChainType, native: boolean) => {
+      const key = currency.toUpperCase();
+      const existing = buckets.get(key) ?? {
+        currency: key,
+        amount: 0,
+        balanceUSD: 0,
+        chains: [],
+        includesNative: false,
+      };
+      existing.amount += amount;
+      existing.balanceUSD += balanceUSD;
+      if (!existing.chains.includes(chain)) existing.chains.push(chain);
+      existing.includesNative = existing.includesNative || native;
+      buckets.set(key, existing);
+    };
+
+    for (const chain of chainBalances) {
+      const nativeSymbol = SUPPORTED_CHAINS[chain.chainType]?.nativeCurrencySymbol ?? chain.chainType.toUpperCase();
+      add(nativeSymbol, Number(chain.nativeBalance) || 0, chain.nativeBalanceUSD, chain.chainType, true);
+      for (const token of chain.tokens) {
+        add(token.assetCode, Number(token.balance) || 0, token.balanceUSD, chain.chainType, false);
+      }
+    }
+
+    return Array.from(buckets.values())
+      .map((bucket) => ({ ...bucket, balanceUSD: Number(bucket.balanceUSD.toFixed(2)) }))
+      .sort((a, b) => b.balanceUSD - a.balanceUSD || a.currency.localeCompare(b.currency));
   }
 
   /**

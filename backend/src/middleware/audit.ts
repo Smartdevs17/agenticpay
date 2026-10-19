@@ -8,6 +8,20 @@ export interface AuditMiddlewareOptions {
 }
 
 /**
+ * Derive a stable resource name from a request path, skipping the API version
+ * segment so `/api/v1/payments` becomes `payments` rather than `v1`.
+ */
+export function deriveAuditResource(req: Request): string {
+  const segments = req.baseUrl ? req.baseUrl.split('/') : req.path.split('/');
+  const filtered = segments.filter(Boolean);
+  if (filtered.length === 0) return 'root';
+
+  const versionIndex = filtered.findIndex((segment) => /^v\d+$/.test(segment));
+  const resourceIndex = versionIndex >= 0 ? versionIndex + 1 : 1;
+  return filtered[resourceIndex] ?? filtered[filtered.length - 1] ?? 'root';
+}
+
+/**
  * Express middleware that records user and system operations to the tamper-evident audit log.
  */
 export function auditMiddleware(options: AuditMiddlewareOptions = {}) {
@@ -39,9 +53,7 @@ export function auditMiddleware(options: AuditMiddlewareOptions = {}) {
         ? options.actionMapper(req)
         : `${req.method} ${req.path}`;
       
-      const resource = options.resourceMapper
-        ? options.resourceMapper(req)
-        : req.baseUrl || req.path.split('/')[2] || 'root';
+      const resource = options.resourceMapper ? options.resourceMapper(req) : deriveAuditResource(req);
 
       // Capture request body (sanitization happens inside auditService.logAction)
       const requestBody = req.body;
@@ -60,7 +72,7 @@ export function auditMiddleware(options: AuditMiddlewareOptions = {}) {
           },
         },
         ipAddress: req.ip || req.socket.remoteAddress,
-        userAgent: req.headers['user-agent'],
+        userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
         request: {
           method: req.method,
           path: req.path,

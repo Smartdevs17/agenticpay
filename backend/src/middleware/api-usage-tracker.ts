@@ -10,7 +10,18 @@ function getWindowKey(keyId: string, windowMs: number): string {
 export async function apiUsageTracker(req: Request, res: Response, next: NextFunction) {
   const startTime = Date.now();
   const tenantId = (req.headers['x-tenant-id'] as string) ?? 'default';
-  const keyId = (req.headers['x-api-key'] as string) ?? 'anonymous';
+  const rawKeyId = req.headers['x-api-key'];
+  const keyId = typeof rawKeyId === 'string' ? rawKeyId : '';
+
+  // `ApiKeyUsage.keyId` is a foreign key onto `ApiKey`, so a row can only be
+  // written for a key that exists. Requests without an API key (health checks,
+  // docs, public routes) are not attributable to a key and are skipped rather
+  // than written with a placeholder that would violate the constraint.
+  if (!keyId) {
+    next();
+    return;
+  }
+
   const endpoint = req.originalUrl ?? req.path;
   const method = req.method;
 

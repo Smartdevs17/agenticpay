@@ -73,8 +73,3 @@ export function purgeResolvedEntries(maxAgeMs = 7 * 24 * 60 * 60 * 1000): number
   queue.push(...kept);
   return before - kept.length;
 }
-
-export function clearDeadLetterQueue(): void {
-  queue.length = 0;
-  nextId = 1;
-}

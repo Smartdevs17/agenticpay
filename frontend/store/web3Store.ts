@@ -7,71 +7,65 @@ import { devtools, persist, subscribeWithSelector, createJSONStorage } from 'zus
 
 export type ProviderType = 'injected' | 'walletconnect' | 'web3auth' | null;
 export type TxStatus = 'pending' | 'confirmed' | 'failed';
+
+// ─── Multi-chain wallet / balance types (#1009) ────────────────────────────────
+
 export type SupportedChain = 'stellar' | 'ethereum' | 'polygon' | 'base' | 'arbitrum' | 'optimism';
-
-export interface ChainBalance {
-  chainType: SupportedChain;
-  chainId: string;
-  address: string;
-  nativeBalance: string;
-  nativeBalanceUSD: number;
-  tokens: Array<{
-    assetCode: string;
-    balance: string;
-    balanceUSD: number;
-    decimals: number;
-  }>;
-  lastUpdated: string;
-}
-
-export interface AggregatedWalletState {
-  totalUSD: number;
-  chains: ChainBalance[];
-  lastUpdated: string;
-  isLoading: boolean;
-  error: string | null;
-}
 
 export interface ConnectedWallet {
   id: string;
+  userId: string;
   chainType: SupportedChain;
   address: string;
   providerName: string;
+  connectedAt: string;
+  lastUsedAt: string;
   isActive: boolean;
 }
 
-/**
- * Chain-agnostic contract a wallet connector implements (EVM injected/
- * WalletConnect, Stellar Freighter, etc.) so the store and UI can treat
- * every chain the same way instead of branching on `chainType`.
- */
-export interface WalletAdapter {
-  readonly chainType: SupportedChain;
-  readonly providerName: string;
-  isAvailable(): boolean;
-  connect(): Promise<{ address: string }>;
-  disconnect(): Promise<void>;
-  getAddress(): string | null;
+/** Balance for a single currency, isolated from every other currency. */
+export interface CurrencyBalance {
+  currency: string;
+  amount: number;
+  balanceUSD: number;
+  chains: SupportedChain[];
+  includesNative?: boolean;
 }
 
-const adapterRegistry = new Map<string, WalletAdapter>();
-
-function adapterKey(chainType: SupportedChain, providerName: string): string {
-  return `${chainType}:${providerName}`;
+export interface WalletChainBalance {
+  chainId: string;
+  chainType: SupportedChain;
+  address: string;
+  nativeBalance: string;
+  nativeBalanceUSD: number;
 }
 
-/** Register a wallet adapter so `connectWithAdapter` can find it later. */
-export function registerWalletAdapter(adapter: WalletAdapter): void {
-  adapterRegistry.set(adapterKey(adapter.chainType, adapter.providerName), adapter);
+export interface WalletTokenBalance {
+  assetCode: string;
+  balance: string;
+  balanceUSD: number;
 }
 
-export function getWalletAdapter(chainType: SupportedChain, providerName: string): WalletAdapter | undefined {
-  return adapterRegistry.get(adapterKey(chainType, providerName));
+export interface AggregatedBalance {
+  totalUSD: number;
+  /** Per-currency balances. Rendered so each currency is shown on its own line. */
+  byCurrency: CurrencyBalance[];
+  chains: WalletChainBalance[];
+  topAssets: WalletTokenBalance[];
+  lastUpdated?: string;
+  isLoading: boolean;
+  error?: string;
 }
 
-export function listWalletAdapters(): WalletAdapter[] {
-  return Array.from(adapterRegistry.values());
-}
+const EMPTY_AGGREGATED_BALANCE: AggregatedBalance = {
+  totalUSD: 0,
+  byCurrency: [],
+  chains: [],
+  topAssets: [],
+  isLoading: false,
+};
+
+const WALLET_API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 export interface TransactionRecord {
   hash: string;
@@ -93,10 +87,8 @@ interface Web3State {
   providerType: ProviderType;
   connectionError: string | null;
   transactions: TransactionRecord[];
-
-  // ── Multi-chain state (Issue #593) ──────────────────────────────────────────
   connectedWallets: ConnectedWallet[];
-  aggregatedBalance: AggregatedWalletState;
+  aggregatedBalance: AggregatedBalance;
   activeChain: SupportedChain | null;
 }
 
@@ -111,14 +103,13 @@ interface Web3Actions {
   addTransaction: (tx: Omit<TransactionRecord, 'timestamp'>) => void;
   updateTransaction: (hash: string, status: TxStatus) => void;
   clearTransactions: () => void;
-
-  // ── Multi-chain actions (Issue #593) ────────────────────────────────────────
+  /** Adds or replaces a connected wallet in local state. */
   addWallet: (wallet: ConnectedWallet) => void;
+  /** Removes a wallet locally and best-effort disconnects it on the API. */
   removeWallet: (walletId: string) => void;
   setActiveChain: (chain: SupportedChain | null) => void;
-  setAggregatedBalance: (balance: AggregatedWalletState) => void;
+  /** Loads the per-currency aggregated balance for a user (#1009). */
   fetchAggregatedBalance: (userId: string) => Promise<void>;
-  connectWithAdapter: (chainType: SupportedChain, providerName: string) => Promise<ConnectedWallet>;
 }
 
 export type Web3Store = Web3State & Web3Actions;
@@ -126,7 +117,7 @@ export type Web3Store = Web3State & Web3Actions;
 // Persisted slice — only serialisable fields
 type PersistedWeb3 = Pick<
   Web3State,
-  'account' | 'chainId' | 'providerType' | 'isConnected' | 'transactions' | 'connectedWallets' | 'activeChain'
+  'account' | 'chainId' | 'providerType' | 'isConnected' | 'transactions'
 >;
 
 // ─── Lightweight XOR-based storage encryption ─────────────────────────────────
@@ -200,17 +191,9 @@ const INITIAL_STATE: Web3State = {
   providerType: null,
   connectionError: null,
   transactions: [],
-
-  // Multi-chain (Issue #593)
   connectedWallets: [],
+  aggregatedBalance: EMPTY_AGGREGATED_BALANCE,
   activeChain: null,
-  aggregatedBalance: {
-    totalUSD: 0,
-    chains: [],
-    lastUpdated: '',
-    isLoading: false,
-    error: null,
-  },
 };
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -278,101 +261,71 @@ export const useWeb3Store = create<Web3Store>()(
           clearTransactions: () =>
             set({ transactions: [] }, false, 'web3/clearTransactions'),
 
-          // ── Multi-chain actions (Issue #593) ──────────────────────────────────
-
           addWallet: (wallet) =>
             set(
               (state) => ({
-                connectedWallets: [
-                  ...state.connectedWallets.filter((w) => w.id !== wallet.id),
-                  wallet,
-                ],
+                connectedWallets: [...state.connectedWallets.filter((w) => w.id !== wallet.id), wallet],
               }),
               false,
-              'web3/addWallet',
+              'web3/addWallet'
             ),
 
-          removeWallet: (walletId) =>
+          removeWallet: (walletId) => {
             set(
               (state) => ({
                 connectedWallets: state.connectedWallets.filter((w) => w.id !== walletId),
               }),
               false,
-              'web3/removeWallet',
-            ),
+              'web3/removeWallet'
+            );
+            // Best-effort server-side disconnect; local state is already updated.
+            void fetch(`${WALLET_API_BASE}/api/v1/wallet/${walletId}`, { method: 'DELETE' }).catch(() => {});
+          },
 
-          setActiveChain: (chain) =>
-            set({ activeChain: chain }, false, 'web3/setActiveChain'),
+          setActiveChain: (activeChain) => set({ activeChain }, false, 'web3/setActiveChain'),
 
-          setAggregatedBalance: (balance) =>
-            set({ aggregatedBalance: balance }, false, 'web3/setAggregatedBalance'),
-
-          fetchAggregatedBalance: async (userId: string) => {
+          fetchAggregatedBalance: async (userId) => {
             set(
               (state) => ({
-                aggregatedBalance: { ...state.aggregatedBalance, isLoading: true, error: null },
+                aggregatedBalance: { ...state.aggregatedBalance, isLoading: true, error: undefined },
               }),
               false,
-              'web3/fetchAggregatedBalance/start',
+              'web3/fetchAggregatedBalance/start'
             );
             try {
-              const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
-              const res = await fetch(`${apiBase}/wallet/aggregated?userId=${userId}`);
-              if (!res.ok) throw new Error(`API error: ${res.status}`);
-              const data = await res.json();
+              const response = await fetch(
+                `${WALLET_API_BASE}/api/v1/wallet/aggregated?userId=${encodeURIComponent(userId)}`
+              );
+              if (!response.ok) throw new Error(`Failed to fetch balances (${response.status})`);
+              const body = await response.json();
+              const data = (body?.data ?? {}) as Partial<AggregatedBalance>;
               set(
                 {
                   aggregatedBalance: {
-                    ...data.data,
+                    totalUSD: Number(data.totalUSD ?? 0),
+                    byCurrency: data.byCurrency ?? [],
+                    chains: data.chains ?? [],
+                    topAssets: data.topAssets ?? [],
+                    lastUpdated: data.lastUpdated,
                     isLoading: false,
-                    error: null,
                   },
                 },
                 false,
-                'web3/fetchAggregatedBalance/success',
+                'web3/fetchAggregatedBalance/success'
               );
-            } catch (err) {
+            } catch (error) {
               set(
                 (state) => ({
                   aggregatedBalance: {
                     ...state.aggregatedBalance,
                     isLoading: false,
-                    error: err instanceof Error ? err.message : 'Failed to fetch balances',
+                    error: (error as Error).message,
                   },
                 }),
                 false,
-                'web3/fetchAggregatedBalance/error',
+                'web3/fetchAggregatedBalance/error'
               );
             }
-          },
-
-          connectWithAdapter: async (chainType, providerName) => {
-            const adapter = getWalletAdapter(chainType, providerName);
-            if (!adapter) {
-              throw new Error(`No wallet adapter registered for ${chainType}/${providerName}`);
-            }
-            if (!adapter.isAvailable()) {
-              throw new Error(`${providerName} is not available for ${chainType}`);
-            }
-            const { address } = await adapter.connect();
-            const wallet: ConnectedWallet = {
-              id: `${chainType}-${address}`,
-              chainType,
-              address,
-              providerName,
-              isActive: true,
-            };
-            set(
-              (state) => ({
-                connectedWallets: [
-                  ...state.connectedWallets.filter((w) => w.id !== wallet.id),
-                  wallet,
-                ],
-              }),
-              false,
-              'web3/connectWithAdapter',
-            );
-            return wallet;
           },
         }),
         {
@@ -385,8 +338,6 @@ export const useWeb3Store = create<Web3Store>()(
             providerType: state.providerType,
             isConnected: state.isConnected,
             transactions: state.transactions,
-            connectedWallets: state.connectedWallets,
-            activeChain: state.activeChain,
           }),
         }
       )

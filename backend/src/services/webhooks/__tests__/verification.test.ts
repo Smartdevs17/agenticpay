@@ -140,6 +140,47 @@ describe('Webhook Signature Verification', () => {
     });
   });
 
+  describe('Replay and signature hardening', () => {
+    it('rejects an unparseable timestamp instead of passing the tolerance window', () => {
+      createWebhookSecret(testProvider, testSecret);
+      const result = verifyWebhookSignature({
+        signature: generateWebhookSignature(testPayload, testSecret, 'not-a-date'),
+        timestamp: 'not-a-date',
+        body: testPayload,
+        provider: testProvider,
+      });
+
+      expect(result.isValid).toBe(false);
+      expect(result.error).toBe('Timestamp is not a valid date');
+    });
+
+    it('rejects a non-hex signature without throwing', () => {
+      createWebhookSecret(testProvider, testSecret);
+      const result = verifyWebhookSignature({
+        signature: 'zz'.repeat(32),
+        timestamp: testTimestamp,
+        body: testPayload,
+        provider: testProvider,
+      });
+
+      expect(result.isValid).toBe(false);
+    });
+
+    it('rejects a signature that differs from the expected digest in one byte', () => {
+      createWebhookSecret(testProvider, testSecret);
+      const good = generateWebhookSignature(testPayload, testSecret, testTimestamp);
+      const flipped = (good[0] === '0' ? '1' : '0') + good.slice(1);
+      const result = verifyWebhookSignature({
+        signature: flipped,
+        timestamp: testTimestamp,
+        body: testPayload,
+        provider: testProvider,
+      });
+
+      expect(result.isValid).toBe(false);
+    });
+  });
+
   describe('Webhook Secret Management', () => {
     it('should create and retrieve webhook secrets', () => {
       const secret = createWebhookSecret(testProvider, testSecret);

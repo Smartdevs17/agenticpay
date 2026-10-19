@@ -1,6 +1,6 @@
 // Token refresh & revocation routes — Issue #512
 // POST /api/v1/auth/refresh   — rotate refresh token, issue new pair
-// POST /api/v1/auth/revoke    — revoke a specific refresh token
+// POST /api/v1/auth/revoke    — revoke a specific refresh token (and the bearer access token)
 // POST /api/v1/auth/revoke-all — sign out everywhere (revoke all families)
 // GET  /api/v1/auth/sessions  — list active token families (session management UI)
 // POST /api/v1/auth/login     — issue initial token family
@@ -16,6 +16,7 @@ import {
   listUserTokenFamilies,
 } from '../auth/token-rotation.js';
 import { getSharedRateLimitRedis } from '../config/rate-limit-redis.js';
+import { getJwtService, looksLikeJwt } from '../auth/jwt.js';
 
 export const tokenRefreshRouter = Router();
 
@@ -64,8 +65,22 @@ async function checkRefreshRateLimit(userId: string): Promise<boolean> {
   return true;
 }
 
-// Simulated user resolution — in production, extract from signed session or API key
-function resolveUser(req: any): { userId: string; tenantId: string } {
+function bearerToken(req: any): string | undefined {
+  const header = req.headers?.authorization;
+  if (typeof header !== 'string' || !header.startsWith('Bearer ')) return undefined;
+  const token = header.slice(7).trim();
+  return looksLikeJwt(token) ? token : undefined;
+}
+
+// A verified access token identifies the caller; the header fallback is kept for the
+// login bootstrap and existing integrations that have not moved to bearer tokens yet.
+async function resolveUser(req: any): Promise<{ userId: string; tenantId: string }> {
+  const token = bearerToken(req);
+  if (token) {
+    const result = await getJwtService().verifyAsync(token);
+    if (!result.ok) throw new AppError(401, 'Invalid access token', 'TOKEN_INVALID');
+    return { userId: result.claims.sub, tenantId: result.claims.tenantId };
+  }
   return {
     userId: (req.headers['x-user-id'] as string) || 'anonymous',
     tenantId: (req.headers['x-tenant-id'] as string) || 'default',
@@ -74,10 +89,11 @@ function resolveUser(req: any): { userId: string; tenantId: string } {
 
 // POST /api/v1/auth/login — issue initial token family
 tokenRefreshRouter.post('/login', asyncHandler(async (req, res) => {
-  const { userId, tenantId } = resolveUser(req);
+  const { userId, tenantId } = await resolveUser(req);
   const tokens = await issueTokenFamily(userId, tenantId);
   res.json({
     accessToken: tokens.accessToken,
+    accessTokenExpiresAt: tokens.accessTokenExpiresAt,
     refreshToken: tokens.refreshToken,
     refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
   });
@@ -113,6 +129,7 @@ tokenRefreshRouter.post('/refresh', asyncHandler(async (req, res) => {
 
   res.json({
     accessToken: result.accessToken,
+    accessTokenExpiresAt: result.accessTokenExpiresAt,
     refreshToken: result.refreshToken,
     refreshTokenExpiresAt: result.refreshTokenExpiresAt,
   });
@@ -125,21 +142,24 @@ tokenRefreshRouter.post('/revoke', asyncHandler(async (req, res) => {
     throw new AppError(400, 'refreshToken is required', 'MISSING_REFRESH_TOKEN');
   }
 
-  const { userId } = resolveUser(req);
+  const { userId } = await resolveUser(req);
   const revoked = await revokeToken(refreshToken, userId);
-  res.json({ success: revoked });
+  // The presented access token dies with the session rather than at its expiry.
+  const access = bearerToken(req);
+  const accessRevoked = access ? await getJwtService().revoke(access) : false;
+  res.json({ success: revoked, accessTokenRevoked: accessRevoked });
 }));
 
 // POST /api/v1/auth/revoke-all — revoke all token families for a user
 tokenRefreshRouter.post('/revoke-all', asyncHandler(async (req, res) => {
-  const { userId, tenantId } = resolveUser(req);
+  const { userId, tenantId } = await resolveUser(req);
   const count = await revokeAllUserTokens(userId, tenantId);
   res.json({ success: true, revokedCount: count });
 }));
 
 // GET /api/v1/auth/sessions — list active token families (session management UI)
 tokenRefreshRouter.get('/sessions', asyncHandler(async (req, res) => {
-  const { userId, tenantId } = resolveUser(req);
+  const { userId, tenantId } = await resolveUser(req);
   const families = await listUserTokenFamilies(userId, tenantId);
   res.json({ sessions: families });
 }));

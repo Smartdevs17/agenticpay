@@ -27,6 +27,9 @@ export async function createConnectedAccount(merchantId: string, email: string):
     capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
   });
 
+  // Only track the merchant once onboarding has a link; otherwise a failed link leaves an orphaned record.
+  const onboardingUrl = await createOnboardingLink(account.id);
+
   const record: ConnectedAccount = {
     stripeAccountId: account.id,
     merchantId,
@@ -36,8 +39,6 @@ export async function createConnectedAccount(merchantId: string, email: string):
     createdAt: Date.now(),
   };
   connectedAccounts.set(merchantId, record);
-
-  const onboardingUrl = await createOnboardingLink(account.id);
 
   await auditService.logAction({ action: 'stripe_connect.account_created', resource: 'stripe_connect', resourceId: account.id, details: { merchantId } });
   return { accountId: account.id, onboardingUrl };
@@ -66,8 +67,8 @@ export async function handleConnectWebhook(event: Stripe.Event): Promise<void> {
     case 'account.updated': {
       const account = event.data.object as Stripe.Account;
       const merchantId = findMerchantByAccountId(account.id);
-      if (merchantId) {
-        const record = connectedAccounts.get(merchantId)!;
+      const record = merchantId ? connectedAccounts.get(merchantId) : undefined;
+      if (merchantId && record) {
         record.chargesEnabled = account.charges_enabled;
         record.payoutsEnabled = account.payouts_enabled;
         if (account.charges_enabled && account.payouts_enabled && record.onboardingStatus !== 'completed') {
@@ -90,7 +91,15 @@ function findMerchantByAccountId(stripeAccountId: string): string | undefined {
   return undefined;
 }
 
+// Stripe amounts are integers in the currency's smallest unit (e.g. cents).
+function assertMinorUnitAmount(amount: number): void {
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw new AppError(400, 'Amount must be a positive integer in minor units', 'VALIDATION_ERROR');
+  }
+}
+
 export async function createPaymentIntentWithConnect(amount: number, currency: string, merchantStripeAccountId: string): Promise<Stripe.PaymentIntent> {
+  assertMinorUnitAmount(amount);
   const stripe = getStripe();
   return stripe.paymentIntents.create({
     amount,
@@ -102,6 +111,7 @@ export async function createPaymentIntentWithConnect(amount: number, currency: s
 }
 
 export async function createTransfer(amount: number, currency: string, destination: string): Promise<Stripe.Transfer> {
+  assertMinorUnitAmount(amount);
   const stripe = getStripe();
   return stripe.transfers.create({ amount, currency: currency.toLowerCase(), destination });
 }

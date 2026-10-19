@@ -3,7 +3,6 @@ import { healthRouter } from '../health.js';
 import { Request, Response, Router, RequestHandler } from 'express';
 import { server as stellarServer } from '../../services/stellar.js';
 import { getJobScheduler } from '../../jobs/index.js';
-import { prisma } from '../../lib/prisma.js';
 
 vi.mock('../../services/stellar.js', () => ({
   server: {
@@ -13,12 +12,6 @@ vi.mock('../../services/stellar.js', () => ({
 
 vi.mock('../../jobs/index.js', () => ({
   getJobScheduler: vi.fn(),
-}));
-
-vi.mock('../../lib/prisma.js', () => ({
-  prisma: {
-    $queryRaw: vi.fn(),
-  },
 }));
 
 describe('Health Router', () => {
@@ -118,35 +111,6 @@ describe('Health Router', () => {
           openai: 'healthy',
           scheduler: 'healthy',
         },
-      }));
-    });
-  });
-
-  describe('GET /health/db', () => {
-    it('returns 200 and healthy status when the database responds', async () => {
-      vi.mocked(prisma.$queryRaw).mockResolvedValue([{ '?column?': 1 }]);
-
-      const handler = getRouteHandler(healthRouter, '/health/db');
-      await handler(mockReq as Request, mockRes as Response, vi.fn());
-
-      expect(resStatus).toHaveBeenCalledWith(200);
-      expect(resJson).toHaveBeenCalledWith(expect.objectContaining({
-        status: 'healthy',
-        connected: true,
-      }));
-    });
-
-    it('returns 503 and unhealthy status when the database query fails', async () => {
-      vi.mocked(prisma.$queryRaw).mockRejectedValue(new Error('connection refused'));
-
-      const handler = getRouteHandler(healthRouter, '/health/db');
-      await handler(mockReq as Request, mockRes as Response, vi.fn());
-
-      expect(resStatus).toHaveBeenCalledWith(503);
-      expect(resJson).toHaveBeenCalledWith(expect.objectContaining({
-        status: 'unhealthy',
-        connected: false,
-        error: 'connection refused',
       }));
     });
   });

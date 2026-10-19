@@ -34,6 +34,15 @@ const PII_FIELDS: Record<string, Record<string, FieldConfig>> = {
   AuditLog: {
     ipAddress: {},
   },
+  // Provider credentials at rest (#1010). Webhook signing secrets and push auth
+  // keys are the provider credentials persisted through Prisma today; the
+  // provider-credential vault (`services/provider-credentials`) covers the rest.
+  Webhook: {
+    secret: {},
+  },
+  PushSubscription: {
+    auth: {},
+  },
 };
 
 // ---------------------------------------------------------------------------

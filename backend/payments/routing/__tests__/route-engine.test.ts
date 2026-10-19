@@ -1,4 +1,4 @@
-import { calculateOptimalRoute, executeWithFallback } from '../route-engine';
+import { calculateOptimalRoute, executeWithFallback, validateRoutingRequest } from '../route-engine';
 import { NetworkMetrics, UserPreferences, NetworkId } from '../types';
 
 const mockMetrics = (id: NetworkId, gasPrice: number, blockTime: number): NetworkMetrics => ({
@@ -13,6 +13,17 @@ const mockMetrics = (id: NetworkId, gasPrice: number, blockTime: number): Networ
 });
 
 describe('route-engine', () => {
+  it('rejects invalid amounts and self-transfers before routing', () => {
+    expect(validateRoutingRequest(
+      { amountUsd: 0, fromAddress: '0x1', toAddress: '0x2' },
+      { priority: 'cost' }
+    )).toContain('positive');
+    expect(validateRoutingRequest(
+      { amountUsd: 10, fromAddress: '0x1', toAddress: '0x1' },
+      { priority: 'cost' }
+    )).toContain('different');
+  });
+
   it('selects cheapest network with cost priority', async () => {
     const metrics = [
       mockMetrics('ethereum', 50, 12),
@@ -133,5 +144,28 @@ describe('route-engine', () => {
         executeFn
       )
     ).rejects.toThrow('All routing attempts failed');
+  });
+
+  it('falls back when a network execution times out', async () => {
+    const executeFn = jest.fn()
+      .mockImplementationOnce(() => new Promise<string>(() => undefined))
+      .mockResolvedValueOnce('0xfallback');
+
+    const result = await executeWithFallback(
+      {
+        primary: 'ethereum',
+        fallbacks: ['arbitrum'],
+        bridgeRequired: false,
+        scores: {} as Record<NetworkId, any>,
+        recommended: 'ethereum',
+        userOverridden: false,
+      },
+      executeFn,
+      undefined,
+      1
+    );
+
+    expect(result.networkUsed).toBe('arbitrum');
+    expect(result.attempts).toBe(2);
   });
 });

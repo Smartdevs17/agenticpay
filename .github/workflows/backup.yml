@@ -17,6 +17,7 @@ on:
           - full
           - incremental
           - verify
+          - drill
 
 env:
   BACKUP_DIR: /tmp/backups
@@ -82,6 +83,18 @@ jobs:
           export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/agenticpay"
           bash scripts/backup.sh verify
 
+      - name: Run isolated restore drill
+        if: ${{ github.event.inputs.type == 'drill' }}
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/agenticpay"
+          createdb -h localhost -U postgres agenticpay_drill
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE TABLE IF NOT EXISTS dr_evidence (id integer primary key);'
+          bash scripts/backup.sh full
+          export DRILL_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/agenticpay_drill"
+          bash scripts/disaster-recovery-drill.sh
+        env:
+          PGPASSWORD: postgres
+
       - name: Upload backup artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -91,8 +104,10 @@ jobs:
 
       - name: Notify on failure
         if: failure()
-        uses: slackapi/slack-github-action@v1.24.0
+        uses: slackapi/slack-github-action@v2.1.0
         with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {
               "attachments": [{
@@ -100,5 +115,3 @@ jobs:
                 "text": "❌ Database backup workflow failed for ${{ github.repository }}"
               }]
             }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,152 +1,333 @@
-// public/sw.js - Service Worker for Offline-First Payments
+// AgenticPay service worker: offline shell, API fallback cache, and payment replay queue.
 
-const CACHE_NAME = "agenticpay-cache-v2";
-const OFFLINE_QUEUE_DB = "agenticpay-offline-db";
-const PAYMENT_QUEUE_STORE = "payment-queue";
-
-const urlsToCache = [
-  "/",
-  "/icons/image-192.png",
-  "/icons/image-512.png",
-  "/manifest.webmanifest",
+const APP_VERSION = '2026-06-01.1';
+const CACHE_PREFIX = 'agenticpay';
+const PRECACHE = `${CACHE_PREFIX}-precache-${APP_VERSION}`;
+const RUNTIME = `${CACHE_PREFIX}-runtime-${APP_VERSION}`;
+const API_CACHE = `${CACHE_PREFIX}-api-${APP_VERSION}`;
+const DB_NAME = 'agenticpay-offline-db';
+const DB_VERSION = 1;
+const PAYMENT_STORE = 'offline-payments';
+const SYNC_TAG = 'agenticpay-payment-sync';
+const PRECACHE_URLS = [
+  '/',
+  '/auth',
+  '/dashboard',
+  '/manifest.webmanifest',
+  '/icons/image-192.png',
+  '/icons/image-512.png',
 ];
+const STATIC_DESTINATIONS = new Set(['script', 'style', 'image', 'font', 'manifest']);
 
-self.addEventListener("install", (event) => {
+self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(urlsToCache))
+    caches.open(PRECACHE).then(async (cache) => {
+      await cache.addAll(PRECACHE_URLS.map((url) => new Request(url, { cache: 'reload' })));
+    }),
   );
   self.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
+self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((names) =>
-      Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name)))
-    )
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((key) => key.startsWith(CACHE_PREFIX) && ![PRECACHE, RUNTIME, API_CACHE].includes(key))
+          .map((key) => caches.delete(key)),
+      );
+      await self.clients.claim();
+      await broadcast({ type: 'SW_ACTIVATED', version: APP_VERSION });
+    })(),
   );
-  event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET" && event.request.method !== "POST") {
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  const url = new URL(request.url);
+
+  if (url.origin !== self.location.origin) {
     return;
   }
 
-  const url = new URL(event.request.url);
+  if (request.method !== 'GET') {
+    if (isPaymentMutation(url.pathname)) {
+      event.respondWith(queuePaymentMutation(request));
+      return;
+    }
 
-  if (event.request.method === "POST" && url.pathname.startsWith("/api/")) {
-    event.respondWith(handleApiRequest(event.request));
+    event.respondWith(fetch(request));
     return;
   }
 
-  if (event.request.destination === "document" || event.request.destination === "script" || 
-      event.request.destination === "style" || event.request.destination === "image") {
-    event.respondWith(
-      caches.match(event.request).then((resp) => resp || fetch(event.request))
+  if (request.mode === 'navigate') {
+    event.respondWith(networkFirstDocument(request));
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(networkFirstApi(request));
+    return;
+  }
+
+  if (STATIC_DESTINATIONS.has(request.destination) || url.pathname.startsWith('/_next/static/')) {
+    event.respondWith(cacheFirst(request));
+    return;
+  }
+
+  event.respondWith(staleWhileRevalidate(request));
+});
+
+self.addEventListener('sync', (event) => {
+  if (event.tag === SYNC_TAG || event.tag === 'sync-payments') {
+    event.waitUntil(flushPaymentQueue());
+  }
+});
+
+self.addEventListener('message', (event) => {
+  const { type, payload } = event.data || {};
+
+  if (type === 'SKIP_WAITING') {
+    self.skipWaiting();
+    return;
+  }
+
+  if (type === 'QUEUE_PAYMENT') {
+    event.waitUntil(
+      savePayment({
+        id: payload?.id || crypto.randomUUID(),
+        endpoint: payload?.endpoint || '/api/v1/stellar/pay',
+        method: payload?.method || 'POST',
+        headers: payload?.headers || { 'content-type': 'application/json' },
+        body: payload?.body || JSON.stringify(payload?.payment || {}),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        status: 'pending',
+        retryCount: 0,
+      }).then(registerSync).then(notifyQueueChanged),
+    );
+    return;
+  }
+
+  if (type === 'SYNC_NOW') {
+    event.waitUntil(flushPaymentQueue());
+    return;
+  }
+
+  if (type === 'GET_QUEUE_STATUS') {
+    event.waitUntil(
+      getQueuedPayments().then((items) => {
+        event.ports?.[0]?.postMessage({
+          pendingCount: items.filter((item) => item.status !== 'synced').length,
+          failedCount: items.filter((item) => item.status === 'failed').length,
+          version: APP_VERSION,
+        });
+      }),
     );
   }
 });
 
-async function handleApiRequest(request) {
-  if (!navigator.onLine) {
-    return queueOfflineRequest(request);
-  }
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
 
+  const response = await fetch(request);
+  if (response.ok) {
+    await safeCachePut(RUNTIME, request, response.clone());
+  }
+  return response;
+}
+
+async function networkFirstDocument(request) {
   try {
-    return await fetch(request.clone());
+    const response = await fetch(request);
+    if (response.ok) await safeCachePut(RUNTIME, request, response.clone());
+    return response;
   } catch {
-    return queueOfflineRequest(request);
+    return (await caches.match(request)) || (await caches.match('/dashboard')) || (await caches.match('/')) || offlineResponse('Offline dashboard shell unavailable');
   }
 }
 
-async function queueOfflineRequest(request) {
+async function networkFirstApi(request) {
   try {
-    const db = await openOfflineDB();
-    const tx = db.transaction(PAYMENT_QUEUE_STORE, "readwrite");
-    const store = tx.objectStore(PAYMENT_QUEUE_STORE);
-
-    const body = await request.clone().text();
-    const queuedRequest = {
-      id: `queue-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-      url: request.url,
-      method: request.method,
-      headers: Object.fromEntries(request.headers.entries()),
-      body,
-      timestamp: Date.now(),
-      retryCount: 0,
-    };
-
-    await store.add(queuedRequest);
-    await tx.done;
-
-    return new Response(JSON.stringify({ queued: true, id: queuedRequest.id }), {
-      status: 202,
-      headers: { "Content-Type": "application/json" },
-    });
+    const response = await fetch(request);
+    if (response.ok) await safeCachePut(API_CACHE, request, response.clone());
+    return response;
   } catch {
-    return new Response(JSON.stringify({ error: "Failed to queue" }), {
+    const cached = await caches.match(request);
+    if (cached) {
+      const headers = new Headers(cached.headers);
+      headers.set('X-AgenticPay-Cache', 'stale');
+      return new Response(cached.body, { status: cached.status, statusText: cached.statusText, headers });
+    }
+    return new Response(JSON.stringify({ error: 'offline', message: 'Network unavailable and no cached API response exists.' }), {
       status: 503,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'content-type': 'application/json', 'X-AgenticPay-Offline': 'true' },
     });
   }
 }
 
-async function openOfflineDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(OFFLINE_QUEUE_DB, 1);
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(RUNTIME);
+  const cached = await cache.match(request);
+  const network = fetch(request)
+    .then((response) => {
+      if (response.ok) void safeCachePut(RUNTIME, request, response.clone());
+      return response;
+    })
+    .catch(() => undefined);
 
+  return cached || (await network) || offlineResponse('Offline');
+}
+
+async function safeCachePut(cacheName, request, response) {
+  try {
+    const cache = await caches.open(cacheName);
+    await cache.put(request, response);
+  } catch (error) {
+    // Storage quota can be exceeded on mobile; evict runtime entries and continue serving network data.
+    if (error && (error.name === 'QuotaExceededError' || /quota/i.test(String(error.message)))) {
+      await caches.delete(RUNTIME);
+      await caches.delete(API_CACHE);
+    }
+  }
+}
+
+function offlineResponse(message) {
+  return new Response(message, { status: 503, headers: { 'content-type': 'text/plain', 'X-AgenticPay-Offline': 'true' } });
+}
+
+function isPaymentMutation(pathname) {
+  return pathname.includes('/pay') || pathname.includes('/payments') || pathname.includes('/stellar/pay');
+}
+
+async function queuePaymentMutation(request) {
+  try {
+    const clone = request.clone();
+    const online = typeof navigator === 'undefined' ? true : navigator.onLine;
+    if (online) {
+      return await fetch(request);
+    }
+
+    const payment = await requestToQueuedPayment(clone);
+    await savePayment(payment);
+    await registerSync();
+    await notifyQueueChanged();
+    return new Response(JSON.stringify({ queued: true, id: payment.id, offline: true }), {
+      status: 202,
+      headers: { 'content-type': 'application/json', 'X-AgenticPay-Offline-Queued': 'true' },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: 'offline_queue_failed', message: String(error?.message || error) }), {
+      status: 503,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+}
+
+async function requestToQueuedPayment(request) {
+  return {
+    id: crypto.randomUUID(),
+    endpoint: new URL(request.url).pathname + new URL(request.url).search,
+    method: request.method,
+    headers: Object.fromEntries(request.headers.entries()),
+    body: await request.text(),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    status: 'pending',
+    retryCount: 0,
+  };
+}
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(PAYMENT_QUEUE_STORE)) {
-        db.createObjectStore(PAYMENT_QUEUE_STORE, { keyPath: "id" });
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PAYMENT_STORE)) {
+        db.createObjectStore(PAYMENT_STORE, { keyPath: 'id' });
       }
     };
   });
 }
 
-self.addEventListener("sync", (event) => {
-  if (event.tag === "sync-payments") {
-    event.waitUntil(syncQueuedPayments());
+async function withStore(storeMode, operation) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(PAYMENT_STORE, storeMode);
+    const store = transaction.objectStore(PAYMENT_STORE);
+    const request = operation(store);
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  }).finally(() => db.close());
+}
+
+async function savePayment(payment) {
+  await withStore('readwrite', (store) => store.put({ ...payment, updatedAt: Date.now() }));
+}
+
+async function deletePayment(id) {
+  await withStore('readwrite', (store) => store.delete(id));
+}
+
+async function getQueuedPayments() {
+  return (await withStore('readonly', (store) => store.getAll())) || [];
+}
+
+async function flushPaymentQueue() {
+  const queued = await getQueuedPayments();
+  let synced = 0;
+  let failed = 0;
+
+  for (const item of queued) {
+    if (item.status === 'syncing') continue;
+
+    await savePayment({ ...item, status: 'syncing' });
+    try {
+      const response = await fetch(item.endpoint, {
+        method: item.method,
+        headers: { ...item.headers, 'X-AgenticPay-Offline-Replay': 'true' },
+        body: item.body,
+      });
+
+      if (response.ok || response.status === 409) {
+        await deletePayment(item.id);
+        synced += 1;
+      } else {
+        await savePayment({ ...item, status: 'failed', retryCount: (item.retryCount || 0) + 1, lastError: `HTTP ${response.status}` });
+        failed += 1;
+      }
+    } catch (error) {
+      await savePayment({ ...item, status: 'failed', retryCount: (item.retryCount || 0) + 1, lastError: String(error?.message || error) });
+      failed += 1;
+      break;
+    }
   }
-});
 
-async function syncQueuedPayments() {
-  if (!navigator.onLine) return;
+  await broadcast({ type: 'PAYMENT_QUEUE_SYNCED', synced, failed, remaining: (await getQueuedPayments()).length });
+  return { synced, failed };
+}
 
-  try {
-    const db = await openOfflineDB();
-    const tx = db.transaction(PAYMENT_QUEUE_STORE, "readwrite");
-    const store = tx.objectStore(PAYMENT_QUEUE_STORE);
-    const requests = await new Promise((resolve, reject) => {
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-
-    await Promise.allSettled(
-      (requests as any[]).map(async (queued) => {
-        const response = await fetch(queued.url, {
-          method: queued.method,
-          headers: queued.headers,
-          body: queued.body,
-        });
-
-        if (response.ok) {
-          const dt = db.transaction(PAYMENT_QUEUE_STORE, "readwrite");
-          await dt.objectStore(PAYMENT_QUEUE_STORE).delete(queued.id);
-        }
-      })
-    );
-  } catch (error) {
-    console.error("[SW] Sync failed:", error);
+async function registerSync() {
+  if ('sync' in self.registration) {
+    await self.registration.sync.register(SYNC_TAG);
   }
 }
 
-self.addEventListener("message", (event) => {
-  if (event.data?.type === "SKIP_WAITING") {
-    self.skipWaiting();
+async function notifyQueueChanged() {
+  const remaining = (await getQueuedPayments()).length;
+  await broadcast({ type: 'PAYMENT_QUEUE_CHANGED', remaining });
+}
+
+async function broadcast(message) {
+  const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+  for (const client of clients) {
+    client.postMessage(message);
   }
-});
+}

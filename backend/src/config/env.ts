@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
-import { applyEnvironmentFileDefaults } from './environments/index.js';
 
 dotenv.config();
-applyEnvironmentFileDefaults();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  LOG_LEVELS: z.string().default(''),
+  DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/agenticpay'),
   PORT: z.coerce.number().default(3001),
   CORS_ALLOWED_ORIGINS: z.string().default('*'),
   STELLAR_NETWORK: z.enum(['testnet', 'public']).default('testnet'),
@@ -23,6 +24,29 @@ const envSchema = z.object({
   IP_ALLOWLIST_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
   IP_ALLOWLIST_BYPASS_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
   IP_ALLOWLIST_BYPASS_EXPIRY_MS: z.coerce.number().default(30 * 60 * 1000),
+  VAPID_PUBLIC_KEY: z.string().default(''),
+  VAPID_PRIVATE_KEY: z.string().default(''),
+  STRIPE_SECRET_KEY: z.string().default(''),
+  STRIPE_WEBHOOK_SECRET: z.string().default(''),
+  STRIPE_PUBLISHABLE_KEY: z.string().default(''),
+  REDIS_URL: z.string().default(''),
+  REDIS_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
+  CACHE_WARMING_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
+  DB_QUERY_LOGGING_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
+  DB_SLOW_QUERY_THRESHOLD_MS: z.coerce.number().default(100),
+  // Transaction monitor (Issue #402)
+  TX_MONITOR_POLL_MS: z.coerce.number().default(15_000),
+  TX_MONITOR_STUCK_THRESHOLD_MS: z.coerce.number().default(300_000),
+  TX_MONITOR_MAX_RETRIES: z.coerce.number().default(3),
+  ALERT_WEBHOOK_URL: z.string().default(''),
+  // File upload (Issue #401)
+  UPLOAD_DIR: z.string().default('./uploads'),
+  CLAMD_HOST: z.string().default(''),
+  CLAMD_PORT: z.coerce.number().default(3310),
+  // Credential rotation (Issue #395)
+  CREDENTIAL_ROTATION_CHECK_INTERVAL_MS: z.coerce.number().default(60 * 60 * 1000),
+  // Threat detection (Issue #394)
+  THREAT_ALERT_WEBHOOK_URL: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -34,10 +58,8 @@ export const validateEnv = (): Env => {
     _config = envSchema.parse(process.env);
     return _config;
   } catch (error: unknown) {
-    const isZodError = error instanceof z.ZodError || (error as any)?.name === 'ZodError';
-    if (isZodError) {
-      const zodError = error as z.ZodError;
-      const missingVars = zodError.errors.map((err: z.ZodIssue) => `${err.path.join('.')}: ${err.message}`);
+    if (error instanceof z.ZodError) {
+      const missingVars = error.errors.map((err: z.ZodIssue) => `${err.path.join('.')}: ${err.message}`);
       console.error('❌ Invalid environment variables:');
       missingVars.forEach((msg: string) => console.error(`   - ${msg}`));
       process.exit(1);
@@ -45,10 +67,6 @@ export const validateEnv = (): Env => {
     throw error;
   }
 };
-
-export function clearEnvCache(): void {
-  _config = undefined;
-}
 
 export const config = (): Env => {
   if (!_config) {

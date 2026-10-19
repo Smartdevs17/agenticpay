@@ -1,10 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { encryptWebhookPayload } from './webhooks/encryption.js';
-import {
-  signWebhookPayload,
-  WEBHOOK_SIGNATURE_HEADER,
-  WEBHOOK_TIMESTAMP_HEADER,
-} from './webhooks/signer.js';
+import { createHmac, randomUUID } from 'node:crypto';
 
 export type WebhookDeliveryStatus =
   | 'pending'
@@ -21,9 +15,6 @@ export interface MerchantWebhookConfig {
   enabled: boolean;
   currentSecret: string;
   previousSecrets: string[];
-  signatureVersion: string;
-  secretExpiresAt: string;
-  encryptionPublicKey?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -57,6 +48,8 @@ export interface WebhookDeliveryLog {
 type WorkerState = {
   timer?: NodeJS.Timeout;
   running: boolean;
+  /** True while a pass over due deliveries is in flight, so the 1s ticker never overlaps itself. */
+  processing: boolean;
 };
 
 const MAX_ATTEMPTS = 5;
@@ -69,7 +62,7 @@ const deliveries = new Map<string, WebhookDeliveryLog>();
 const idempotencyIndex = new Map<string, string>();
 const deadLetterQueue: WebhookDeliveryLog[] = [];
 
-const worker: WorkerState = { running: false };
+const worker: WorkerState = { running: false, processing: false };
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -81,12 +74,15 @@ function computeBackoffDelay(attempt: number): number {
   return exponential + jitter;
 }
 
+function buildSignature(secret: string, body: string): string {
+  return createHmac('sha256', secret).update(body).digest('hex');
+}
+
 export function upsertWebhookConfig(input: {
   merchantId: string;
   url: string;
   secret: string;
   enabled?: boolean;
-  encryptionPublicKey?: string;
 }): MerchantWebhookConfig {
   const existing = Array.from(webhookConfigs.values()).find((x) => x.merchantId === input.merchantId);
   const ts = nowIso();
@@ -95,9 +91,6 @@ export function upsertWebhookConfig(input: {
     existing.url = input.url;
     existing.currentSecret = input.secret;
     existing.enabled = input.enabled ?? true;
-    existing.signatureVersion = 'v1';
-    existing.secretExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
-    existing.encryptionPublicKey = input.encryptionPublicKey;
     existing.updatedAt = ts;
     webhookConfigs.set(existing.id, existing);
     return existing;
@@ -110,9 +103,6 @@ export function upsertWebhookConfig(input: {
     enabled: input.enabled ?? true,
     currentSecret: input.secret,
     previousSecrets: [],
-    signatureVersion: 'v1',
-    secretExpiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
-    encryptionPublicKey: input.encryptionPublicKey,
     createdAt: ts,
     updatedAt: ts,
   };
@@ -126,8 +116,6 @@ export function rotateWebhookSecret(configId: string, nextSecret: string): Merch
   config.previousSecrets.unshift(config.currentSecret);
   config.previousSecrets = config.previousSecrets.slice(0, 5);
   config.currentSecret = nextSecret;
-  config.signatureVersion = 'v1';
-  config.secretExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
   config.updatedAt = nowIso();
   webhookConfigs.set(config.id, config);
   return config;
@@ -192,25 +180,8 @@ async function deliverOne(delivery: WebhookDeliveryLog): Promise<void> {
     return;
   }
 
-  let originalEvent: PaymentWebhookEvent | undefined;
-  try {
-    originalEvent = delivery.responseBody ? JSON.parse(delivery.responseBody) as PaymentWebhookEvent : undefined;
-  } catch {
-    originalEvent = {
-      eventId: delivery.eventId,
-      merchantId: delivery.merchantId,
-      type: 'webhook.retry',
-      payload: {},
-      createdAt: delivery.createdAt,
-    };
-  }
-  const signed = signWebhookPayload({
-    payload: originalEvent ? { ...originalEvent, payload: originalEvent.payload } : {},
-    secret: config.currentSecret,
-    version: config.signatureVersion,
-    eventId: delivery.eventId,
-  });
-  const body = encryptWebhookPayload(signed.body, config.encryptionPublicKey);
+  const body = delivery.responseBody ?? '{}';
+  const signature = buildSignature(config.currentSecret, body);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ATTEMPT_TIMEOUT_MS);
 
@@ -223,10 +194,7 @@ async function deliverOne(delivery: WebhookDeliveryLog): Promise<void> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        [WEBHOOK_SIGNATURE_HEADER]: signed.signature,
-        [WEBHOOK_TIMESTAMP_HEADER]: signed.timestamp,
-        'X-AgenticPay-Signature-Version': signed.version,
-        'X-AgenticPay-Event-Id': delivery.eventId,
+        'X-Webhook-Signature': signature,
         'X-Webhook-Idempotency-Key': delivery.idempotencyKey,
         'X-Webhook-Event-Id': delivery.eventId,
       },
@@ -288,7 +256,16 @@ export function startWebhookWorker(): void {
   if (worker.running) return;
   worker.running = true;
   worker.timer = setInterval(() => {
-    void processDueDeliveries();
+    // A pass that is still in flight (e.g. a slow endpoint, or a backlog bigger
+    // than one tick can clear) must finish before another one starts. Without
+    // this guard, the next 1s tick starts a second, overlapping pass that can
+    // pick up and deliver the same still-"pending"/"retrying" delivery a
+    // second time before the first pass has marked it "processing".
+    if (worker.processing) return;
+    worker.processing = true;
+    void processDueDeliveries().finally(() => {
+      worker.processing = false;
+    });
   }, 1_000);
 }
 
@@ -296,6 +273,7 @@ export function stopWebhookWorker(): void {
   if (worker.timer) clearInterval(worker.timer);
   worker.timer = undefined;
   worker.running = false;
+  worker.processing = false;
 }
 
 export function listWebhookDeliveries(): WebhookDeliveryLog[] {

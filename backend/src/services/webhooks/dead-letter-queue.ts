@@ -85,12 +85,14 @@ export function enqueueDeadLetter(log: DeliveryLog): DeadLetterEntry {
 export function listDLQ(filters: {
   merchantId?: string;
   endpointId?: string;
+  eventType?: string;
   failureCategory?: FailureCategory;
 } = {}): DeadLetterEntry[] {
   return Array.from(dlqEntries.values()).filter((e) => {
     if (e.purgedAt) return false;
     if (filters.merchantId && e.merchantId !== filters.merchantId) return false;
     if (filters.endpointId && e.endpointId !== filters.endpointId) return false;
+    if (filters.eventType && e.eventType !== filters.eventType) return false;
     if (filters.failureCategory && e.failureCategory !== filters.failureCategory) return false;
     return true;
   });

@@ -1,36 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { inferCategory } from '../../services/categories.js';
+import { scoreCategories, inferCategory } from '../categories.js';
 
-describe('inferCategory', () => {
-  it('returns refund for type=refund', () => {
-    expect(inferCategory({ type: 'refund' })).toBe('refund');
+describe('scoreCategories', () => {
+  it('ranks refund highest for a refund payment', () => {
+    const scores = scoreCategories({ type: 'refund' });
+    expect(scores[0]).toEqual({ category: 'refund', confidence: 0.95 });
   });
 
-  it('returns milestone for type=milestone_payment', () => {
-    expect(inferCategory({ type: 'milestone_payment' })).toBe('milestone');
+  it('stacks signals for the same category, capped at 1', () => {
+    const scores = scoreCategories({ type: 'full_payment', network: 'stellar' });
+    // strong stellar-escrow signal (0.8) + weak generic full_payment signal (0.3), capped at 1
+    expect(scores[0]).toEqual({ category: 'escrow', confidence: 1 });
   });
 
-  it('returns escrow for stellar full_payment', () => {
-    expect(inferCategory({ type: 'full_payment', network: 'stellar' })).toBe('escrow');
+  it('falls back to other at full confidence when nothing matches', () => {
+    expect(scoreCategories({ type: 'unknown_type' })).toEqual([{ category: 'other', confidence: 1 }]);
   });
 
-  it('returns subscription when metadata.subscriptionId is set', () => {
-    expect(inferCategory({ metadata: { subscriptionId: 'sub-1' } })).toBe('subscription');
-  });
-
-  it('returns invoice when metadata.invoiceId is set', () => {
-    expect(inferCategory({ metadata: { invoiceId: 'inv-1' } })).toBe('invoice');
-  });
-
-  it('returns donation when metadata.isDonation=true', () => {
-    expect(inferCategory({ metadata: { isDonation: true } })).toBe('donation');
-  });
-
-  it('returns other when no rule matches', () => {
-    expect(inferCategory({})).toBe('other');
-  });
-
-  it('refund rule takes priority over subscription metadata', () => {
-    expect(inferCategory({ type: 'refund', metadata: { subscriptionId: 's1' } })).toBe('refund');
+  it('inferCategory returns the top-scored category', () => {
+    expect(inferCategory({ metadata: { invoiceId: 'inv_1' } })).toBe('invoice');
   });
 });

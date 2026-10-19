@@ -18,7 +18,7 @@ import {
   getProjectReadModel,
   getVerificationReadModel,
 } from '../events/projections.js';
-import { enqueueStoredOutboxEventOutsideTransaction } from '../outbox/writer.js';
+import { publish } from '../events/event-bus.js';
 import type { DomainEventType } from '../events/event-types.js';
 
 export const eventsRouter = Router();
@@ -48,7 +48,7 @@ eventsRouter.post(
         metadata ?? {},
         { expectedVersion }
       );
-      await enqueueStoredOutboxEventOutsideTransaction(stored);
+      await publish(stored);
       res.status(201).json(stored);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Append failed';

@@ -226,6 +226,39 @@ export function WalletManager({ userId }: { userId: string }) {
         </section>
       </div>
 
+      {/* Per-currency balances (#1009) */}
+      {aggregatedBalance.byCurrency && aggregatedBalance.byCurrency.length > 0 && (
+        <section className="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden" aria-labelledby="currencies-heading">
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 id="currencies-heading" className="text-sm font-semibold text-gray-900 dark:text-white">Balances by Currency</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-700" aria-label="Balances by currency">
+              <thead className="bg-gray-50 dark:bg-gray-700">
+                <tr>
+                  <th scope="col" className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Currency</th>
+                  <th scope="col" className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Balance</th>
+                  <th scope="col" className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Value (USD)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                {aggregatedBalance.byCurrency.map((balance) => (
+                  <tr key={balance.currency} className="hover:bg-gray-50 dark:hover:bg-gray-750">
+                    <td className="px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100">{balance.currency}</td>
+                    <td className="px-4 py-2.5 text-sm text-right text-gray-700 dark:text-gray-300">
+                      {balance.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm text-right font-medium text-gray-900 dark:text-gray-100">
+                      ${balance.balanceUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* Top assets across all chains */}
       {aggregatedBalance.topAssets && aggregatedBalance.topAssets.length > 0 && (
         <section className="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden" aria-labelledby="assets-heading">

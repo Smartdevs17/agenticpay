@@ -144,7 +144,7 @@ export default function BackupsPage() {
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Backup & Disaster Recovery</h1>
                     <p className="text-sm text-gray-600">
-                        RTO: <4 hours | RPO: <1 hour | Retention: 30 days
+                        {'RTO: <4 hours | RPO: <1 hour | Retention: 30 days'}
                     </p>
                 </div>
                 <Button onClick={createFullBackup} disabled={creatingBackup}>

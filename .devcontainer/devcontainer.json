@@ -30,14 +30,27 @@
     "OPENAI_API_KEY": "sk-dev-placeholder-replace-me",
     "JOBS_ENABLED": "false",
     "QUEUE_ENABLED": "false",
-    "CORS_ALLOWED_ORIGINS": "*"
+    "CORS_ALLOWED_ORIGINS": "*",
+    "STELLAR_RPC_URL": "http://stellar:8000/soroban/rpc",
+    "SOROBAN_RPC_URL": "http://stellar:8000/soroban/rpc",
+    "STELLAR_NETWORK": "local",
+    "EVM_RPC_URL": "http://evm:8545"
   },
-  "forwardPorts": [3000, 3001, 5432, 6379],
+  "forwardPorts": [3000, 3001, 5432, 6379, 7001, 8000, 8545, 9229],
   "portsAttributes": {
     "3000": { "label": "Frontend", "onAutoForward": "notify" },
     "3001": { "label": "Backend API", "onAutoForward": "silent" },
     "5432": { "label": "PostgreSQL", "onAutoForward": "ignore" },
-    "6379": { "label": "Redis", "onAutoForward": "ignore" }
+    "6379": { "label": "Redis", "onAutoForward": "ignore" },
+    "7001": { "label": "Stellar Core", "onAutoForward": "ignore" },
+    "8000": { "label": "Soroban RPC", "onAutoForward": "silent" },
+    "8545": { "label": "EVM node (Hardhat)", "onAutoForward": "silent" },
+    "9229": { "label": "Node debugger", "onAutoForward": "silent" }
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "postStartCommand": "bash .devcontainer/post-start.sh",
@@ -54,13 +67,16 @@
         "redhat.vscode-yaml",
         "42Crunch.vscode-openapi",
         "ms-azuretools.vscode-docker",
-        "github.vscode-github-actions"
+        "github.vscode-github-actions",
+        "vitest.explorer"
       ],
       "settings": {
         "editor.formatOnSave": true,
         "editor.defaultFormatter": "esbenp.prettier-vscode",
         "typescript.tsdk": "node_modules/typescript/lib",
-        "rust-analyzer.checkOnSave.command": "clippy"
+        "rust-analyzer.checkOnSave.command": "clippy",
+        "debug.javascript.autoAttachFilter": "smart",
+        "vitest.enable": true
       }
     }
   },

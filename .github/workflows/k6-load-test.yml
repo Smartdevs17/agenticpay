@@ -1,0 +1,41 @@
+name: k6 Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Isolated or staging AgenticPay URL
+        required: true
+        type: string
+      target_rate:
+        description: Requests per second at the steady stage
+        required: false
+        default: '25'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: grafana/setup-k6-action@v1
+      - name: Run health smoke test
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: k6 run tests/load/k6/smoke.js
+      - name: Run staged payment load test
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          TARGET_RATE: ${{ inputs.target_rate }}
+        run: k6 run --summary-export=k6-summary.json tests/load/k6/payment-flow.js
+      - name: Upload load-test summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary
+          path: k6-summary.json
+          if-no-files-found: ignore

@@ -61,6 +61,7 @@ describe('Payout Engine (Issue 457)', () => {
     batches = await engine.evaluatePayouts();
     expect(batches).toHaveLength(1);
     expect(batches[0].status).toBe('completed');
+    expect(batches[0].transactionHash).toBeTruthy();
   });
 
   it('requires manual review and supports approval flow above autoApproveLimit', async () => {
@@ -79,9 +80,9 @@ describe('Payout Engine (Issue 457)', () => {
     expect(batches).toHaveLength(1);
     expect(batches[0].status).toBe('pending');
 
-    const approved = await engine.approveManualPayout(batches[0].id);
+    const approved = await engine.approveManualPayout(batches[0].id, { id: 'fin_1', role: 'finance_approver' });
     expect(approved).toBe(true);
-    expect(batches[0].status).toBe('completed');
+    expect(engine.getPayoutHistory()[0].status).toBe('completed');
   });
 });
 

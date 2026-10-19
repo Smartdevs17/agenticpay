@@ -95,6 +95,33 @@ walletRouter.get(
   }),
 );
 
+// ─── Per-currency balances (#1009) ────────────────────────────────────────────
+
+walletRouter.get(
+  '/balances',
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = String(req.query.userId || '');
+    if (!userId) {
+      return res.status(400).json({ success: false, error: { message: 'userId is required' } });
+    }
+
+    const currency = typeof req.query.currency === 'string' ? req.query.currency : undefined;
+    if (currency) {
+      const balance = await WalletAggregationService.getCurrencyBalance(userId, currency);
+      if (!balance) {
+        return res.status(404).json({
+          success: false,
+          error: { message: `No ${currency.toUpperCase()} balance for this user` },
+        });
+      }
+      return res.status(200).json({ success: true, data: balance });
+    }
+
+    const balances = await WalletAggregationService.getBalancesByCurrency(userId);
+    res.status(200).json({ success: true, data: balances });
+  }),
+);
+
 // ─── Routing ──────────────────────────────────────────────────────────────────
 
 walletRouter.get(
