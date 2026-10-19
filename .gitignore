@@ -31,3 +31,9 @@ npm-debug.log*
 *.pem
 
 .claude
+# additional ignores
+*.snap
+**/*.snap
+__snapshots__/
+**/__snapshots__/
+
