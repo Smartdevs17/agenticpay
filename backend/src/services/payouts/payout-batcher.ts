@@ -75,6 +75,8 @@ export interface ScheduledPayout {
   anomalyFlagIds?: string[];
   createdAt: Date;
   updatedAt: Date;
+  /** Optimistic locking version - incremented on each status change */
+  version: number;
 }
 
 export interface ProviderBatchItem {
@@ -277,6 +279,7 @@ export class PayoutBatcher {
       attempts: 0,
       createdAt,
       updatedAt: createdAt,
+      version: 1,
     };
     this.payouts.set(payout.id, payout);
 
@@ -311,7 +314,8 @@ export class PayoutBatcher {
   cancel(payoutId: string, actorId = 'system'): boolean {
     const payout = this.payouts.get(payoutId);
     if (!payout || (payout.status !== 'scheduled' && payout.status !== 'held')) return false;
-    this.setStatus(payout, 'cancelled');
+    const expectedVersion = payout.version;
+    this.setStatus(payout, 'cancelled', expectedVersion);
     this.audit(actorId, 'payout.cancelled', payout);
     return true;
   }
@@ -416,7 +420,8 @@ export class PayoutBatcher {
       item.attempts += 1;
       item.batchId = batch.id;
       delete item.lastError;
-      this.setStatus(item, 'batched');
+      const expectedVersion = item.version;
+      this.setStatus(item, 'batched', expectedVersion);
     }
 
     try {
@@ -443,7 +448,8 @@ export class PayoutBatcher {
       batch.completedAt = this.now();
       for (const item of items) {
         item.transactionHash = result.transactionHash;
-        this.setStatus(item, 'paid');
+        const expectedVersion = item.version;
+        this.setStatus(item, 'paid', expectedVersion);
         this.audit('system', 'payout.settled', item, { batchId: batch.id, transactionHash: result.transactionHash });
       }
       this.auditBatch('payout_batch.settled', batch, { transactionHash: result.transactionHash });
@@ -454,13 +460,14 @@ export class PayoutBatcher {
       batch.completedAt = this.now();
       for (const item of items) {
         item.lastError = message;
+        const expectedVersion = item.version;
         if (item.attempts >= this.maxAttempts) {
-          this.setStatus(item, 'failed');
+          this.setStatus(item, 'failed', expectedVersion);
           this.audit('system', 'payout.failed', item, { batchId: batch.id, error: message, final: true });
         } else {
           // Back to the queue on its own: the retry may land in a different batch.
           item.scheduledFor = new Date(this.now().getTime() + this.retryDelayMs);
-          this.setStatus(item, 'scheduled');
+          this.setStatus(item, 'scheduled', expectedVersion);
           this.audit('system', 'payout.failed', item, { batchId: batch.id, error: message, final: false });
         }
       }
@@ -474,15 +481,16 @@ export class PayoutBatcher {
     const payout = this.payouts.get(flag.reference);
     if (!payout || payout.status !== 'held') return;
 
+    const expectedVersion = payout.version;
     if (flag.status === 'confirmed') {
-      this.setStatus(payout, 'cancelled');
+      this.setStatus(payout, 'cancelled', expectedVersion);
       this.audit(flag.reviewedBy ?? 'system', 'payout.cancelled', payout, { anomalyFlagId: flag.id });
       return;
     }
 
     // Released only once every flag on the payout has been cleared as a false positive.
     if (this.anomalyDetector?.hasOpenFlags(payout.id)) return;
-    this.setStatus(payout, 'scheduled');
+    this.setStatus(payout, 'scheduled', expectedVersion);
     this.audit(flag.reviewedBy ?? 'system', 'payout.scheduled', payout, {
       releasedFromHold: true,
       anomalyFlagIds: payout.anomalyFlagIds ?? [],
@@ -551,9 +559,14 @@ export class PayoutBatcher {
     };
   }
 
-  private setStatus(payout: ScheduledPayout, status: ScheduledPayoutStatus): void {
+  private setStatus(payout: ScheduledPayout, status: ScheduledPayoutStatus, expectedVersion?: number): void {
+    // Optimistic locking: reject if version doesn't match expected (race condition prevention)
+    if (expectedVersion !== undefined && payout.version !== expectedVersion) {
+      throw new Error('PAYOUT_VERSION_CONFLICT');
+    }
     payout.status = status;
     payout.updatedAt = this.now();
+    payout.version += 1;
   }
 
   private audit(

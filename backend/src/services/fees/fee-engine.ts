@@ -41,6 +41,14 @@ export class FeeEngineService {
   private readonly DEFAULT_GAS_SURCHARGE_PCT = 10;
   private readonly CACHE_TTL_SECONDS = 300; // 5 min
 
+  /**
+   * Round to integer minor units (cents) to prevent rounding drift.
+   * Uses banker's rounding (round half to even) for deterministic results.
+   */
+  private roundMinor(value: number): number {
+    return Math.round(value * 100) / 100;
+  }
+
   async calculate(input: FeeCalculationInput): Promise<{
     breakdown: FeeBreakdown;
     schedule: FeeScheduleInfo;
@@ -52,7 +60,8 @@ export class FeeEngineService {
     const tier = await tierResolver.resolveTier(schedule.id, input.amount);
     if (!tier) throw new AppError(400, 'No applicable fee tier for this amount', 'NO_TIER_FOUND');
 
-    let baseFee = tier.flatFee + (input.amount * tier.percentageFee / 100);
+    // Use integer minor units (cents) to prevent rounding drift
+    let baseFee = this.roundMinor(tier.flatFee + (input.amount * tier.percentageFee / 100));
     baseFee = this.applyMinMax(baseFee, tier.minFee, tier.maxFee);
 
     const processingFee = baseFee;
@@ -64,7 +73,7 @@ export class FeeEngineService {
       if (override) {
         const overrideFlat = Number(override.flatFee ?? tier.flatFee);
         const overridePct = Number(override.percentageFee ?? tier.percentageFee);
-        baseFee = overrideFlat + (input.amount * overridePct / 100);
+        baseFee = this.roundMinor(overrideFlat + (input.amount * overridePct / 100));
         baseFee = this.applyMinMax(baseFee, Number(override.minFee ?? tier.minFee), Number(override.maxFee ?? tier.maxFee));
       }
 
@@ -72,8 +81,8 @@ export class FeeEngineService {
         input.tenantId, input.merchantId, schedule.id, input.amount,
       );
       if (discountResult.discountPct > 0) {
-        volumeDiscount = baseFee * (discountResult.discountPct / 100);
-        baseFee -= volumeDiscount;
+        volumeDiscount = this.roundMinor(baseFee * (discountResult.discountPct / 100));
+        baseFee = this.roundMinor(baseFee - volumeDiscount);
         appliedVolumeDiscount = true;
       }
     }
@@ -83,12 +92,12 @@ export class FeeEngineService {
     const inputGasPct = Number(schedule.gasSurchargePct ?? this.DEFAULT_GAS_SURCHARGE_PCT);
 
     if (input.gasPriceGwei && input.gasPriceGwei > gasThreshold) {
-      gasSurcharge = baseFee * (inputGasPct / 100);
-      baseFee += gasSurcharge;
+      gasSurcharge = this.roundMinor(baseFee * (inputGasPct / 100));
+      baseFee = this.roundMinor(baseFee + gasSurcharge);
     }
 
-    const totalFee = processingFee + gasSurcharge;
-    const netAmount = input.amount - totalFee;
+    const totalFee = this.roundMinor(processingFee + gasSurcharge);
+    const netAmount = this.roundMinor(input.amount - totalFee);
 
     const scheduleInfo: FeeScheduleInfo = {
       id: schedule.id,
