@@ -88,6 +88,10 @@ import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { churnPredictionRouter } from './routes/churn-prediction.js';
 import { slackRouter } from './routes/slack.js';
 import { githubIntegrationRouter } from './routes/github-integration.js';
+import { wooCommerceRouter } from './routes/woocommerce.js';
+import { salesforceRouter } from './routes/salesforce.js';
+import { xeroRouter } from './routes/xero.js';
+import { quickBooksRouter } from './routes/quickbooks.js';
 import { pluginsRouter } from './routes/plugins.js';
 import { devWebhookRouter } from './routes/dev/webhook.js';
 import { funnelTrackingRouter } from './routes/funnel-tracking.js';
@@ -244,6 +248,10 @@ app.use('/webhooks', webhookHandlersRouter);
 // Mounted before the global JSON parser so `req.rawBody` is populated.
 app.use('/api/v1/fiat-payments/webhooks', webhookJsonParser);
 
+// WooCommerce webhooks are signed over the raw body (#954). Mounted before the
+// global JSON parser so `req.rawBody` is populated for HMAC verification.
+app.use('/api/v1/integrations/woocommerce/webhooks', webhookJsonParser);
+
 // KYC document uploads carry base64 file contents (up to 10 MB decoded) (#921)
 app.use('/api/v1/kyc', express.json({ limit: '15mb' }));
 app.use(express.json());
@@ -351,6 +359,10 @@ apiV1Router.use('/analytics/cohorts', cohortAnalyticsRouter);
 apiV1Router.use('/analytics/churn', churnPredictionRouter);
 apiV1Router.use('/integrations/slack', slackRouter);
 apiV1Router.use('/integrations/github', githubIntegrationRouter);
+apiV1Router.use('/integrations/woocommerce', wooCommerceRouter);
+apiV1Router.use('/integrations/salesforce', salesforceRouter);
+apiV1Router.use('/integrations/xero', xeroRouter);
+apiV1Router.use('/integrations/quickbooks', quickBooksRouter);
 apiV1Router.use('/plugins', pluginsRouter);
 apiV1Router.use('/funnels', funnelTrackingRouter);
 apiV1Router.use('/forecast/ml', mlForecastRouter);

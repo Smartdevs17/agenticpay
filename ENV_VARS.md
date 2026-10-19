@@ -29,6 +29,25 @@
 | PAYOUT_ANOMALY_BASELINE_SAMPLE_SIZE | Payouts kept per merchant for the rolling baseline | 50 | No |
 | PAYOUT_BATCH_MAX_SIZE | Maximum payouts sent in one provider call | 100 | No |
 | PAYOUT_PROVIDER_FEE_PER_CALL | Flat provider fee per call, used for the fees-saved estimate in batch reports | 0 | No |
+| WOOCOMMERCE_STORE_URL | WooCommerce store base URL (e.g. `https://shop.example.com`) | - | No |
+| WOOCOMMERCE_CONSUMER_KEY | WooCommerce REST API consumer key | - | No |
+| WOOCOMMERCE_CONSUMER_SECRET | WooCommerce REST API consumer secret | - | No |
+| WOOCOMMERCE_WEBHOOK_SECRET | Secret used to verify `X-WC-Webhook-Signature` | - | No |
+| SALESFORCE_INSTANCE_URL | Salesforce instance URL (e.g. `https://acme.my.salesforce.com`) | - | No |
+| SALESFORCE_ACCESS_TOKEN | Salesforce OAuth access token | - | No |
+| SALESFORCE_API_VERSION | Salesforce REST API version | 59.0 | No |
+| SALESFORCE_INVOICE_STATUS | Salesforce Billing invoice status to write | Draft | No |
+| SALESFORCE_ACCOUNT_EMAIL_FIELD | Optional Account field to store the customer email | - | No |
+| XERO_ACCESS_TOKEN | Xero OAuth access token | - | No |
+| XERO_TENANT_ID | Xero tenant id the tokens are scoped to | - | No |
+| XERO_API_URL | Xero Accounting API base URL | https://api.xero.com/api.xro/2.0 | No |
+| XERO_DEFAULT_ACCOUNT_CODE | Default account code for invoice lines | - | No |
+| XERO_PAYMENT_ACCOUNT_CODE | Account code bank payments are posted to (required to record payments) | - | No |
+| XERO_INVOICE_STATUS | Xero invoice status to write | AUTHORISED | No |
+| QUICKBOOKS_ACCESS_TOKEN | QuickBooks Online OAuth access token | - | No |
+| QUICKBOOKS_REALM_ID | QuickBooks company (realm) id | - | No |
+| QUICKBOOKS_API_URL | QuickBooks Accounting API base URL | https://quickbooks.api.intuit.com/v3/company/:realmId | No |
+| QUICKBOOKS_DEFAULT_ITEM_ID | Default QuickBooks item used on invoice lines | - | No |
 
 ## Frontend
 
