@@ -13,6 +13,7 @@ import {
   RateLimitError,
   ValidationError,
 } from './errors.js';
+import { createIdempotencyKey } from './idempotency.js';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -71,7 +72,19 @@ export class AgenticPayClient {
       ...(this.apiKey ? { 'x-api-key': this.apiKey } : {}),
     };
 
-    let context: RequestContext = { method, path, headers: mergedHeaders, body };
+    const hasIdempotencyKey = Object.keys(mergedHeaders).some(
+      (header) => header.toLowerCase() === 'idempotency-key' || header.toLowerCase() === 'x-idempotency-key'
+    );
+    if (method !== 'GET' && !hasIdempotencyKey) {
+      mergedHeaders['Idempotency-Key'] = createIdempotencyKey();
+    }
+
+    let context: RequestContext = {
+      method,
+      path,
+      headers: mergedHeaders,
+      body,
+    };
     for (const interceptor of this.requestInterceptors) {
       context = await interceptor(context);
     }
@@ -100,10 +113,7 @@ export class AgenticPayClient {
         }
 
         if (!response.ok) {
-          if (
-            this.retryConfig.retryableStatusCodes.includes(response.status) &&
-            attempt < this.retryConfig.attempts
-          ) {
+          if (this.retryConfig.retryableStatusCodes.includes(response.status) && attempt < this.retryConfig.attempts) {
             await sleep(this.retryConfig.baseDelayMs * Math.pow(2, attempt));
             attempt += 1;
             continue;

@@ -1,5 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
@@ -18,6 +16,7 @@ import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
 import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
+import { correlationMiddleware, httpLogger } from './middleware/logger.js';
 import { validateEnv, config as getConfig } from './config/env.js';
 import { config } from './config.js';
 import { flagsRouter } from './routes/flags.js';
@@ -65,34 +64,10 @@ import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { churnPredictionRouter } from './routes/churn-prediction.js';
 import { slackRouter } from './routes/slack.js';
 import { githubIntegrationRouter } from './routes/github-integration.js';
+import { pluginsRouter } from './routes/plugins.js';
+import { devWebhookRouter } from './routes/dev/webhook.js';
 
 dotenv.config();
-
-const traceStorage = new AsyncLocalStorage<string>();
-
-const originalConsole = {
-  log: console.log,
-  info: console.info,
-  warn: console.warn,
-  error: console.error,
-};
-
-function formatMessage(args: any[]): any[] {
-  const traceId = traceStorage.getStore();
-  if (traceId) {
-    if (typeof args[0] === 'string') {
-      args[0] = `[TraceID: ${traceId}] ${args[0]}`;
-    } else {
-      args.unshift(`[TraceID: ${traceId}]`);
-    }
-  }
-  return args;
-}
-
-console.log = (...args) => originalConsole.log(...formatMessage(args));
-console.info = (...args) => originalConsole.info(...formatMessage(args));
-console.warn = (...args) => originalConsole.warn(...formatMessage(args));
-console.error = (...args) => originalConsole.error(...formatMessage(args));
 
 const app = express();
 
@@ -146,9 +121,7 @@ function tieredRateLimit(req: Request, res: Response, next: NextFunction): void 
   const existingState = tierRateStore.get(storeKey);
 
   const state =
-    !existingState || existingState.resetAtMs <= nowMs
-      ? { count: 0, resetAtMs: nowMs + tierWindowMs }
-      : existingState;
+    !existingState || existingState.resetAtMs <= nowMs ? { count: 0, resetAtMs: nowMs + tierWindowMs } : existingState;
 
   state.count += 1;
   tierRateStore.set(storeKey, state);
@@ -206,23 +179,9 @@ app.use(express.json());
 app.use(compressionMiddleware({ minSizeBytes: config.compression.threshold }));
 
 app.use(requestIdMiddleware);
+app.use(correlationMiddleware);
+app.use(httpLogger);
 app.use(auditMiddleware());
-
-// Trace ID middleware
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const traceId = (req.headers['x-trace-id'] as string) || randomUUID();
-  res.setHeader('X-Trace-Id', traceId);
-
-  traceStorage.run(traceId, () => {
-    console.log(`${req.method} ${req.url} - Started`);
-
-    res.on('finish', () => {
-      console.log(`${req.method} ${req.url} - Finished with status ${res.statusCode}`);
-    });
-
-    next();
-  });
-});
 
 // SLA Tracking middleware
 app.use(slaTrackingMiddleware);
@@ -244,6 +203,11 @@ app.use(healthRouter);
 
 // Interactive API documentation & playground — Issue #758
 app.use('/docs', docsRouter);
+
+// Local webhook inspection endpoint. Never expose it in production.
+if (!config.isProd) {
+  app.use('/api/dev/webhooks', devWebhookRouter);
+}
 
 import { versionMiddleware } from './middleware/versioning.js';
 
@@ -315,6 +279,7 @@ apiV1Router.use('/analytics/cohorts', cohortAnalyticsRouter);
 apiV1Router.use('/analytics/churn', churnPredictionRouter);
 apiV1Router.use('/integrations/slack', slackRouter);
 apiV1Router.use('/integrations/github', githubIntegrationRouter);
+apiV1Router.use('/plugins', pluginsRouter);
 
 // Explicit URL-based mounting
 app.use('/api/v1', apiV1Router);
@@ -334,7 +299,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.apiVersion === 'v1') {
     return apiV1Router(req, res, next);
   }
-  
+
   next(new AppError(404, `API Version ${req.apiVersion} is not supported`, 'UNSUPPORTED_API_VERSION'));
 });
 

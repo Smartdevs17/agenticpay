@@ -22,7 +22,7 @@ export * from './invoices.js';
 export * from './stellar.js';
 export * from './sandbox.js';
 export * from './wallet.js';
-
+export * from './idempotency.js';
 
 export class AgenticPaySDK {
   readonly client: AgenticPayClient;
@@ -65,7 +65,6 @@ export class AgenticPaySDK {
     this.sandbox = new SandboxApi(this.client);
     this.wallet = new WalletApi(this.client);
   }
-
 }
 
 export function createAgenticPaySDK(options: AgenticPayClientOptions, authProvider?: AuthProvider) {

@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma.js';
 import { PluginHost } from './plugin-host.js';
 import type { ExtensionPoint, HookContextByExtensionPoint } from './extension-points.js';
 import type { PluginHealth, PluginPrismaClient } from './types.js';
+import { listMarketplaceApps, type MarketplaceFilters } from './marketplace.js';
 
 const CORE_VERSION = process.env.AGENTICPAY_VERSION ?? '0.1.0';
 
@@ -26,21 +27,14 @@ export class PluginRegistry {
     return this.db.plugin.findMany({ orderBy: { installedAt: 'desc' } });
   }
 
-  marketplace() {
+  marketplace(filters: MarketplaceFilters = {}) {
     const configured = process.env.PLUGIN_MARKETPLACE
-      ? JSON.parse(process.env.PLUGIN_MARKETPLACE) as unknown
+      ? (JSON.parse(process.env.PLUGIN_MARKETPLACE) as unknown)
       : undefined;
 
     if (Array.isArray(configured)) return configured;
 
-    return [
-      {
-        name: 'agenticpay-fee-sample',
-        version: '0.1.0',
-        description: 'Sample fee:calculate extension',
-        compatibility: { agenticPay: `^${CORE_VERSION}` },
-      },
-    ];
+    return listMarketplaceApps(filters);
   }
 
   async install(input: {
@@ -69,11 +63,19 @@ export class PluginRegistry {
       },
     });
     await this.db.pluginConfig.upsert({
-      where: { pluginId_environment: { pluginId: record.id, environment: 'default' } },
-      create: { pluginId: record.id, environment: 'default', config: input.config ?? {} },
+      where: {
+        pluginId_environment: { pluginId: record.id, environment: 'default' },
+      },
+      create: {
+        pluginId: record.id,
+        environment: 'default',
+        config: input.config ?? {},
+      },
       update: { config: input.config ?? {} },
     });
-    await this.audit(record.id, 'install', input.actorId, { source: input.source });
+    await this.audit(record.id, 'install', input.actorId, {
+      source: input.source,
+    });
     await this.enable(record.id, input.actorId);
     return record;
   }
@@ -122,7 +124,9 @@ export class PluginRegistry {
   }
 
   async update(pluginId: string, input: { version?: string; source?: string; actorId?: string }) {
-    const current = await this.db.plugin.findUnique({ where: { id: pluginId } });
+    const current = await this.db.plugin.findUnique({
+      where: { id: pluginId },
+    });
     if (!current) throw new Error('Plugin not found');
     await this.host.uninstall(pluginId).catch(() => undefined);
     const updated = await this.db.plugin.update({
@@ -134,7 +138,10 @@ export class PluginRegistry {
         health: { status: 'healthy', errorCount: 0 } satisfies PluginHealth,
       },
     });
-    await this.audit(pluginId, 'update', input.actorId, { version: input.version, source: input.source });
+    await this.audit(pluginId, 'update', input.actorId, {
+      version: input.version,
+      source: input.source,
+    });
     return updated;
   }
 
@@ -147,10 +154,7 @@ export class PluginRegistry {
     await this.audit(pluginId, 'configure', actorId);
   }
 
-  async runHook<Point extends ExtensionPoint>(
-    point: Point,
-    context: HookContextByExtensionPoint[Point]
-  ) {
+  async runHook<Point extends ExtensionPoint>(point: Point, context: HookContextByExtensionPoint[Point]) {
     try {
       return await this.host.runHook(point, context);
     } catch (error) {
@@ -169,7 +173,9 @@ export class PluginRegistry {
   }
 
   private async disableFaultyPlugins(message: string) {
-    const plugins = await this.db.plugin.findMany({ where: { status: 'enabled' } });
+    const plugins = await this.db.plugin.findMany({
+      where: { status: 'enabled' },
+    });
     await Promise.all(
       plugins.map((plugin) =>
         this.db.plugin.update({
@@ -177,7 +183,11 @@ export class PluginRegistry {
           data: {
             status: 'error',
             disabledAt: new Date(),
-            health: { status: 'disabled', errorCount: 1, lastError: message } satisfies PluginHealth,
+            health: {
+              status: 'disabled',
+              errorCount: 1,
+              lastError: message,
+            } satisfies PluginHealth,
           },
         })
       )

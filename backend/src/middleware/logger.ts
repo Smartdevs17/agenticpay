@@ -61,6 +61,7 @@ export const httpLogger = pinoHttp({
   logger,
   genReqId(req: Request, res: Response) {
     const existing =
+      req.requestId ??
       (req.headers[REQUEST_ID_HEADER] as string | undefined) ??
       (req.headers['x-request-id'] as string | undefined);
     const id = existing ?? randomUUID();
@@ -113,7 +114,10 @@ export function correlationMiddleware(req: Request, res: Response, next: NextFun
   });
 }
 
-export function bindAsyncContext<T>(fn: () => Promise<T>, partial?: Partial<{ traceId: string; requestId: string; module: string }>): Promise<T> {
+export function bindAsyncContext<T>(
+  fn: () => Promise<T>,
+  partial?: Partial<{ traceId: string; requestId: string; module: string }>
+): Promise<T> {
   const parent = getLogContext();
   const ctx = {
     traceId: partial?.traceId ?? parent?.traceId ?? randomUUID(),

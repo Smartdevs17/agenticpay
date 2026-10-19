@@ -12,7 +12,7 @@ function makeReqRes(overrides: Partial<IncomingMessage> = {}) {
       socket: { remoteAddress: '127.0.0.1' },
       headers: {},
     },
-    overrides,
+    overrides
   );
 
   const res = Object.assign(Object.create(null) as ServerResponse, {
@@ -44,9 +44,7 @@ describe('httpLogger middleware', () => {
     httpLogger(req as any, res as any, next);
 
     // pino-http sets req.id
-    expect((req as any).id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
+    expect((req as any).id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 
     // X-Request-Id header must be set on the response
     expect(res.setHeader).toHaveBeenCalledWith('x-request-id', (req as any).id);
@@ -87,5 +85,30 @@ describe('logger module', () => {
     expect(typeof logger.info).toBe('function');
     expect(typeof logger.error).toBe('function');
     expect(typeof logger.warn).toBe('function');
+  });
+});
+
+describe('correlationMiddleware', () => {
+  it('propagates request and trace IDs through async log context', async () => {
+    const { correlationMiddleware } = await import('./logger.js');
+    const { getLogContext } = await import('../logging/context.js');
+    const { req, res } = makeReqRes({
+      headers: { 'x-trace-id': 'trace-test' },
+    });
+    (req as any).requestId = 'request-test';
+
+    await new Promise<void>((resolve) => {
+      correlationMiddleware(req as any, res as any, () => {
+        setTimeout(() => {
+          expect(getLogContext()).toMatchObject({
+            traceId: 'trace-test',
+            requestId: 'request-test',
+          });
+          resolve();
+        }, 0);
+      });
+    });
+
+    expect(res.setHeader).toHaveBeenCalledWith('X-Trace-Id', 'trace-test');
   });
 });
