@@ -150,8 +150,12 @@ export abstract class BaseGatewayAdapter implements IGatewayAdapter {
       const processingTime = Date.now() - startTime;
       this.recordFailure(processingTime);
 
-      // Check if should open circuit
-      if (this.health.consecutiveFailures >= this.config.circuitBreakerThreshold) {
+      // A failed probe in half-open state must reopen the circuit immediately;
+      // otherwise a single probe failure can leave the gateway half-open.
+      if (
+        this.health.consecutiveFailures >= this.config.circuitBreakerThreshold ||
+        this.circuitState === CircuitState.HalfOpen
+      ) {
         this.openCircuit();
       }
 
