@@ -16,6 +16,11 @@ services and tests so future changes remain reviewable.
 When adding a provider, cover quote creation, timeout behavior, provider
 failure mapping, and idempotent retry behavior in the provider test suite.
 
+## Gateway failure semantics
+
+- Failure metrics, half-open circuit recovery, and safe failover guidance:
+  [`GATEWAY_FAILURE_SEMANTICS.md`](GATEWAY_FAILURE_SEMANTICS.md)
+
 ## Payment correctness
 
 - Payment reconciliation and mismatch handling:
