@@ -169,6 +169,8 @@ import { recurringBillingRouter } from './routes/recurring-billing.js';
 import { splitPaymentsRouter } from './routes/split-payments.js';
 import { transfersRouter } from './routes/transfers.js';
 import { threeDSRouter } from './routes/3ds.js';
+import { chargebacksRouter } from './routes/chargebacks.js';
+import { merchantRiskRouter } from './routes/merchant-risk.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -400,6 +402,10 @@ apiV1Router.use('/split-payments', splitPaymentsRouter);
 apiV1Router.use('/transfers', transfersRouter);
 // 3D Secure card-payment authentication — Issue #925
 apiV1Router.use('/3ds', threeDSRouter);
+// Merchant onboarding risk tiering — Issue #928
+apiV1Router.use('/merchant-risk', merchantRiskRouter);
+// Chargeback management with evidence submission — Issue #926
+apiV1Router.use('/chargebacks', chargebacksRouter);
 apiV1Router.get('/compression/metrics', (_req, res) => {
   res.json(getCompressionMetrics());
 });

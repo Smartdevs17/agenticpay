@@ -11,6 +11,7 @@
  *   GET  /api/v1/database/query-plans          — EXPLAIN ANALYZE for hot queries
  *   GET  /api/v1/database/alerts               — Database performance alerts
  *   GET  /api/v1/database/table-scans          — pg_stat_user_tables snapshot
+ *   POST /api/v1/database/analyse-queries      — Index recommendations from observed SQL
  *
  *   — Read-replica routing (Issue #881) ——————————————————————————————————————
  *   GET  /api/v1/database/replicas             — List replica health + routing stats
@@ -28,8 +29,30 @@ import {
 } from '../config/database.js';
 import { getSlowQueryDashboard, resetQueryMetrics } from '../middleware/queryLogger.js';
 import { poolMetrics, connectionLeaseManager, poolExhaustionManager } from '../config/database.js';
+import { z } from 'zod';
+import {
+  analyseQuery,
+  recommendIndexes,
+  detectFullTableScans,
+  consolidateByTable,
+  type QueryStats,
+} from '../services/query-optimization.js';
+import { validateRequest } from '../middleware/validate.js';
 
 const router = Router();
+
+const analyseQuerySchema = z.object({
+  queries: z
+    .array(
+      z.object({
+        sql: z.string().min(1),
+        executions: z.number().int().nonnegative().optional(),
+        avgDurationMs: z.number().nonnegative().optional(),
+        rowsExamined: z.number().nonnegative().optional(),
+      }),
+    )
+    .min(1, 'At least one query is required'),
+});
 
 router.get('/stats', async (_req: Request, res: Response) => {
   const dashboard = getSlowQueryDashboard();
@@ -96,6 +119,38 @@ router.post('/metrics/reset', async (_req: Request, res: Response) => {
   resetQueryMetrics();
   res.json({ data: { message: 'Query metrics reset' } });
 });
+
+/**
+ * POST /database/analyse-queries
+ *
+ * Analyses a batch of observed SQL statements and returns index
+ * recommendations plus any statements flagged as likely full-table scans.
+ * Backs the index-analysis workflow for Issue #739.
+ */
+router.post(
+  '/analyse-queries',
+  validateRequest({ body: analyseQuerySchema }),
+  (req: Request, res: Response) => {
+    const stats = (req.body.queries as Array<{
+      sql: string;
+      executions?: number;
+      avgDurationMs?: number;
+      rowsExamined?: number;
+    }>)
+      .map((entry) => analyseQuery(entry.sql, entry))
+      .filter((s): s is QueryStats => s !== null);
+
+    const recommendations = recommendIndexes(stats);
+    res.json({
+      data: {
+        analysed: stats.length,
+        recommendations,
+        byTable: consolidateByTable(recommendations),
+        fullTableScans: detectFullTableScans(stats),
+      },
+    });
+  },
+);
 
 // ── Read-replica routing endpoints — Issue #881 ───────────────────────────────
 
