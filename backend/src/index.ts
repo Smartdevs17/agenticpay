@@ -54,6 +54,7 @@ import { ipAllowlistMiddleware, initIpAllowlist } from './middleware/ip-allowlis
 import { sessionMiddleware } from './middleware/session.js';
 import { auditSensitiveOperations } from './middleware/sensitiveAudit.js';
 import { notificationsRouter } from './routes/notifications.js';
+import { instamojoRouter } from './routes/instamojo.js';
 import { auditRouter } from './routes/audit.js';
 import { hedgingRouter } from './routes/hedging.js';
 import { complianceRouter } from './routes/compliance.js';
@@ -416,6 +417,7 @@ apiV1Router.get('/pool/metrics', (_req, res) => {
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
 app.use('/api/v1/notifications', notificationsRouter);
+app.use('/api/v1/instamojo', instamojoRouter);
 app.use('/api/v1/audit', auditRouter);
 app.use('/api/v1/hedging', hedgingRouter);
 app.use('/api/v1/compliance', complianceRouter);

@@ -4,7 +4,7 @@
 /**
  * Payment gateway types
  */
-export type GatewayType = 'stellar' | 'stripe' | 'paypal' | 'coinbase';
+export type GatewayType = 'stellar' | 'stripe' | 'paypal' | 'coinbase' | 'instamojo';
 
 /**
  * Payment request

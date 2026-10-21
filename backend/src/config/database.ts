@@ -601,7 +601,17 @@ export {
   type ReplicaSnapshot,
 } from '../db/read-replica-router.js';
 
-export const readReplicaRouter = getReadReplicaRouter();
+export const getReadReplicaRouterInstance = () => getReadReplicaRouter();
+export const readReplicaRouter = {
+  get instance() {
+    return getReadReplicaRouter();
+  },
+  selectReadUrl: (...args: Parameters<ReadReplicaRouter['selectReadUrl']>) => getReadReplicaRouter().selectReadUrl(...args),
+  recordFailure: (...args: Parameters<ReadReplicaRouter['recordFailure']>) => getReadReplicaRouter().recordFailure(...args),
+  recordSuccess: (...args: Parameters<ReadReplicaRouter['recordSuccess']>) => getReadReplicaRouter().recordSuccess(...args),
+  checkHealth: (...args: Parameters<ReadReplicaRouter['checkHealth']>) => getReadReplicaRouter().checkHealth(...args),
+  getSnapshot: (...args: Parameters<ReadReplicaRouter['getSnapshot']>) => getReadReplicaRouter().getSnapshot(...args),
+};
 
 export interface ReplicaConfig {
   host: string;

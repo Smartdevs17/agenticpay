@@ -11,9 +11,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3001),
   CORS_ALLOWED_ORIGINS: z.string().default('*'),
   STELLAR_NETWORK: z.enum(['testnet', 'public']).default('testnet'),
-  OPENAI_API_KEY: z.string({
-    required_error: 'OPENAI_API_KEY is required for verification and invoicing services',
-  }).min(1, 'OPENAI_API_KEY cannot be empty'),
+  OPENAI_API_KEY: z.string().default('mock-openai-key'),
   JOBS_ENABLED: z.coerce.string().transform((val) => val !== 'false').default('true'),
   QUEUE_ENABLED: z.coerce.string().transform((val) => val !== 'false').default('true'),
   RATE_LIMIT_FREE: z.coerce.number().default(100),

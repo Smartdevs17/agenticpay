@@ -13,6 +13,7 @@ const FIAT_CURRENCIES = new Set(['USD', 'EUR', 'GBP']);
  */
 export function selectProviderId(input: PaymentInput, preferredId?: string, registry: PaymentProviderRegistry = providerRegistry): string {
   if (preferredId && registry.get(preferredId)) return preferredId;
+  if (input.network === 'instamojo' || input.currency === 'INR') return 'instamojo';
   if (input.network === 'stellar') return 'soroban';
   if (EVM_NETWORKS.has(input.network)) return 'evm';
   if (input.token ? FIAT_CURRENCIES.has(input.token) : FIAT_CURRENCIES.has(input.currency)) return 'fiat';
