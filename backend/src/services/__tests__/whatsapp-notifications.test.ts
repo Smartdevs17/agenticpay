@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { WhatsAppChannel } from '../notifications/channels/whatsapp.js';
-import { NotificationService } from '../notificationService.js';
+import { NotificationService } from '../notificationService.ts';
 import { NotificationPreferenceService, notificationPreferenceService } from '../notifications/preferenceService.js';
 import { NotificationTemplateService } from '../notifications/templateService.js';
 import { whatsAppPaymentNotificationService } from '../whatsapp-payment-notifications.js';

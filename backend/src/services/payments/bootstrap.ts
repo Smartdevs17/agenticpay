@@ -17,6 +17,7 @@ import { EvmPaymentProvider } from './providers/evm.js';
 import { FiatPaymentProvider } from './providers/fiat.js';
 import { CreditPaymentProvider } from './providers/credit.js';
 import { InstamojoPaymentProvider } from './providers/instamojo.js';
+import { RazorpayPaymentProvider } from './providers/razorpay.js';
 
 export function registerDefaultPaymentProviders(registry: PaymentProviderRegistry = providerRegistry): void {
   registry.register(new SorobanPaymentProvider());
@@ -24,4 +25,5 @@ export function registerDefaultPaymentProviders(registry: PaymentProviderRegistr
   registry.register(new FiatPaymentProvider());
   registry.register(new CreditPaymentProvider());
   registry.register(new InstamojoPaymentProvider());
+  registry.register(new RazorpayPaymentProvider());
 }

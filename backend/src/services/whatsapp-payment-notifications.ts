@@ -1,4 +1,4 @@
-import { NotificationService } from './notificationService.js';
+import { NotificationService } from './notificationService.ts';
 import { WhatsAppChannel } from './notifications/channels/whatsapp.js';
 import { NotificationPreferenceService, notificationPreferenceService } from './notifications/preferenceService.js';
 

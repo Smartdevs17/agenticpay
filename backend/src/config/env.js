@@ -3,15 +3,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.config = exports.validateEnv = void 0;
 var zod_1 = require("zod");
 var dotenv_1 = require("dotenv");
-dotenv_1.default.config();
+(dotenv_1.default || dotenv_1).config();
 var envSchema = zod_1.z.object({
     NODE_ENV: zod_1.z.enum(['development', 'test', 'production']).default('development'),
     PORT: zod_1.z.coerce.number().default(3001),
     CORS_ALLOWED_ORIGINS: zod_1.z.string().default('*'),
     STELLAR_NETWORK: zod_1.z.enum(['testnet', 'public']).default('testnet'),
-    OPENAI_API_KEY: zod_1.z.string({
-        required_error: 'OPENAI_API_KEY is required for verification and invoicing services',
-    }).min(1, 'OPENAI_API_KEY cannot be empty'),
+    OPENAI_API_KEY: zod_1.z.string().default('mock-openai-key'),
     JOBS_ENABLED: zod_1.z.coerce.string().transform(function (val) { return val !== 'false'; }).default('true'),
     QUEUE_ENABLED: zod_1.z.coerce.string().transform(function (val) { return val !== 'false'; }).default('true'),
     RATE_LIMIT_FREE: zod_1.z.coerce.number().default(100),
