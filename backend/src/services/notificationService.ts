@@ -1,18 +1,18 @@
-import { EmailChannel } from './channels/email.js';
-import { SMSChannel } from './channels/sms.js';
-import { PushChannel } from './channels/push.js';
-import { InAppChannel } from './channels/in-app.js';
-import { NotificationPreferenceService } from './preferenceService.js';
-import { NotificationTemplateService } from './templateService.js';
-import { DeliveryTracker } from './deliveryTracker.js';
-import { config } from '../config.js';
+import { EmailChannel } from './notifications/channels/email.js';
+import { SMSChannel } from './notifications/channels/sms.js';
+import { PushChannel } from './notifications/channels/push.js';
+import { InAppChannel } from './notifications/channels/in-app.js';
+import { WhatsAppChannel } from './notifications/channels/whatsapp.js';
+import { NotificationPreferenceService } from './notifications/preferenceService.js';
+import { NotificationTemplateService } from './notifications/templateService.js';
+import { DeliveryTracker } from './notifications/deliveryTracker.js';
 
 export interface NotificationPayload {
   templateId: string;
   variables: Record<string, string>;
-  channels: ('email' | 'sms' | 'push' | 'in-app')[];
+  channels: ('email' | 'sms' | 'push' | 'in-app' | 'whatsapp')[];
   userId: string;
-  recipient?: string; // For email and SMS, if not provided will use user's registered contact
+  recipient?: string; // For email, SMS, and WhatsApp, if not provided will use user's registered contact
   priority?: 'low' | 'normal' | 'high';
   scheduledFor?: Date;
 }
@@ -31,16 +31,18 @@ export class NotificationService {
   private smsChannel: SMSChannel;
   private pushChannel: PushChannel;
   private inAppChannel: InAppChannel;
+  private whatsAppChannel: WhatsAppChannel;
   private preferenceService: NotificationPreferenceService;
   private templateService: NotificationTemplateService;
   private deliveryTracker: DeliveryTracker;
 
-  constructor() {
+  constructor(preferenceService?: NotificationPreferenceService) {
     this.emailChannel = new EmailChannel();
     this.smsChannel = new SMSChannel();
     this.pushChannel = new PushChannel();
     this.inAppChannel = new InAppChannel();
-    this.preferenceService = new NotificationPreferenceService();
+    this.whatsAppChannel = new WhatsAppChannel();
+    this.preferenceService = preferenceService || new NotificationPreferenceService();
     this.templateService = new NotificationTemplateService();
     this.deliveryTracker = new DeliveryTracker();
   }
@@ -137,6 +139,16 @@ export class NotificationService {
             );
             channelResult = { success: inAppResult.success, messageId: inAppResult.messageId, error: inAppResult.error };
             break;
+          case 'whatsapp':
+            const waRecipient = recipient || preferences.whatsappNumber || await this.getUserPhone(userId);
+            const waResult = await this.whatsAppChannel.send(
+              waRecipient,
+              rendered.body,
+              templateId,
+              { variables }
+            );
+            channelResult = { success: waResult.success, messageId: waResult.messageId, error: waResult.error };
+            break;
         }
 
         // Track delivery
@@ -179,6 +191,7 @@ export class NotificationService {
       case 'sms': return preferences.smsEnabled ?? true;
       case 'push': return preferences.pushEnabled ?? true;
       case 'in-app': return preferences.inAppEnabled ?? true;
+      case 'whatsapp': return preferences.whatsappEnabled ?? true;
       default: return false;
     }
   }

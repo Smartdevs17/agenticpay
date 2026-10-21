@@ -1,5 +1,3 @@
-import { config } from '../../../config.js';
-
 export interface SMSSendResult {
   success: boolean;
   messageId?: string;
@@ -13,7 +11,7 @@ export class SMSChannel {
       // For now, we'll simulate sending
       
       // Check if SMS service is configured
-      if (!config.twilioAccountSid && !config.twilioAuthToken) {
+      if (!process.env.TWILIO_ACCOUNT_SID && !process.env.TWILIO_AUTH_TOKEN) {
         console.log('[SMS] No SMS service configured, simulating send');
         // Simulate successful send
         return {

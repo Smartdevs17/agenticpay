@@ -3,6 +3,7 @@ import { EmailChannel } from './channels/email.js';
 import { SMSChannel } from './channels/sms.js';
 import { PushChannel } from './channels/push.js';
 import { InAppChannel } from './channels/in-app.js';
+import { WhatsAppChannel } from './channels/whatsapp.js';
 import { NotificationPreferenceService } from './preferenceService.js';
 import { NotificationTemplateService } from './templateService.js';
 import { DeliveryTracker } from './deliveryTracker.js';
@@ -13,7 +14,8 @@ export {
   SMSChannel,
   PushChannel,
   InAppChannel,
+  WhatsAppChannel,
   NotificationPreferenceService,
   NotificationTemplateService,
   DeliveryTracker
-};
+};

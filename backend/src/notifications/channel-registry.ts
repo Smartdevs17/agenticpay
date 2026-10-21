@@ -11,6 +11,7 @@ import { PagerDutyChannel } from "./channels/pagerduty-channel";
 import { DatadogChannel } from "./channels/datadog-channel";
 import { ZapierChannel } from "./channels/zapier-channel.js";
 import { IntercomChannel } from "./channels/intercom-channel.js";
+import { WhatsAppNotificationChannel } from "./channels/whatsapp-channel.js";
 
 export class ChannelRegistry {
   private channels = new Map<string, NotificationChannel>();
@@ -111,6 +112,17 @@ export class ChannelRegistry {
       });
       this.register(intercomChannel);
     }
+
+    // WhatsApp channel
+    const whatsAppChannel = new WhatsAppNotificationChannel({
+      accountSid: process.env.TWILIO_ACCOUNT_SID,
+      authToken: process.env.TWILIO_AUTH_TOKEN,
+      fromNumber: process.env.WHATSAPP_FROM_NUMBER,
+      apiUrl: process.env.WHATSAPP_API_URL,
+      maxPerHour: 50,
+      maxPerDay: 500,
+    });
+    this.register(whatsAppChannel);
   }
 
   /**

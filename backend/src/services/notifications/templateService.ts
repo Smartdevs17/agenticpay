@@ -1,4 +1,3 @@
-import { config } from '../../config.js';
 
 export interface NotificationTemplate {
   id: string;
@@ -6,7 +5,7 @@ export interface NotificationTemplate {
   subject: string; // For email and push title
   body: string; // For email, SMS, and push body
   variables: string[];
-  channels: ('email' | 'sms' | 'push' | 'in-app')[];
+  channels: ('email' | 'sms' | 'push' | 'in-app' | 'whatsapp')[];
 }
 
 export class NotificationTemplateService {
@@ -25,7 +24,7 @@ export class NotificationTemplateService {
       subject: 'Payment Receipt - {{amount}} {{currency}}',
       body: `Dear {{customerName}},\n\nThank you for your payment of {{amount}} {{currency}}.\n\nPayment Details:\n- Transaction ID: {{transactionId}}\n- Amount: {{amount}} {{currency}}\n- Date: {{date}}\n- Status: {{status}}\n\n{{#if projectName}}\nProject: {{projectName}}\n{{/if}}\n\nIf you have any questions, please contact support.\n\nBest regards,\nAgenticPay Team`,
       variables: ['customerName', 'amount', 'currency', 'transactionId', 'date', 'status', 'projectName'],
-      channels: ['email', 'sms', 'push', 'in-app']
+      channels: ['email', 'sms', 'push', 'in-app', 'whatsapp']
     });
 
     // Payment confirmation template
@@ -35,7 +34,7 @@ export class NotificationTemplateService {
       subject: 'Payment Confirmed - {{amount}} {{currency}}',
       body: `Dear {{customerName}},\n\nYour payment has been confirmed!\n\nAmount: {{amount}} {{currency}}\nTransaction Hash: {{transactionHash}}\nTimestamp: {{timestamp}}\n\nThis email serves as your official receipt.\n\nBest regards,\nAgenticPay Team`,
       variables: ['customerName', 'amount', 'currency', 'transactionHash', 'timestamp'],
-      channels: ['email', 'sms', 'push', 'in-app']
+      channels: ['email', 'sms', 'push', 'in-app', 'whatsapp']
     });
 
     // Refund notification template
@@ -45,7 +44,7 @@ export class NotificationTemplateService {
       subject: 'Refund Processed - {{amount}} {{currency}}',
       body: `Dear {{customerName}},\n\nYour refund of {{amount}} {{currency}} has been processed.\n\nOriginal Transaction: {{originalTransactionId}}\nRefund Amount: {{amount}} {{currency}}\nRefund ID: {{refundId}}\n\nThe funds should appear in your account within 5-7 business days.\n\nBest regards,\nAgenticPay Team`,
       variables: ['customerName', 'amount', 'currency', 'originalTransactionId', 'refundId'],
-      channels: ['email', 'sms', 'push', 'in-app']
+      channels: ['email', 'sms', 'push', 'in-app', 'whatsapp']
     });
 
     // Invoice created template

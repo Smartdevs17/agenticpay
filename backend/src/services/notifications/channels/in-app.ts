@@ -1,4 +1,3 @@
-import { config } from '../../../config.js';
 
 export interface InAppSendResult {
   success: boolean;

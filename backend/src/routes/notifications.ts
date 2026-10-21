@@ -1,8 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { NotificationService } from '../services/notificationService.js';
+import { whatsappNotificationRouter } from './whatsapp.js';
 
 export const notificationsRouter = Router();
+
+// Mount WhatsApp notifications sub-router
+notificationsRouter.use('/whatsapp', whatsappNotificationRouter);
 
 // Initialize notification service
 const notificationService = new NotificationService();

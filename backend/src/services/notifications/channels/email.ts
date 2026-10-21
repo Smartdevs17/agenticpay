@@ -1,5 +1,3 @@
-import { config } from '../../../config.js';
-
 export interface EmailSendResult {
   success: boolean;
   messageId?: string;
@@ -13,7 +11,7 @@ export class EmailChannel {
       // For now, we'll simulate sending
       
       // Check if email service is configured
-      if (!config.sendGridApiKey && !config.postmarkApiKey) {
+      if (!process.env.SENDGRID_API_KEY && !process.env.POSTMARK_API_KEY) {
         console.log('[Email] No email service configured, simulating send');
         // Simulate successful send
         return {

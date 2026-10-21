@@ -1,9 +1,8 @@
-import { config } from '../../config.js';
 
 export interface DeliveryRecord {
   id: string;
   notificationId: string;
-  channel: 'email' | 'sms' | 'push' | 'in-app';
+  channel: 'email' | 'sms' | 'push' | 'in-app' | 'whatsapp';
   userId: string;
   templateId: string;
   status: 'pending' | 'sent' | 'failed' | 'delivered' | 'read';
@@ -20,7 +19,7 @@ export interface DeliveryRecord {
 export class DeliveryTracker {
   // In a real implementation, this would use a database
   // For now, we'll use an in-memory store
-  private deliveries: Map<string, DeliveryRecord> = {};
+  private deliveries: Map<string, DeliveryRecord> = new Map();
 
   async track(delivery: Omit<DeliveryRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<DeliveryRecord> {
     const now = new Date();

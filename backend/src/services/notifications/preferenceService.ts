@@ -1,4 +1,3 @@
-import { config } from '../../config.js';
 
 export interface NotificationPreferences {
   userId: string;
@@ -7,6 +6,8 @@ export interface NotificationPreferences {
   smsEnabled: boolean;
   pushEnabled: boolean;
   inAppEnabled: boolean;
+  whatsappEnabled: boolean;
+  whatsappNumber?: string;
   // Category-specific enablement
   payments: boolean;
   invoices: boolean;
@@ -24,7 +25,7 @@ export interface NotificationPreferences {
 export class NotificationPreferenceService {
   // In a real implementation, this would use a database
   // For now, we'll use an in-memory store
-  private preferences: Map<string, NotificationPreferences> = {};
+  private preferences: Map<string, NotificationPreferences> = new Map();
 
   async getPreferences(userId: string): Promise<NotificationPreferences> {
     const stored = this.preferences.get(userId);
@@ -37,6 +38,7 @@ export class NotificationPreferenceService {
       smsEnabled: true,
       pushEnabled: true,
       inAppEnabled: true,
+      whatsappEnabled: true,
       payments: true,
       invoices: true,
       marketing: false,
@@ -68,6 +70,7 @@ export class NotificationPreferenceService {
       smsEnabled: true,
       pushEnabled: true,
       inAppEnabled: true,
+      whatsappEnabled: true,
       payments: true,
       invoices: true,
       marketing: false,
@@ -83,3 +86,5 @@ export class NotificationPreferenceService {
     return defaults;
   }
 }
+
+export const notificationPreferenceService = new NotificationPreferenceService();
