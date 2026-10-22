@@ -1,19 +1,63 @@
+/**
+ * reconciliation-report.ts — Issue #937
+ *
+ * Transaction reconciliation report: every payment in the window is checked
+ * against the ledger rules the platform can prove (settlement reference,
+ * uniqueness of the transaction hash, positive amount) and the expected
+ * settlement is reconciled against what was actually collected.
+ */
+
 import { prisma } from '../../lib/prisma.js';
 import { AppError } from '../../middleware/errorHandler.js';
+import {
+  MAX_REPORT_ROWS,
+  buildCsv,
+  buildTextPdf,
+  dayKey,
+  feeForAmount,
+  monthKey,
+  parseReportPeriod,
+  platformFeeBps,
+  roundMoney,
+  toAmount,
+  weekKey,
+  type CsvBlock,
+} from './report-format.js';
 
-interface ReconciliationFilters {
+export interface ReconciliationFilters {
   dateFrom: string;
   dateTo: string;
   tenantId: string;
   chain?: string;
   status?: string;
-  format?: 'csv' | 'pdf';
+  currency?: string;
+  /** Requested export format. The service always returns csv and pdf. */
+  format?: 'json' | 'csv' | 'pdf';
+  /** Override the configured platform fee rate (basis points). */
+  feeBps?: number;
 }
 
-interface ReportRow {
+/**
+ * Outcome of reconciling a single transaction.
+ *
+ * - `matched` — the ledger row satisfies every check.
+ * - `missing_tx_hash` — a completed payment without a settlement reference.
+ * - `duplicate_tx_hash` — the settlement reference was already seen.
+ * - `invalid_amount` — a non-positive amount.
+ * - `not_settled` — the payment has not settled yet.
+ */
+export type ReconciliationStatus =
+  | 'matched'
+  | 'missing_tx_hash'
+  | 'duplicate_tx_hash'
+  | 'invalid_amount'
+  | 'not_settled';
+
+export interface ReportRow {
   txId: string;
   date: string;
   chain: string;
+  currency: string;
   amount: string;
   fee: string;
   net: string;
@@ -21,9 +65,11 @@ interface ReportRow {
   receiver: string;
   status: string;
   memo: string;
+  reconciliationStatus: ReconciliationStatus;
+  note: string;
 }
 
-interface DailySummary {
+export interface DailySummary {
   date: string;
   chain: string;
   txCount: number;
@@ -32,7 +78,7 @@ interface DailySummary {
   totalNet: string;
 }
 
-interface WeeklySummary {
+export interface WeeklySummary {
   week: string;
   chain: string;
   txCount: number;
@@ -41,7 +87,7 @@ interface WeeklySummary {
   totalNet: string;
 }
 
-interface MonthlySummary {
+export interface MonthlySummary {
   month: string;
   chain: string;
   txCount: number;
@@ -50,47 +96,223 @@ interface MonthlySummary {
   totalNet: string;
 }
 
-interface ReconciliationReport {
+export interface ReconciliationTotals {
+  txCount: number;
+  matchedCount: number;
+  exceptionCount: number;
+  grossAmount: number;
+  totalFees: number;
+  netAmount: number;
+  expectedSettlement: number;
+  collectedAmount: number;
+  outstandingAmount: number;
+  byStatus: Record<ReconciliationStatus, number>;
+}
+
+export interface ReconciliationReport {
   rows: ReportRow[];
   dailySummaries: DailySummary[];
   weeklySummaries: WeeklySummary[];
   monthlySummaries: MonthlySummary[];
+  totals: ReconciliationTotals;
   dateFrom: string;
   dateTo: string;
+  tenantId: string;
   generatedAt: string;
+  truncated: boolean;
 }
 
-function escapeCsv(val: string): string {
-  if (val == null) return '';
-  const s = String(val);
-  if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
-    return '"' + s.replace(/"/g, '""') + '"';
+interface LedgerRow {
+  id: string;
+  txHash: string | null;
+  createdAt: Date;
+  network: string;
+  currency: string;
+  status: string;
+  type: string;
+  amount: number;
+  fromAddress: string | null;
+  toAddress: string | null;
+  projectTitle: string | null;
+}
+
+const EMPTY_STATUS_COUNTS: Record<ReconciliationStatus, number> = {
+  matched: 0,
+  missing_tx_hash: 0,
+  duplicate_tx_hash: 0,
+  invalid_amount: 0,
+  not_settled: 0,
+};
+
+function reconcileRow(row: LedgerRow, seenHashes: Set<string>): { status: ReconciliationStatus; note: string } {
+  if (row.amount <= 0) {
+    return { status: 'invalid_amount', note: 'Amount must be greater than zero' };
   }
-  return s;
+
+  if (row.status !== 'completed' && row.status !== 'refunded') {
+    return { status: 'not_settled', note: `Payment is ${row.status}` };
+  }
+
+  if (!row.txHash) {
+    return { status: 'missing_tx_hash', note: 'Settled payment has no transaction hash' };
+  }
+
+  if (seenHashes.has(row.txHash)) {
+    return { status: 'duplicate_tx_hash', note: `Transaction hash ${row.txHash} was already reconciled` };
+  }
+
+  seenHashes.add(row.txHash);
+  return { status: 'matched', note: '' };
 }
 
-function toCsv(rows: ReportRow[], summaries: DailySummary[] | WeeklySummary[] | MonthlySummary[], summaryLabel: string): string {
-  const header = ['Transaction ID,Date,Chain,Amount,Fee,Net,Sender,Receiver,Status,Memo'];
-  const dataRows = rows.map(r =>
-    [escapeCsv(r.txId), escapeCsv(r.date), escapeCsv(r.chain), escapeCsv(r.amount), escapeCsv(r.fee), escapeCsv(r.net), escapeCsv(r.sender), escapeCsv(r.receiver), escapeCsv(r.status), escapeCsv(r.memo)].join(',')
-  );
-  const summaryHeader = [`\n${summaryLabel} Summary\n${summaryLabel},Chain,Transactions,Total Amount,Total Fee,Total Net`];
-  const summaryRows = summaries.map(s =>
-    [escapeCsv(s.date || s.week || s.month), escapeCsv(s.chain), String(s.txCount), escapeCsv(s.totalAmount), escapeCsv(s.totalFee), escapeCsv(s.totalNet)].join(',')
-  );
-  return [header.join(''), ...dataRows, '', ...summaryHeader, ...summaryRows].join('\n');
+interface AggregatedPeriod {
+  date: string;
+  chain: string;
+  txCount: number;
+  totalAmount: number;
+  totalFee: number;
+  totalNet: number;
 }
 
-function buildSimplePdf(report: ReconciliationReport): Buffer {
+function aggregate(rows: ReportRow[], periodOf: (row: ReportRow) => string): AggregatedPeriod[] {
+  const groups = new Map<string, ReportRow[]>();
+  for (const row of rows) {
+    const bucket = `${periodOf(row)}::${row.chain}`;
+    const existing = groups.get(bucket);
+    if (existing) existing.push(row);
+    else groups.set(bucket, [row]);
+  }
+
+  return [...groups.entries()]
+    .map(([, items]) => ({
+      date: periodOf(items[0]),
+      chain: items[0].chain,
+      txCount: items.length,
+      totalAmount: roundMoney(items.reduce((sum, row) => sum + Number(row.amount), 0)),
+      totalFee: roundMoney(items.reduce((sum, row) => sum + Number(row.fee), 0)),
+      totalNet: roundMoney(items.reduce((sum, row) => sum + Number(row.net), 0)),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.chain.localeCompare(b.chain));
+}
+
+function toDaily(entries: AggregatedPeriod[]): DailySummary[] {
+  return entries.map((entry) => ({
+    date: entry.date,
+    chain: entry.chain,
+    txCount: entry.txCount,
+    totalAmount: entry.totalAmount.toFixed(8),
+    totalFee: entry.totalFee.toFixed(8),
+    totalNet: entry.totalNet.toFixed(8),
+  }));
+}
+
+function toWeekly(entries: AggregatedPeriod[]): WeeklySummary[] {
+  return entries.map((entry) => ({
+    week: entry.date,
+    chain: entry.chain,
+    txCount: entry.txCount,
+    totalAmount: entry.totalAmount.toFixed(8),
+    totalFee: entry.totalFee.toFixed(8),
+    totalNet: entry.totalNet.toFixed(8),
+  }));
+}
+
+function toMonthly(entries: AggregatedPeriod[]): MonthlySummary[] {
+  return entries.map((entry) => ({
+    month: entry.date,
+    chain: entry.chain,
+    txCount: entry.txCount,
+    totalAmount: entry.totalAmount.toFixed(8),
+    totalFee: entry.totalFee.toFixed(8),
+    totalNet: entry.totalNet.toFixed(8),
+  }));
+}
+
+function reportToCsv(report: ReconciliationReport): string {
+  const transactionBlock: CsvBlock = {
+    header: [
+      'Transaction ID',
+      'Date',
+      'Chain',
+      'Currency',
+      'Amount',
+      'Fee',
+      'Net',
+      'Sender',
+      'Receiver',
+      'Status',
+      'Memo',
+      'Reconciliation Status',
+      'Note',
+    ],
+    rows: report.rows.map((row) => [
+      row.txId,
+      row.date,
+      row.chain,
+      row.currency,
+      row.amount,
+      row.fee,
+      row.net,
+      row.sender,
+      row.receiver,
+      row.status,
+      row.memo,
+      row.reconciliationStatus,
+      row.note,
+    ]),
+  };
+
+  const summaryBlock: CsvBlock = {
+    header: ['Date', 'Chain', 'Transactions', 'Total Amount', 'Total Fee', 'Total Net'],
+    rows: report.dailySummaries.map((row) => [
+      row.date,
+      row.chain,
+      row.txCount,
+      row.totalAmount,
+      row.totalFee,
+      row.totalNet,
+    ]),
+  };
+
+  const totalsBlock: CsvBlock = {
+    header: ['Metric', 'Value'],
+    rows: [
+      ['Transactions', report.totals.txCount],
+      ['Matched', report.totals.matchedCount],
+      ['Exceptions', report.totals.exceptionCount],
+      ['Gross amount', report.totals.grossAmount.toFixed(8)],
+      ['Fees', report.totals.totalFees.toFixed(8)],
+      ['Net amount', report.totals.netAmount.toFixed(8)],
+      ['Expected settlement', report.totals.expectedSettlement.toFixed(8)],
+      ['Collected', report.totals.collectedAmount.toFixed(8)],
+      ['Outstanding', report.totals.outstandingAmount.toFixed(8)],
+    ],
+  };
+
+  return buildCsv([totalsBlock, transactionBlock, summaryBlock]);
+}
+
+function reportToPdf(report: ReconciliationReport): Buffer {
   const lines: string[] = [];
-  lines.push('Payment Reconciliation Report');
-  lines.push('='.repeat(60));
+  lines.push(`Tenant: ${report.tenantId}`);
   lines.push(`Period: ${report.dateFrom} to ${report.dateTo}`);
   lines.push(`Generated: ${report.generatedAt}`);
   lines.push('');
+  lines.push('Totals');
+  lines.push('-'.repeat(60));
+  lines.push(`Transactions: ${report.totals.txCount}`);
+  lines.push(`Matched: ${report.totals.matchedCount}`);
+  lines.push(`Exceptions: ${report.totals.exceptionCount}`);
+  lines.push(`Gross amount: ${report.totals.grossAmount.toFixed(8)}`);
+  lines.push(`Fees: ${report.totals.totalFees.toFixed(8)}`);
+  lines.push(`Net amount: ${report.totals.netAmount.toFixed(8)}`);
+  lines.push(`Expected settlement: ${report.totals.expectedSettlement.toFixed(8)}`);
+  lines.push(`Collected: ${report.totals.collectedAmount.toFixed(8)}`);
+  lines.push(`Outstanding: ${report.totals.outstandingAmount.toFixed(8)}`);
+  lines.push('');
   lines.push('Transaction Details');
   lines.push('-'.repeat(60));
-  lines.push('TX ID            | Date       | Chain    | Amount   | Fee      | Net      | Status');
+  lines.push('TX ID            | Date       | Chain    | Amount   | Fee      | Net      | Status            | Result');
   lines.push('-'.repeat(60));
 
   for (const row of report.rows.slice(0, 100)) {
@@ -100,8 +322,8 @@ function buildSimplePdf(report: ReconciliationReport): Buffer {
     const amount = row.amount.padEnd(8).slice(0, 8);
     const fee = row.fee.padEnd(8).slice(0, 8);
     const net = row.net.padEnd(8).slice(0, 8);
-    const status = row.status.padEnd(6).slice(0, 6);
-    lines.push(`${txId} | ${date} | ${chain} | ${amount} | ${fee} | ${net} | ${status}`);
+    const status = row.status.padEnd(16).slice(0, 16);
+    lines.push(`${txId} | ${date} | ${chain} | ${amount} | ${fee} | ${net} | ${status} | ${row.reconciliationStatus}`);
   }
 
   if (report.rows.length > 100) {
@@ -114,150 +336,122 @@ function buildSimplePdf(report: ReconciliationReport): Buffer {
   lines.push('Month      | Chain    | Txs  | Amount     | Fee        | Net');
   lines.push('-'.repeat(60));
 
-  for (const m of report.monthlySummaries) {
-    const month = m.month.padEnd(10).slice(0, 10);
-    const chain = m.chain.padEnd(8).slice(0, 8);
-    const txs = String(m.txCount).padEnd(4).slice(0, 4);
-    const totalAmount = m.totalAmount.padEnd(10).slice(0, 10);
-    const totalFee = m.totalFee.padEnd(10).slice(0, 10);
-    const totalNet = m.totalNet.padEnd(10).slice(0, 10);
-    lines.push(`${month} | ${chain} | ${txs} | ${totalAmount} | ${totalFee} | ${totalNet}`);
+  for (const summary of report.monthlySummaries) {
+    const month = summary.month.padEnd(10).slice(0, 10);
+    const chain = summary.chain.padEnd(8).slice(0, 8);
+    const txs = String(summary.txCount).padEnd(4).slice(0, 4);
+    lines.push(
+      `${month} | ${chain} | ${txs} | ${summary.totalAmount.padEnd(10)} | ${summary.totalFee.padEnd(10)} | ${summary.totalNet}`,
+    );
   }
 
-  const text = lines.join('\n');
-  const buffer = Buffer.from(
-    'PDF-1.4\n%\xFF\xFF\xFF\xFF\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n' +
-    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n' +
-    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] ' +
-    '/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n' +
-    '4 0 obj\n<< /Length ' + text.length + ' >>\nstream\n' +
-    text.replace(/\(/g, '\\(').replace(/\)/g, '\\)') + '\n' +
-    'endstream\nendobj\n' +
-    '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n' +
-    'xref\n0 6\n' +
-    '0000000000 65535 f \n' +
-    '0000000009 00000 n \n' +
-    '0000000058 00000 n \n' +
-    '0000000115 00000 n \n' +
-    '0000000266 00000 n \n' +
-    '0000000378 00000 n \n' +
-    'trailer\n<< /Size 6 /Root 1 0 R >>\n' +
-    'startxref\n446\n%%EOF'
-  );
-  return buffer;
+  return buildTextPdf('Payment Reconciliation Report', lines);
 }
 
 export class ReconciliationReportService {
   async generateReport(filters: ReconciliationFilters): Promise<{ report: ReconciliationReport; csv: string; pdf: Buffer }> {
-    const { dateFrom, dateTo, tenantId, chain, status } = filters;
+    const { tenantId } = filters;
+    if (!tenantId) {
+      throw new AppError(400, 'tenantId is required', 'VALIDATION_ERROR');
+    }
 
-    const where: any = {
-      tenantId,
-      createdAt: {
-        gte: new Date(dateFrom),
-        lte: new Date(dateTo + 'T23:59:59.999Z'),
-      },
-      deletedAt: null,
-    };
-
-    if (chain) where.network = chain;
-    if (status) where.status = status;
+    const period = parseReportPeriod(filters.dateFrom, filters.dateTo);
+    const feeBps = filters.feeBps ?? platformFeeBps();
 
     const payments = await prisma.payment.findMany({
-      where,
+      where: {
+        tenantId,
+        createdAt: { gte: period.from, lte: period.to },
+        deletedAt: null,
+        ...(filters.chain ? { network: filters.chain } : {}),
+        ...(filters.status ? { status: filters.status as any } : {}),
+        ...(filters.currency ? { currency: filters.currency } : {}),
+      },
       orderBy: { createdAt: 'asc' },
-      take: 10000,
+      take: MAX_REPORT_ROWS,
     });
 
-    const rows: ReportRow[] = payments.map(p => ({
-      txId: p.txHash || p.id,
-      date: p.createdAt.toISOString().split('T')[0],
-      chain: p.network,
-      amount: p.amount.toString(),
-      fee: '0',
-      net: p.amount.toString(),
-      sender: p.fromAddress || '',
-      receiver: p.toAddress || '',
-      status: p.status,
-      memo: p.projectTitle || '',
+    const ledger: LedgerRow[] = payments.map((payment) => ({
+      id: payment.id,
+      txHash: payment.txHash,
+      createdAt: payment.createdAt,
+      network: payment.network,
+      currency: payment.currency,
+      status: payment.status,
+      type: payment.type,
+      amount: toAmount(payment.amount),
+      fromAddress: payment.fromAddress,
+      toAddress: payment.toAddress,
+      projectTitle: payment.projectTitle,
     }));
 
-    const chainGroups: Record<string, ReportRow[]> = {};
-    for (const r of rows) {
-      if (!chainGroups[r.chain]) chainGroups[r.chain] = [];
-      chainGroups[r.chain].push(r);
-    }
+    const seenHashes = new Set<string>();
+    const rows: ReportRow[] = ledger.map((row) => {
+      const fee = row.status === 'completed' && row.type !== 'refund' ? feeForAmount(row.amount, feeBps) : 0;
+      const outcome = reconcileRow(row, seenHashes);
 
-    const getDateKey = (d: string) => d;
-    const getWeekKey = (d: string) => {
-      const date = new Date(d);
-      const start = new Date(date);
-      start.setDate(date.getDate() - date.getDay());
-      return start.toISOString().split('T')[0];
-    };
-    const getMonthKey = (d: string) => d.slice(0, 7);
+      return {
+        txId: row.txHash || row.id,
+        date: dayKey(row.createdAt),
+        chain: row.network,
+        currency: row.currency,
+        amount: row.amount.toFixed(8),
+        fee: fee.toFixed(8),
+        net: roundMoney(row.amount - fee).toFixed(8),
+        sender: row.fromAddress ?? '',
+        receiver: row.toAddress ?? '',
+        status: row.status,
+        memo: row.projectTitle ?? '',
+        reconciliationStatus: outcome.status,
+        note: outcome.note,
+      };
+    });
 
-    const aggregate = (grouped: Record<string, ReportRow[]>) => {
-      const entries: { date: string; chain: string; txCount: number; totalAmount: number; totalFee: number; totalNet: number }[] = [];
-      for (const [key, items] of Object.entries(grouped)) {
-        entries.push({
-          date: key,
-          chain: items[0].chain,
-          txCount: items.length,
-          totalAmount: items.reduce((s, r) => s + parseFloat(r.amount || '0'), 0),
-          totalFee: items.reduce((s, r) => s + parseFloat(r.fee || '0'), 0),
-          totalNet: items.reduce((s, r) => s + parseFloat(r.net || '0'), 0),
-        });
+    const byStatus = { ...EMPTY_STATUS_COUNTS };
+    let grossAmount = 0;
+    let totalFees = 0;
+    let collectedAmount = 0;
+
+    for (const row of rows) {
+      byStatus[row.reconciliationStatus] += 1;
+
+      const amount = Number(row.amount);
+      const fee = Number(row.fee);
+      if (row.status === 'completed') {
+        grossAmount = roundMoney(grossAmount + amount);
+        totalFees = roundMoney(totalFees + fee);
+        collectedAmount = roundMoney(collectedAmount + Number(row.net));
       }
-      return entries.sort((a, b) => a.date.localeCompare(b.date));
-    };
-
-    const dailyGroups: Record<string, ReportRow[]> = {};
-    const weeklyGroups: Record<string, ReportRow[]> = {};
-    const monthlyGroups: Record<string, ReportRow[]> = {};
-
-    for (const r of rows) {
-      const dk = getDateKey(r.date);
-      if (!dailyGroups[dk]) dailyGroups[dk] = [];
-      dailyGroups[dk].push(r);
-
-      const wk = getWeekKey(r.date);
-      if (!weeklyGroups[wk]) weeklyGroups[wk] = [];
-      weeklyGroups[wk].push(r);
-
-      const mk = getMonthKey(r.date);
-      if (!monthlyGroups[mk]) monthlyGroups[mk] = [];
-      monthlyGroups[mk].push(r);
     }
 
-    const formatSummary = (entries: any[], labelKey: string): any[] =>
-      entries.map(e => ({
-        [labelKey]: e.date,
-        chain: e.chain,
-        txCount: e.txCount,
-        totalAmount: e.totalAmount.toFixed(8),
-        totalFee: e.totalFee.toFixed(8),
-        totalNet: e.totalNet.toFixed(8),
-      }));
-
-    const dailySummaries = formatSummary(aggregate(dailyGroups), 'date') as DailySummary[];
-    const weeklySummaries = formatSummary(aggregate(weeklyGroups), 'week') as WeeklySummary[];
-    const monthlySummaries = formatSummary(aggregate(monthlyGroups), 'month') as MonthlySummary[];
+    const netAmount = roundMoney(grossAmount - totalFees);
+    const exceptionCount = rows.length - byStatus.matched;
 
     const report: ReconciliationReport = {
       rows,
-      dailySummaries,
-      weeklySummaries,
-      monthlySummaries,
-      dateFrom,
-      dateTo,
+      dailySummaries: toDaily(aggregate(rows, (row) => row.date)),
+      weeklySummaries: toWeekly(aggregate(rows, (row) => weekKey(new Date(row.date)))),
+      monthlySummaries: toMonthly(aggregate(rows, (row) => monthKey(new Date(row.date)))),
+      totals: {
+        txCount: rows.length,
+        matchedCount: byStatus.matched,
+        exceptionCount,
+        grossAmount,
+        totalFees,
+        netAmount,
+        expectedSettlement: netAmount,
+        collectedAmount,
+        outstandingAmount: roundMoney(netAmount - collectedAmount),
+        byStatus,
+      },
+      dateFrom: period.dateFrom,
+      dateTo: period.dateTo,
+      tenantId,
       generatedAt: new Date().toISOString(),
+      truncated: rows.length >= MAX_REPORT_ROWS,
     };
 
-    const csv = toCsv(rows, dailySummaries, 'Daily');
-    const pdf = buildSimplePdf(report);
-
-    return { report, csv, pdf };
+    return { report, csv: reportToCsv(report), pdf: reportToPdf(report) };
   }
 
   async saveReportJob(
@@ -266,21 +460,22 @@ export class ReconciliationReportService {
     dateFrom: string,
     dateTo: string,
     format: string,
-    filters: any,
+    filters: Record<string, unknown>,
   ) {
+    const period = parseReportPeriod(dateFrom, dateTo);
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 90);
 
     const job = await prisma.reportJob.create({
       data: {
         tenantId,
-        userId,
+        userId: userId ?? null,
         type: 'reconciliation',
         status: 'pending',
-        dateFrom: new Date(dateFrom),
-        dateTo: new Date(dateTo),
+        dateFrom: period.from,
+        dateTo: period.to,
         format,
-        filters,
+        filters: filters as any,
         expiresAt,
       },
     });
@@ -288,7 +483,7 @@ export class ReconciliationReportService {
   }
 
   async updateJobStatus(jobId: string, status: string, errorMessage?: string) {
-    const data: any = { status };
+    const data: Record<string, unknown> = { status };
     if (status === 'generating') {
       data.progress = 50;
     }
@@ -299,7 +494,7 @@ export class ReconciliationReportService {
     if (errorMessage) {
       data.errorMessage = errorMessage;
     }
-    return prisma.reportJob.update({ where: { id: jobId }, data });
+    return prisma.reportJob.update({ where: { id: jobId }, data: data as any });
   }
 
   async createArchive(jobId: string, format: string, fileUrl: string, rowCount: number, fileSize: number) {

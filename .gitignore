@@ -7,6 +7,8 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
+ehthumbs.db
 
 # IDE
 .idea/
@@ -37,6 +39,32 @@ npm-debug.log*
 __snapshots__/
 **/__snapshots__/
 
+# ── Test snapshots ───────────────────────────────────────────────────────────
+# Unit-test baselines (jest/vitest) and Playwright visual-regression
+# baselines are generated artefacts and are never committed.
+**/*.ts-snapshots/
+frontend/e2e/__snapshots__/
+**/test-results/
+**/playwright-report/
+**/blob-report/
+
+# ── Build caches and coverage ────────────────────────────────────────────────
+coverage/
+.nyc_output/
+.turbo/
+*.tsbuildinfo
+.eslintcache
+*.tsbuildinfo
+
+# ── Local scratch files left behind by tooling ───────────────────────────────
+test-write.txt
+fix-paths.js
+patch.js
+scaffold.js
+issue-64.md
+PR_BODY.md
+PR_DESCRIPTION.md
+.todo_webhook_verification.json
 
 # Test snapshots
 *.snap

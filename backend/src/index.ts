@@ -3,6 +3,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import { tokenBucketRateLimit } from './middleware/rate-limit.js';
+import { registerDefaultPaymentProviders } from './services/payments/bootstrap.js';
 import { apiExpressRateLimit } from './middleware/express-api-rate-limit.js';
 import { compressionMiddleware, getCompressionMetrics } from './middleware/compression.js';
 import { poolMetrics } from './config/database.js';
@@ -69,7 +70,6 @@ import securityRouter from './routes/security.js';
 import commentsRouter from './routes/comments.js';
 import collaborationRouter from './routes/collaboration.js';
 import { paymentStrategiesRouter } from './routes/payment-strategies.js';
-import { registerDefaultPaymentProviders } from './services/payments/bootstrap.js';
 import { compressionMiddleware } from './middleware/compression.js';
 import { streamingExportRouter } from './routes/streaming-export.js';
 import { poolMonitorRouter } from './routes/pool-monitor.js';
@@ -79,13 +79,11 @@ import { refundsRouter } from './routes/refunds.js';
 import { databaseRouter } from './routes/database.js';
 import { archiveRouter } from './routes/archive.js';
 import { searchRouter } from './routes/search.js';
-import { zapierRouter } from './routes/zapier.js';
-import { intercomRouter } from './routes/intercom.js';
 import { allowancesRouter } from './routes/allowances.js';
 import { payoutsRouter } from './routes/payouts.js';
+import { reportsRouter } from './routes/reports.js';
 import { startPayoutRetryWorker } from './services/payouts/retry-worker.js';
 import { startPayoutBatchWorker } from './services/payouts/payout-batcher.js';
-import { getPrismaReplicaClient } from './db/PrismaReplicaClient.js';
 import { cohortAnalyticsRouter } from './routes/cohort-analytics.js';
 import { churnPredictionRouter } from './routes/churn-prediction.js';
 import { slackRouter } from './routes/slack.js';
@@ -138,10 +136,8 @@ import { createAnalyticsRouter } from './routes/analytics.js';
 import { paymentQueue } from './queue/payment-queue.js';
 import './events/projections.js';
 import { stripeRouter } from './routes/stripe.js';
-import { SecurityMiddleware, SecurityMonitor } from './middleware/security.js';
-import { sanitizeInput, contentSecurityPolicy } from './middleware/sanitize.js';
+import { SecurityMiddleware } from './middleware/security.js';
 import { requestSizeLimit } from './middleware/request-size-limit.js';
-import { signaturesRouter } from './routes/signatures.js';
 import { createSandboxRouter } from './routes/sandbox.js';
 import { circuitBreakerRouter } from './routes/circuit-breaker.js';
 import SandboxManager from './services/sandbox.js';
@@ -173,6 +169,7 @@ import { transfersRouter } from './routes/transfers.js';
 import { threeDSRouter } from './routes/3ds.js';
 import { chargebacksRouter } from './routes/chargebacks.js';
 import { merchantRiskRouter } from './routes/merchant-risk.js';
+import { reconciliationRouter } from './routes/reconciliation.js';
 
 // Validate environment variables at startup
 validateEnv();
@@ -327,7 +324,10 @@ apiV1Router.use('/queue/payments', paymentQueueRouter);
 apiV1Router.use('/splits', splitsRouter);
 apiV1Router.use('/refunds', refundsRouter);
 apiV1Router.use('/allowances', allowancesRouter);
-apiV1Router.use('/payouts', payoutsRouter);
+  apiV1Router.use('/payouts', payoutsRouter);
+  apiV1Router.use('/reports', reportsRouter);
+  // Transaction reconciliation report — Issue #937
+  apiV1Router.use('/reconciliation', reconciliationRouter);
 apiV1Router.use('/forms', formsRouter);
 // Webhook management and verification
 apiV1Router.use('/webhooks', webhooksRouter);
@@ -547,6 +547,11 @@ getRedisCache().connect().then(() => {
 }).catch(() => {
   console.log('[RedisCache] Not available, using in-memory cache only');
 });
+
+// Register the concrete multi-chain payment providers before the app starts
+// serving requests. Without this the provider registry stays empty and every
+// /payment-strategies/pay call fails with "All payment providers failed".
+registerDefaultPaymentProviders();
 
 const server = http.createServer(app);
 const wsServer = attachWebSocketServer({ server, options: { path: '/ws' } });
