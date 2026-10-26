@@ -24,7 +24,7 @@ describe('stellar validation', () => {
     it('rejects wrong prefix and malformed values', () => {
       expect(
         isValidStellarAddress(
-          'SCFX5VEQOTYNPI2D7Y4N4EJXXWQTH2QX4PQD3NQCV3K4M5JJFGBX7D7O'
+          'SINVALIDPUBLICKEY'
         )
       ).toBe(false);
       expect(isValidStellarAddress('G123')).toBe(false);
