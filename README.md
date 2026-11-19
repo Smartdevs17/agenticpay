@@ -532,25 +532,21 @@ For issues, questions, or suggestions:
 
 ## Quick Reference Commands
 
+The root [`Makefile`](Makefile) maps every common dev task to a `make` target. Run `make` on its own to list them all, grouped by area.
+
 ```bash
-# Install all dependencies
-npm install --workspaces
-
-# Start development
-npm run dev --workspace=backend &
-npm run dev --workspace=frontend
-
-# Run all tests
-npm test --workspaces
-
-# Build for production
-npm run build --workspace=backend
-npm run build --workspace=frontend
-
-# Lint code
-npm run lint --workspace=backend
-npm run lint --workspace=frontend
+make doctor              # check Node 20+, npm, cargo, forge, docker
+make setup               # npm workspaces + contract toolchains
+make dev                 # backend + frontend in watch mode (or dev-backend / dev-frontend)
+make test                # every workspace suite; test-backend / test-frontend / test-contracts / test-e2e
+make test-backend FILE=src/services/__tests__/settlementProof.test.ts   # a single file
+make lint build          # turbo-cached lint and build
+make db-migrate db-seed  # database lifecycle (db-reset needs CONFIRM=1)
+make sandbox-up          # local sandbox stack (sandbox-down / sandbox-reset / sandbox-logs)
+make clean               # remove build outputs and turbo caches
 ```
+
+Every target wraps the npm, cargo, forge or docker command it names, and `make -n <target>` prints that command without running it. You can override tool binaries (`NPM=pnpm`, `COMPOSE="podman compose"`). Set `VERBOSE=1` to echo commands and `TIMINGS=1` to print how long each target took. If a required tool is missing, the target fails with an install hint. `scripts/makefile.test.mjs` checks that every target is documented, that every npm script a target calls exists, and that every root npm script has a target. Run it with `make test-tooling`.
 
 ---
 

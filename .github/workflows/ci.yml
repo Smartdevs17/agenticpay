@@ -325,4 +325,4 @@ jobs:
         run: npx --yes turbo@${TURBO_VERSION} run build lint test --dry=json > /dev/null
 
       - name: Test repo tooling
-        run: node --test scripts/*.test.mjs
+        run: make test-tooling

@@ -76,6 +76,6 @@ Structured logs use the `[settlement-proof]` prefix.
 ## Running the tests
 
 ```bash
-make contracts-relayer-test    # forge test --root contracts/bridges/relayer
+make test-contracts-relayer      # forge test --root contracts/bridges/relayer
 cd backend && npx vitest run src/services/__tests__/settlementProof.test.ts
 ```
