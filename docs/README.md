@@ -26,6 +26,7 @@ Use this page as the entry point for the repository's maintained guides. API-spe
 - [Payout reliability](PAYOUT_RELIABILITY.md)
 - [Subscription usage billing](SUBSCRIPTION_USAGE_BILLING.md)
 - [Multi-currency balances](MULTI_CURRENCY_BALANCES.md)
+- [Cross-chain settlement proof relayer (Stellar ⇄ EVM)](../contracts/bridges/relayer/README.md)
 - [Wallet payments](WALLET_PAYMENTS.md)
 - [Withdrawal approval security](WITHDRAWAL_SECURITY.md)
 
