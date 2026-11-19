@@ -478,6 +478,28 @@ netlify deploy
 5. Push to branch: `git push origin feature/your-feature`
 6. Create Pull Request with description
 
+### Build caching (Turborepo)
+
+Root `build`, `lint`, `test` and `dev` scripts run through [Turborepo](https://turbo.build/repo) using the task graph in [`turbo.json`](turbo.json). Each task's hash covers the workspace's tracked files, its dependencies' hashes, `NODE_VERSION`, and `NEXT_PUBLIC_*` for builds. When the hash is unchanged, turbo restores the cached outputs (`dist/`, `.next/` without `.next/cache`, `coverage/`) and skips the task.
+
+| Where | Cache |
+| --- | --- |
+| Local | `node_modules/.cache/turbo`. Run `npx turbo run build --force` to bypass it. |
+| CI (`.github/workflows/ci.yml`) | Shared remote cache when it is configured. Otherwise a per-job `actions/cache` fallback. Each backend/frontend job writes a cache hit/miss table to the run summary. |
+
+To enable the shared remote cache, a maintainer sets these in **Settings → Secrets and variables → Actions**:
+
+| Name | Kind | Purpose |
+| --- | --- | --- |
+| `TURBO_TOKEN` | secret | Remote cache access token |
+| `TURBO_TEAM` | variable | Remote cache team slug |
+| `TURBO_REMOTE_CACHE_SIGNATURE_KEY` | secret | HMAC key. Artifacts are signed (`remoteCache.signature`), and unsigned or tampered artifacts are ignored |
+| `TURBO_API` | variable, optional | Self-hosted cache server URL. Defaults to `https://vercel.com/api` |
+
+To use the remote cache locally, run `npx turbo login && npx turbo link`, or export the same variables. If the cache is unreachable or the signing key is missing, turbo prints a warning and rebuilds. The build never fails because of the cache.
+
+CI calls `turbo@${TURBO_VERSION}`, which must match the version in `package-lock.json`. The config uses the turbo 1.x `pipeline` schema. `scripts/turbo-config.test.mjs` checks the version pin and the pipeline contract (`node --test scripts/*.test.mjs`), and the `Repo tooling` CI job runs that test.
+
 ---
 
 ## Contributing

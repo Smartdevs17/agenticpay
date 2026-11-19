@@ -19,6 +19,19 @@ env:
   SERVICE: agenticpay
   ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
   COMMIT_SHORT: ${{ github.sha }}
+  # ── Turborepo remote cache ───────────────────────────────────────────────
+  # Builds run through turbo so identical inputs are restored from cache
+  # instead of rebuilt. Set the TURBO_TOKEN / TURBO_REMOTE_CACHE_SIGNATURE_KEY
+  # secrets and the TURBO_TEAM variable to enable the shared remote cache;
+  # without them (e.g. fork PRs) turbo falls back to the per-job local cache.
+  # Artifacts are HMAC-signed (turbo.json `remoteCache.signature`) so a
+  # tampered remote artifact is rejected. TURBO_VERSION must match the
+  # version locked in package-lock.json (pinned by scripts/turbo-config.test.mjs).
+  TURBO_VERSION: 1.13.4
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+  TURBO_API: ${{ vars.TURBO_API || 'https://vercel.com/api' }}
+  TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
 
 jobs:
   # ── Detect changed paths (avoids running unaffected jobs) ─────────────────
@@ -29,6 +42,7 @@ jobs:
       backend:   ${{ steps.filter.outputs.backend }}
       frontend:  ${{ steps.filter.outputs.frontend }}
       contracts: ${{ steps.filter.outputs.contracts }}
+      tooling:   ${{ steps.filter.outputs.tooling }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -41,6 +55,14 @@ jobs:
               - 'frontend/**'
             contracts:
               - 'contracts/**'
+            tooling:
+              - 'turbo.json'
+              - 'Makefile'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'scripts/**'
+              - 'docs/**'
+              - '.github/workflows/ci.yml'
 
   # ── Backend ───────────────────────────────────────────────────────────────
   backend:
@@ -59,6 +81,9 @@ jobs:
       # Auto-scale: limit simultaneous matrix jobs.
       # Raise to 2 (or remove) if faster turnaround is preferred over cost savings.
       max-parallel: 2
+    env:
+      # Part of turbo's global hash so each matrix leg keeps its own artifacts.
+      NODE_VERSION: ${{ matrix.node-version }}
     defaults:
       run:
         working-directory: backend
@@ -113,19 +138,40 @@ jobs:
             echo "No backend test files changed — skipping tests"
           fi
 
+      # Local fallback for turbo's cache when the remote cache is not configured.
+      - name: Cache turbo artifacts
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/turbo
+          key: ${{ runner.os }}-turbo-backend-node${{ matrix.node-version }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-backend-node${{ matrix.node-version }}-
+
+      # turbo hashes the workspace inputs and replays dist/ on a cache hit,
+      # so unchanged sources never rebuild.
       - name: Build
+        working-directory: .
+        run: npx --yes turbo@${TURBO_VERSION} run build --filter=agenticpay-backend --summarize
+
+      - &turbo-cache-report
+        name: Report turbo cache
+        if: always()
+        working-directory: .
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- backend/src/ | grep '\.ts$' | wc -l)
-          else
-            CHANGED=$(git diff --name-only HEAD^ HEAD -- backend/src/ | grep '\.ts$' | wc -l)
+          SUMMARY=$(ls -t .turbo/runs/*.json 2>/dev/null | head -1)
+          if [ -z "$SUMMARY" ]; then
+            echo "No turbo run summary found — skipping cache report"
+            exit 0
           fi
-          if [ "$CHANGED" -gt 0 ]; then
-            echo "Building — $CHANGED backend source files changed"
-            npm run build
-          else
-            echo "No backend source files changed — skipping build"
-          fi
+          node -e '
+            const run = require(process.argv[1]);
+            const label = `${process.env.GITHUB_JOB} (Node ${process.env.NODE_VERSION})`;
+            const { cached, attempted } = run.execution;
+            console.log(`::notice title=Turbo cache — ${label}::${cached}/${attempted} tasks restored from cache`);
+            const rows = run.tasks.map((t) => `| ${t.taskId} | ${t.cache.status} | ${t.cache.source || "-"} | ${t.cache.timeSaved || 0} |`);
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+              [`### Turbo cache — ${label}`, "| Task | Status | Source | Time saved (ms) |", "| --- | --- | --- | --- |", ...rows, ""].join("\n"));
+          ' "$PWD/$SUMMARY"
 
       # Emit build size as a workflow annotation (picked up by cost-monitor)
       - name: Report build size
@@ -148,6 +194,8 @@ jobs:
         node-version: [20, 22]
       fail-fast: false
       max-parallel: 2
+    env:
+      NODE_VERSION: ${{ matrix.node-version }}
     defaults:
       run:
         working-directory: frontend
@@ -210,19 +258,19 @@ jobs:
             echo "No frontend test files changed — skipping tests"
           fi
 
+      - name: Cache turbo artifacts
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/turbo
+          key: ${{ runner.os }}-turbo-frontend-node${{ matrix.node-version }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-frontend-node${{ matrix.node-version }}-
+
       - name: Build
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- . | grep -E '\.(ts|tsx)$' | wc -l)
-          else
-            CHANGED=$(git diff --name-only HEAD^ HEAD -- . | grep -E '\.(ts|tsx)$' | wc -l)
-          fi
-          if [ "$CHANGED" -gt 0 ]; then
-            echo "Building — $CHANGED frontend source files changed"
-            npm run build
-          else
-            echo "No frontend source files changed — skipping build"
-          fi
+        working-directory: .
+        run: npx --yes turbo@${TURBO_VERSION} run build --filter=agenticpay-frontend --summarize
+
+      - *turbo-cache-report
 
       - name: Report build size
         if: always()
@@ -257,3 +305,24 @@ jobs:
         run: |
           cargo build --target wasm32-unknown-unknown --release
           cargo check
+
+  # ── Repo tooling (turbo config, Makefile, docs index) ─────────────────────
+  tooling:
+    needs: changes
+    if: ${{ needs.changes.outputs.tooling == 'true' }}
+    name: Repo tooling
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate turbo pipeline graph
+        run: npx --yes turbo@${TURBO_VERSION} run build lint test --dry=json > /dev/null
+
+      - name: Test repo tooling
+        run: node --test scripts/*.test.mjs
