@@ -14,7 +14,7 @@ When possible, keep changes focused to a single area of the codebase. If a chang
 
 1. Fork the repository and clone your fork.
 2. Create a branch from `main`.
-3. Install dependencies in the area you plan to change:
+3. Install dependencies. `make doctor && make setup` checks your toolchain and installs everything, and `make` lists every dev task. To install only one area instead:
 
 ```bash
 cd backend && npm install

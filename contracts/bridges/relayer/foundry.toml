@@ -1,0 +1,15 @@
+# Self-contained Foundry project for the settlement proof relay so its suite
+# runs without the repo-wide remappings: `forge test --root contracts/bridges/relayer`.
+[profile.default]
+src = '.'
+test = 'test'
+out = 'out'
+cache_path = 'cache'
+libs = []
+solc = '0.8.24'
+evm_version = 'cancun'
+optimizer = true
+optimizer_runs = 200
+
+[fuzz]
+runs = 256
