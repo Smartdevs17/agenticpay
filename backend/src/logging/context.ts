@@ -4,6 +4,8 @@ export interface LogContext {
   traceId: string;
   requestId?: string;
   module?: string;
+  /** Set once the request is authenticated; selects tenant-scoped log redaction (#1492). */
+  tenantId?: string;
 }
 
 export const logContextStorage = new AsyncLocalStorage<LogContext>();

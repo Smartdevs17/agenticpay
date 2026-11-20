@@ -3,7 +3,7 @@ import pinoHttp from 'pino-http';
 import { randomUUID } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { getLogContext, logContextStorage, mergeLogContext, runWithLogContext } from '../logging/context.js';
-import { redactPii } from '../logging/redact.js';
+import { redactForTenant } from '../utils/logger.js';
 import { REQUEST_ID_HEADER } from './requestId.js';
 
 const MODULE_LEVELS: Record<string, string> = {};
@@ -36,12 +36,16 @@ export const logger = pino({
     },
     log(object) {
       const ctx = getLogContext();
-      return redactPii({
-        ...object,
-        ...(ctx?.traceId ? { traceId: ctx.traceId } : {}),
-        ...(ctx?.requestId ? { requestId: ctx.requestId } : {}),
-        ...(ctx?.module ? { module: ctx.module } : {}),
-      }) as Record<string, unknown>;
+      const redacted = redactForTenant(
+        {
+          ...object,
+          ...(ctx?.traceId ? { traceId: ctx.traceId } : {}),
+          ...(ctx?.requestId ? { requestId: ctx.requestId } : {}),
+          ...(ctx?.module ? { module: ctx.module } : {}),
+        },
+        ctx?.tenantId
+      );
+      return (redacted && typeof redacted === 'object' ? redacted : { redacted: '[REDACTION_FAILED]' }) as Record<string, unknown>;
     },
   },
   ...(process.env.NODE_ENV === 'development' && {
