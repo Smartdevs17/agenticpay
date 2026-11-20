@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import PWAWrapper from "@/components/PWAWrapper";
@@ -26,11 +27,18 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // The CSP set in middleware.ts uses a fresh nonce per request (#1466). Next.js
+  // can only stamp that nonce on its scripts when the page renders per request;
+  // a statically prerendered page would ship scripts without it, and the strict
+  // policy would block them. This opts every route under the root layout into
+  // dynamic rendering.
+  await connection();
+
   return (
     <html lang="en" className="scroll-smooth" suppressHydrationWarning>
       <body

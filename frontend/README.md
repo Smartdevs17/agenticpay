@@ -20,6 +20,44 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Content Security Policy
+
+Every page is served with a strict, nonce-based CSP (#1466). `middleware.ts`
+creates a fresh 128-bit nonce for each request and builds the policy with
+`lib/csp.ts`. Next.js reads the nonce from the forwarded request header and
+adds it to every script it renders:
+
+```
+script-src 'self' 'nonce-<per request>' 'strict-dynamic'; object-src 'none';
+base-uri 'self'; form-action 'self'; frame-ancestors 'none'; ...
+```
+
+- **Scripts:** only nonced scripts run, plus the chunks they load
+  (`'strict-dynamic'`). Injected `<script>` tags and inline event handlers are
+  blocked. `next dev` also gets `'unsafe-eval'`, which React needs for debugging.
+- **Inline scripts:** add them through Next.js (`next/script`, or read the
+  nonce with `(await headers()).get('x-nonce')` in a server component). A raw
+  inline `<script>` without the nonce will not run.
+- **Styles** keep `'unsafe-inline'`, because React, Radix and Web3Modal set
+  inline style attributes, which a nonce cannot cover.
+- **Connections** allow any `https:`/`wss:` origin, for wallet RPCs and
+  WalletConnect relays, plus the configured API and WebSocket origins.
+- **Framing** is denied (`frame-ancestors 'none'` and `X-Frame-Options: DENY`)
+  except on `/forms/embed/:id`, which merchants embed on their own sites.
+- **Rendering:** the root layout calls `connection()`, so pages render per
+  request. A nonce cannot be added to statically prerendered HTML.
+
+Rollout and monitoring:
+
+- Set `CSP_REPORT_ONLY=true` to send the policy as
+  `Content-Security-Policy-Report-Only`. Browsers then report violations without
+  blocking anything. Remove the variable to enforce.
+- Reports go to `CSP_REPORT_URI` or, by default, to Sentry's security endpoint
+  for `NEXT_PUBLIC_SENTRY_DSN`. They are sent through both `report-uri` and
+  `report-to` with a `Reporting-Endpoints` header.
+
+`nosniff` and `Referrer-Policy` are static headers in `next.config.ts`.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

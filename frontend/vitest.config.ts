@@ -15,6 +15,13 @@ export default defineConfig({
     // and are executed via `npm run test:e2e`.
     include: ['**/*.test.{ts,tsx}'],
     exclude: ['node_modules/**', '.next/**', 'e2e/**', 'playwright-report/**', 'test-results/**'],
+    server: {
+      deps: {
+        // next-intl's ESM build imports `next/server` without an extension,
+        // which Node's resolver rejects; let Vite resolve it (middleware.test.ts).
+        inline: ['next-intl'],
+      },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

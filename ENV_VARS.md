@@ -63,6 +63,8 @@
 | NEXT_PUBLIC_BACKEND_URL | Backend URL fallback | http://localhost:3001/api/v1 |
 | NEXT_PUBLIC_WS_URL      | WebSocket URL        | http://localhost:3001        |
 | NEXT_PUBLIC_WS_ENABLED  | Enable WebSocket     | true                         |
+| CSP_REPORT_ONLY         | `true` sends the dashboard CSP as `Content-Security-Policy-Report-Only` (observe violations without blocking). See [frontend/README.md](./frontend/README.md#content-security-policy) | false (enforced) |
+| CSP_REPORT_URI          | Where browsers send CSP violation reports. Defaults to Sentry's security endpoint derived from `NEXT_PUBLIC_SENTRY_DSN` | - |
 
 ## Environment Files
 
