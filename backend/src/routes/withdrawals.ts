@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { validate } from '../middleware/validate.js';
+import { requireFreshSignature } from '../middleware/requireFreshSignature.js';
 import {
   configureWalletWithdrawalSchema,
   addWithdrawalAllowlistEntrySchema,
@@ -82,8 +83,28 @@ withdrawalsRouter.get(
 // Withdrawal request lifecycle
 // ---------------------------------------------------------------------------
 
+/**
+ * High-value withdrawals must carry a fresh signature from the requester
+ * (see middleware/requireFreshSignature.ts). Non-numeric amounts are treated
+ * as high-value so they fail closed rather than skipping the check.
+ */
+const freshSignatureOnCreate = requireFreshSignature({
+  signerOf: (req) => (typeof req.body?.requestedBy === 'string' ? req.body.requestedBy : undefined),
+  amountOf: (req) => {
+    const amount = req.body?.amount;
+    if (amount === undefined) return undefined;
+    return typeof amount === 'number' ? amount : Number.POSITIVE_INFINITY;
+  },
+});
+
+const freshSignatureOnExecute = requireFreshSignature({
+  signerOf: (req) => getWithdrawalRequest(String(req.params.requestId))?.requestedBy,
+  amountOf: (req) => getWithdrawalRequest(String(req.params.requestId))?.amount,
+});
+
 withdrawalsRouter.post(
   '/:walletId/requests',
+  freshSignatureOnCreate,
   validate(createWithdrawalRequestSchema),
   asyncHandler(async (req, res) => {
     const { toAddress, amount, currency, requestedBy } = req.body;
@@ -143,6 +164,7 @@ withdrawalsRouter.post(
 
 withdrawalsRouter.post(
   '/requests/:requestId/execute',
+  freshSignatureOnExecute,
   asyncHandler(async (req, res) => {
     const { txHash } = req.body as { txHash?: string };
     if (!txHash) throw new AppError(400, 'txHash is required', 'VALIDATION_ERROR');
