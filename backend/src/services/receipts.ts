@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { appendEvent } from '../events/event-store.js';
 import { publish } from '../events/event-bus.js';
+import { logger } from '../utils/logger.js';
 
 export interface ReceiptNFT {
   id: string;
@@ -341,4 +342,133 @@ trailer << /Root 1 0 R /Size 6 >>
 %%EOF`;
 
   return Buffer.from(pdf);
+}
+
+// ---------------------------------------------------------------------------
+// Signed, time-bounded receipt downloads — issue #1494
+// ---------------------------------------------------------------------------
+
+/** Longest lifetime a download grant may ever have. */
+export const RECEIPT_DOWNLOAD_MAX_TTL_SECONDS = 15 * 60;
+export const RECEIPT_DOWNLOAD_DEFAULT_TTL_SECONDS = 5 * 60;
+/** Tolerated clock skew for an `iat` slightly in the future. */
+const DOWNLOAD_CLOCK_SKEW_MS = 30 * 1000;
+
+export type ReceiptDownloadErrorCode = 'NOT_FOUND' | 'INVALID' | 'EXPIRED' | 'TTL_EXCEEDED';
+
+export class ReceiptDownloadError extends Error {
+  constructor(public readonly code: ReceiptDownloadErrorCode, message: string) {
+    super(message);
+    this.name = 'ReceiptDownloadError';
+  }
+}
+
+export interface ReceiptDownloadGrant {
+  tokenId: string;
+  userId: string;
+  /** Issued-at, Unix milliseconds. */
+  iat: number;
+  /** Expiry, Unix milliseconds. */
+  expires: number;
+  /** Hex HMAC-SHA256 over the grant fields. */
+  sig: string;
+}
+
+let ephemeralDownloadSecret: string | undefined;
+
+/**
+ * HMAC key for download grants. Production must set RECEIPT_DOWNLOAD_SECRET,
+ * so grants stay valid across restarts and instances. Other environments
+ * fall back to a per-process secret, which invalidates grants on restart.
+ */
+function downloadSecret(): string {
+  const configured = process.env.RECEIPT_DOWNLOAD_SECRET;
+  if (configured) {
+    if (configured.length < 32) throw new Error('RECEIPT_DOWNLOAD_SECRET must be at least 32 characters');
+    return configured;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('RECEIPT_DOWNLOAD_SECRET is required in production');
+  }
+  if (!ephemeralDownloadSecret) {
+    ephemeralDownloadSecret = randomBytes(32).toString('hex');
+    logger.warn(JSON.stringify({ event: 'receipt.download_secret_ephemeral' }));
+  }
+  return ephemeralDownloadSecret;
+}
+
+function grantPayload(tokenId: string, userId: string, iat: number, expires: number): string {
+  return ['RECEIPT-DL-V1', tokenId, userId, String(iat), String(expires)].join('\n');
+}
+
+function computeGrantSignature(tokenId: string, userId: string, iat: number, expires: number): string {
+  return createHmac('sha256', downloadSecret()).update(grantPayload(tokenId, userId, iat, expires), 'utf8').digest('hex');
+}
+
+/**
+ * Issue a download grant for one receipt to one user. The lifetime is
+ * capped at RECEIPT_DOWNLOAD_MAX_TTL_SECONDS.
+ */
+export function createReceiptDownloadGrant(input: {
+  tokenId: string;
+  userId: string;
+  ttlSeconds?: number;
+  now?: number;
+}): ReceiptDownloadGrant {
+  if (!input.userId) throw new ReceiptDownloadError('INVALID', 'A user is required to issue a download grant');
+  const ttl = input.ttlSeconds ?? RECEIPT_DOWNLOAD_DEFAULT_TTL_SECONDS;
+  if (!Number.isInteger(ttl) || ttl < 1 || ttl > RECEIPT_DOWNLOAD_MAX_TTL_SECONDS) {
+    throw new ReceiptDownloadError(
+      'TTL_EXCEEDED',
+      `ttlSeconds must be an integer between 1 and ${RECEIPT_DOWNLOAD_MAX_TTL_SECONDS}`
+    );
+  }
+  if (!receipts.has(input.tokenId)) throw new ReceiptDownloadError('NOT_FOUND', 'Receipt not found');
+
+  const iat = input.now ?? Date.now();
+  const expires = iat + ttl * 1000;
+  return {
+    tokenId: input.tokenId,
+    userId: input.userId,
+    iat,
+    expires,
+    sig: computeGrantSignature(input.tokenId, input.userId, iat, expires),
+  };
+}
+
+/**
+ * Verify a download grant. Checks run in this order: signature, lifetime
+ * bound, issued-at not in the future, expiry, then receipt existence. The
+ * signature check comes first so a forged request learns nothing about
+ * timing or existence.
+ */
+export function verifyReceiptDownloadGrant(input: {
+  tokenId: string;
+  userId: string;
+  iat: number;
+  expires: number;
+  sig: string;
+  now?: number;
+}): ReceiptNFT {
+  const { tokenId, userId, iat, expires, sig } = input;
+  const invalid = () => new ReceiptDownloadError('INVALID', 'Download link is invalid');
+
+  if (!userId || !Number.isSafeInteger(iat) || !Number.isSafeInteger(expires)) throw invalid();
+  if (!/^[0-9a-f]{64}$/.test(sig)) throw invalid();
+
+  const expected = Buffer.from(computeGrantSignature(tokenId, userId, iat, expires), 'hex');
+  const provided = Buffer.from(sig, 'hex');
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) throw invalid();
+
+  if (expires <= iat || expires - iat > RECEIPT_DOWNLOAD_MAX_TTL_SECONDS * 1000) {
+    throw new ReceiptDownloadError('TTL_EXCEEDED', 'Download link lifetime is out of bounds');
+  }
+
+  const now = input.now ?? Date.now();
+  if (iat > now + DOWNLOAD_CLOCK_SKEW_MS) throw invalid();
+  if (now >= expires) throw new ReceiptDownloadError('EXPIRED', 'Download link has expired');
+
+  const receipt = receipts.get(tokenId);
+  if (!receipt) throw new ReceiptDownloadError('NOT_FOUND', 'Receipt not found');
+  return receipt;
 }

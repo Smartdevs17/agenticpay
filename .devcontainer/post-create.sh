@@ -22,21 +22,10 @@ for template in "$ROOT"/.devcontainer/vscode/*.json; do
   fi
 done
 
-# Rust WASM target (Soroban contracts)
-if command -v rustup >/dev/null 2>&1; then
-  echo "==> Adding wasm32-unknown-unknown target"
-  rustup target add wasm32-unknown-unknown
-fi
-
-# Soroban CLI (optional but required for contract work)
-if command -v cargo >/dev/null 2>&1; then
-  if ! command -v soroban >/dev/null 2>&1; then
-    echo "==> Installing Soroban CLI (this may take a few minutes)"
-    cargo install --locked soroban-cli --version 21.0.0 || {
-      echo "WARN: soroban-cli install failed; run manually: cargo install --locked soroban-cli"
-    }
-  fi
-fi
+# Rust toolchain and Soroban CLI. The image already ships them, so this is a quick
+# check. It installs anything missing (#1498).
+echo "==> Verifying Rust and Soroban toolchain"
+bash scripts/setup.sh || echo "WARN: toolchain check failed; run scripts/setup.sh to repair it"
 
 # Node workspaces
 echo "==> Installing npm dependencies (root + workspaces)"

@@ -13,10 +13,6 @@
       "version": "22",
       "nodeGypDependencies": true
     },
-    "ghcr.io/devcontainers/features/rust:1": {
-      "version": "stable",
-      "profile": "minimal"
-    },
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "version": "latest"
     }

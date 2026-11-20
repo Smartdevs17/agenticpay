@@ -46,6 +46,7 @@ Use this page as the entry point for the repository's maintained guides. API-spe
 - [Security policy](security-policy.md)
 - [Audit logging](security/audit-logging.md)
 - [Provider credentials encryption](security/provider-credentials-encryption.md)
+- [Request and data hardening](security/request-hardening.md)
 - [AML transaction monitoring](AML_TRANSACTION_MONITORING.md)
 - [Sanctions screening](SANCTIONS_SCREENING.md)
 - [PCI DSS compliance dashboard](PCI_DSS_DASHBOARD.md)

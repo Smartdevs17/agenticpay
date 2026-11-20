@@ -192,8 +192,8 @@ test-contracts-relayer: ## Run settlement proof relay Foundry tests
 	$(call timed,test-contracts-relayer,$(FORGE) test --root $(RELAYER))
 
 .PHONY: test-tooling
-test-tooling: ## Test repo tooling: Makefile, turbo config, docs index, commitlint, CODEOWNERS, Sentry upload
-	$(NODE) --test scripts/*.test.mjs infra/sentry/*.test.mjs
+test-tooling: ## Test repo tooling: Makefile, turbo config, docs index
+	$(NODE) --test scripts/*.test.mjs scripts/*/*.test.mjs
 
 .PHONY: test-integration
 test-integration: ## Run integration tests in docker, then tear the stack down
@@ -252,9 +252,14 @@ up: ## Start the docker-compose stack in the background
 	$(call require,$(DOCKER),install Docker Desktop or Docker Engine)
 	$(COMPOSE) up -d
 
+.PHONY: up-app
+up-app: ## Build and start the full stack: infra, backend API and frontend
+	$(call require,$(DOCKER),install Docker Desktop or Docker Engine)
+	$(COMPOSE) --profile app up -d --build
+
 .PHONY: down
-down: ## Stop the docker-compose stack
-	$(COMPOSE) down
+down: ## Stop the docker-compose stack (including up-app services)
+	$(COMPOSE) --profile app down
 
 .PHONY: logs
 logs: ## Follow docker-compose logs

@@ -15,6 +15,8 @@
 | WS_ENABLED           | Enable/disable WebSocket support    | true    | No       |
 | WS_PORT              | WebSocket port                      | 3001    | No       |
 | PAYOUT_APPROVAL_THRESHOLD | Payouts at or above this amount require approval | 10000 | No |
+| HIGH_VALUE_WITHDRAWAL_THRESHOLD | Withdrawals at or above this amount require a fresh requester signature (see docs/security/request-hardening.md) | 10000 | No |
+| RECEIPT_DOWNLOAD_SECRET | HMAC key for signed receipt download links, min 32 chars. Required in production; other environments use a per-process secret | - | Prod |
 | JWT_SECRET | HS256 signing secret for access tokens (min 32 chars). Required in production; dev/test fall back to a per-process random secret | - | Prod |
 | JWT_SECRET_PREVIOUS | Previous signing secret, still accepted for verification during key rotation | - | No |
 | JWT_ACCESS_TOKEN_TTL_SECONDS | Access token lifetime, clamped to 60–3600 | 900 | No |
@@ -33,6 +35,8 @@
 | WOOCOMMERCE_CONSUMER_KEY | WooCommerce REST API consumer key | - | No |
 | WOOCOMMERCE_CONSUMER_SECRET | WooCommerce REST API consumer secret | - | No |
 | WOOCOMMERCE_WEBHOOK_SECRET | Secret used to verify `X-WC-Webhook-Signature` | - | No |
+| WEBHOOK_EGRESS_ALLOWED_HOSTS | Hosts webhook deliveries may be sent to. Exact hostnames or `*.suffix` wildcards, comma-separated. Empty denies every delivery (fail closed). Private, loopback and link-local addresses are always denied. See [WEBHOOK_VERIFICATION.md](./WEBHOOK_VERIFICATION.md#outbound-egress-policy) | - | **Yes** for webhooks |
+| WEBHOOK_EGRESS_ALLOWED_PORTS | Ports webhook deliveries may use, comma-separated. Applies to HTTPS only | 443 | No |
 | SALESFORCE_INSTANCE_URL | Salesforce instance URL (e.g. `https://acme.my.salesforce.com`) | - | No |
 | SALESFORCE_ACCESS_TOKEN | Salesforce OAuth access token | - | No |
 | SALESFORCE_API_VERSION | Salesforce REST API version | 59.0 | No |

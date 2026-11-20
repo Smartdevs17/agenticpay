@@ -1,16 +1,9 @@
 name: SDK Generation and Publishing
 
 on:
+  # #1496: generate on every push, not only when API files change, so the SDKs
+  # never silently drift from the spec. Publishing is still limited to main below.
   push:
-    branches:
-      - main
-      - develop
-    paths:
-      - 'backend/src/routes/**'
-      - 'backend/src/controllers/**'
-      - 'backend/tsoa.json'
-      - 'backend/openapi-generator.config.json'
-      - 'backend/docs/api/openapi/**'
   pull_request:
     branches:
       - main

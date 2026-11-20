@@ -6,6 +6,14 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import {
+  assertEgressAllowed,
+  assertEgressUrl,
+  EgressDeniedError,
+  logEgressDenial,
+  parseEgressPolicy,
+  type HostResolver,
+} from './egress-policy.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -105,6 +113,10 @@ const idempotencyIndex = new Map<string, string>();
 export function registerEndpoint(
   config: Omit<WebhookEndpointConfig, 'id' | 'createdAt' | 'updatedAt'>
 ): WebhookEndpointConfig {
+  // Reject disallowed destinations at registration time. DNS is checked again at
+  // dispatch, because the answer can change after this point.
+  assertEgressUrl(config.url, parseEgressPolicy());
+
   const now = new Date().toISOString();
   const endpoint: WebhookEndpointConfig = {
     ...config,
@@ -240,7 +252,8 @@ function isExpired(log: DeliveryLog, policy: RetryPolicy): boolean {
 
 export async function attemptDelivery(
   logId: string,
-  _fetchFn?: (url: string, opts: RequestInit) => Promise<{ status: number; text: () => Promise<string> }>
+  _fetchFn?: (url: string, opts: RequestInit) => Promise<{ status: number; text: () => Promise<string> }>,
+  _resolveHost?: HostResolver,
 ): Promise<DeliveryLog> {
   const log = deliveryLogs.get(logId);
   if (!log) throw new Error(`Delivery log ${logId} not found`);
@@ -254,6 +267,29 @@ export async function attemptDelivery(
     log.status = 'expired';
     log.expiredAt = new Date().toISOString();
     log.updatedAt = log.expiredAt;
+    deliveryLogs.set(logId, log);
+    return log;
+  }
+
+  // Egress guard, checked before the request is built. The request is never sent
+  // to a destination that fails the check.
+  try {
+    await assertEgressAllowed(endpoint.url, parseEgressPolicy(), _resolveHost);
+  } catch (err: unknown) {
+    log.updatedAt = new Date().toISOString();
+    if (err instanceof EgressDeniedError) {
+      // A permanent denial will not start passing on retry, so dead-letter it now.
+      logEgressDenial(err, { endpointId: endpoint.id, merchantId: endpoint.merchantId });
+      log.status = 'dead_letter';
+      log.failureCategory = 'invalid_endpoint';
+      log.lastError = err.message;
+      log.nextAttemptAt = undefined;
+    } else {
+      // Transient failure (for example DNS). Count it and retry on the normal backoff.
+      log.attempt += 1;
+      log.lastError = err instanceof Error ? err.message : String(err);
+      handleRetryOrDead(log, policy, 'unknown');
+    }
     deliveryLogs.set(logId, log);
     return log;
   }
@@ -272,11 +308,14 @@ export async function attemptDelivery(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), policy.timeoutMs);
 
+    // redirect: 'manual' stops a 3xx from sending the request to a destination
+    // that was never checked against the egress policy.
     const response = await fetcher(endpoint.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Event-Id': log.eventId },
       body: log.payloadPreview,
       signal: controller.signal,
+      redirect: 'manual',
     }).finally(() => clearTimeout(timeout));
 
     log.responseLatencyMs = Date.now() - startMs;
