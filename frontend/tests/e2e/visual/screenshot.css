@@ -1,0 +1,28 @@
+/*
+ * Applied only while a screenshot is captured (`toHaveScreenshot` stylePath),
+ * so assertions still see the real page.
+ */
+
+/* Demo notifications fire a random toast every 10s (components/providers.tsx). */
+[data-sonner-toaster] {
+  display: none !important;
+}
+
+/* Next.js dev overlay / route announcer, in case the suite runs against `next dev`. */
+nextjs-portal,
+next-route-announcer {
+  display: none !important;
+}
+
+/*
+ * The dashboard shell is a viewport-height flex box with an inner scrolling
+ * <main>. Let it grow so `fullPage` captures content below the fold.
+ */
+div.h-screen:has(> div > main) {
+  height: auto !important;
+  min-height: 100vh;
+}
+div.h-screen:has(> div > main) > div,
+div.h-screen:has(> div > main) main {
+  overflow: visible !important;
+}

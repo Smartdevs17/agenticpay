@@ -13,7 +13,7 @@ is in [`../playwright.config.ts`](../playwright.config.ts).
 - **Onboarding** — checklist, document upload with API mocks (`onboarding.spec.ts`)
 - **Disputes** — list, file dispute, detail view (`disputes.spec.ts`)
 - **Payment routing** — auth gating (`payment.spec.ts`)
-- **Visual regression** — landing, auth, escrow, disputes (`visual.spec.ts`)
+- **Visual regression** — lives in its own suite, see [`../tests/e2e/visual`](../tests/e2e/visual/README.md)
 
 Tests run against Chromium, Firefox, WebKit, plus Pixel 7 and iPhone 14 mobile
 viewports.
@@ -34,9 +34,6 @@ npx playwright test e2e/auth.spec.ts --project=chromium
 
 # Interactive UI mode (watch + time-travel debugger)
 npm run test:e2e:ui
-
-# Regenerate visual snapshots
-npm run test:e2e:update-snapshots
 
 # Open the last HTML report
 npm run test:e2e:report
@@ -72,9 +69,9 @@ test('custom user', async ({ seedAuth, page }) => {
 
 ## Visual regression
 
-Snapshots live under `e2e/__snapshots__/` and are keyed per browser project.
-Update them intentionally (`test:e2e:update-snapshots`) and review diffs in
-the HTML report.
+Pixel snapshots of the dashboard run as a separate suite with its own config,
+production build and Linux baselines — see
+[`tests/e2e/visual/README.md`](../tests/e2e/visual/README.md).
 
 ## Test data & cleanup
 

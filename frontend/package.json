@@ -13,8 +13,9 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:install": "playwright install --with-deps",
-    "test:e2e:update-snapshots": "playwright test --update-snapshots",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "test:visual": "playwright test -c tests/e2e/visual/playwright.config.ts",
+    "test:visual:docker": "bash tests/e2e/visual/docker.sh"
   },
   "dependencies": {
     "workbox-precaching": "^7.3.0",
