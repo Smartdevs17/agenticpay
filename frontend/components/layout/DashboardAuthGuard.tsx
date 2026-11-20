@@ -19,7 +19,10 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
   const scrollPositions = React.useRef<Record<string, number>>({});
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    // Read the store directly: during hydration `isAuthenticated` is the
+    // server snapshot (always false), which would bounce a signed-in user who
+    // hard-loads a dashboard URL to /auth before the persisted session applies.
+    if (!useAuthStore.getState().isAuthenticated) {
       router.push('/auth');
     }
   }, [isAuthenticated, router]);
