@@ -24,7 +24,10 @@
     "benchmark": "tsx src/tests/benchmarks/run-benchmarks.ts",
     "benchmark:baseline": "tsx src/tests/benchmarks/run-benchmarks.ts --write-baseline",
     "benchmark:compare": "tsx src/tests/benchmarks/compare-baseline.ts",
-    "generate:vapid-keys": "node scripts/generate-vapid-keys.js"
+    "generate:vapid-keys": "node scripts/generate-vapid-keys.js",
+    "sdk:generate:typescript": "node ../scripts/sdk/generate-sdk.mjs typescript",
+    "sdk:generate:python": "node ../scripts/sdk/generate-sdk.mjs python",
+    "sdk:generate:go": "node ../scripts/sdk/generate-sdk.mjs go"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

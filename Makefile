@@ -193,7 +193,7 @@ test-contracts-relayer: ## Run settlement proof relay Foundry tests
 
 .PHONY: test-tooling
 test-tooling: ## Test repo tooling: Makefile, turbo config, docs index
-	$(NODE) --test scripts/*.test.mjs
+	$(NODE) --test scripts/*.test.mjs scripts/*/*.test.mjs
 
 .PHONY: test-integration
 test-integration: ## Run integration tests in docker, then tear the stack down
