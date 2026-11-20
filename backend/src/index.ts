@@ -19,11 +19,12 @@ import { messageQueue } from './services/queue.js';
 import { registerDefaultProcessors } from './services/queue-producers.js';
 import { slaTrackingMiddleware } from './middleware/slaTracking.js';
 import { requestIdMiddleware, REQUEST_ID_HEADER } from './middleware/requestId.js';
-import { validateEnv, config } from './config/env.js';
+import { validateEnv, config as loadEnvConfig } from './config/env.js';
+import { verifyContractHashAtStartup } from './services/stellar.js';
 
 // Validate environment variables at startup
 validateEnv();
-const env = config();
+const env = loadEnvConfig();
 
 const traceStorage = new AsyncLocalStorage<string>();
 
@@ -229,23 +230,36 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-if (config.jobs.enabled) {
-  startJobs();
-}
+let server: ReturnType<typeof app.listen> | undefined;
 
-registerDefaultProcessors();
-if (config.queue.enabled) {
-  messageQueue.start();
-}
+async function bootstrap() {
+  // Refuse to serve traffic if the deployed contract does not match the build manifest.
+  await verifyContractHashAtStartup();
 
-const server = app.listen(config.server.port, () => {
-  console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
-});
+  if (config.jobs.enabled) {
+    startJobs();
+  }
+
+  registerDefaultProcessors();
+  if (config.queue.enabled) {
+    messageQueue.start();
+  }
+
+  server = app.listen(config.server.port, () => {
+    console.log(`AgenticPay backend running on port ${config.server.port} [${config.env}]`);
+  });
+}
 
 const shutdown = (signal: string) => {
   console.log(`${signal} received. Starting graceful shutdown...`);
 
-  server.close(() => {
+  const serverInstance = server;
+  if (!serverInstance) {
+    console.log('HTTP server was never started. Exiting.');
+    process.exit(0);
+  }
+
+  serverInstance.close(() => {
     console.log('HTTP server closed.');
 
     try {
@@ -277,5 +291,11 @@ const shutdown = (signal: string) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+bootstrap().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`AgenticPay backend failed to start: ${message}`);
+  process.exit(1);
+});
 
 export default app;

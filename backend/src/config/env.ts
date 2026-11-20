@@ -8,6 +8,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3001),
   CORS_ALLOWED_ORIGINS: z.string().default('*'),
   STELLAR_NETWORK: z.enum(['testnet', 'public']).default('testnet'),
+  SOROBAN_CONTRACT_ID: z.string().trim().optional(),
+  SOROBAN_RPC_URL: z.string().trim().url('SOROBAN_RPC_URL must be a valid URL').optional(),
+  SOROBAN_BUILD_MANIFEST: z.string().trim().optional(),
+  CONTRACT_HASH_VERIFICATION: z.enum(['enforce', 'warn', 'off']).default('enforce'),
   OPENAI_API_KEY: z.string({
     required_error: 'OPENAI_API_KEY is required for verification and invoicing services',
   }).min(1, 'OPENAI_API_KEY cannot be empty'),
