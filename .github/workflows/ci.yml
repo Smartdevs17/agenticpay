@@ -62,6 +62,9 @@ jobs:
               - 'package-lock.json'
               - 'scripts/**'
               - 'docs/**'
+              - 'commitlint.config.js'
+              - '.husky/**'
+              - '.releaserc.json'
               - '.github/workflows/ci.yml'
 
   # ── Backend ───────────────────────────────────────────────────────────────
@@ -306,13 +309,13 @@ jobs:
           cargo build --target wasm32-unknown-unknown --release
           cargo check
 
-  # ── Repo tooling (turbo config, Makefile, docs index) ─────────────────────
+  # ── Repo tooling (turbo config, Makefile, docs index, commitlint) ───────
   tooling:
     needs: changes
     if: ${{ needs.changes.outputs.tooling == 'true' }}
     name: Repo tooling
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -320,6 +323,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # commitlint / semantic-release tests exercise the real CLIs.
+      - name: Install root tooling
+        run: npm ci --ignore-scripts --prefer-offline
 
       - name: Validate turbo pipeline graph
         run: npx --yes turbo@${TURBO_VERSION} run build lint test --dry=json > /dev/null

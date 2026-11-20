@@ -1,0 +1,54 @@
+name: Commitlint
+
+# PRs are squash-merged, so the PR title becomes the commit on `main` that
+# semantic-release reads to choose the next version and write CHANGELOG.md.
+# Lint the title against the same commitlint.config.js the local
+# `.husky/commit-msg` hook uses.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main, dev]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    name: PR title follows Conventional Commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci --ignore-scripts --prefer-offline
+
+      - name: Lint PR title
+        env:
+          # Passed through env, never interpolated into the script, so a
+          # crafted title cannot inject shell.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if printf '%s\n' "$PR_TITLE" | npx --no -- commitlint; then
+            echo "### ✅ PR title follows Conventional Commits" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### ❌ PR title does not follow Conventional Commits"
+              echo
+              echo "Title: \`$PR_TITLE\`"
+              echo
+              echo "Expected \`type(scope): summary\`, e.g. \`feat(payments): add razorpay gateway\`."
+              echo "See [CONTRIBUTING.md](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/CONTRIBUTING.md#commit-message-format)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Invalid PR title::'$PR_TITLE' is not a Conventional Commit. Expected 'type(scope): summary'."
+            exit 1
+          fi

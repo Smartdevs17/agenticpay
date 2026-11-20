@@ -8,6 +8,7 @@
     "workers"
   ],
   "scripts": {
+    "prepare": "node .husky/install.mjs",
     "build": "turbo run build",
     "test": "npm run test:docs && turbo run test",
     "test:docs": "node --test scripts/docs-index.test.mjs",
@@ -36,6 +37,14 @@
     "release": "semantic-release"
   },
   "devDependencies": {
+    "@commitlint/cli": "~19.8.1",
+    "@commitlint/config-conventional": "~19.8.1",
+    "@semantic-release/changelog": "~6.0.3",
+    "@semantic-release/git": "~10.0.1",
+    "@sentry/cli": "~2.58.6",
+    "conventional-changelog-conventionalcommits": "~8.0.0",
+    "husky": "~9.1.7",
+    "semantic-release": "~24.2.9",
     "turbo": "^1.10.16"
   },
   "optionalDependencies": {

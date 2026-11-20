@@ -103,7 +103,7 @@ fix/incorrect-balance-calculation
 ```
 
 ## Commit Messages (Conventional Commits)
-Follow this format:
+Follow this format (enforced by commitlint — see [CONTRIBUTING.md](../CONTRIBUTING.md#commit-message-format)):
 ```
 type: short description
 ```

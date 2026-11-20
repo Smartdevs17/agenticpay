@@ -79,8 +79,9 @@ test('every root npm script is reachable from a make target', () => {
       .filter((match) => !match[1])
       .map((match) => match[2] ?? match[3]),
   );
-  // release runs only in the release workflow; test:docs runs inside `npm test` (make test).
-  const notDevTasks = new Set(['release', 'test:docs']);
+  // release runs only in the release workflow; test:docs runs inside `npm test` (make test);
+  // prepare is the npm lifecycle hook that installs the husky git hooks.
+  const notDevTasks = new Set(['release', 'test:docs', 'prepare']);
   const unmapped = Object.keys(scriptsOf('.')).filter((script) => !notDevTasks.has(script) && !reached.has(script));
   assert.deepEqual(unmapped, [], 'add a make target for these root scripts');
 });
