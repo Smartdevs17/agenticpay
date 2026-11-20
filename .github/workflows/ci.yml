@@ -66,6 +66,8 @@ jobs:
               - '.husky/**'
               - '.releaserc.json'
               - '.github/CODEOWNERS'
+              - '.github/workflows/release.yml'
+              - 'infra/sentry/**'
               - '.github/workflows/ci.yml'
 
   # ── Backend ───────────────────────────────────────────────────────────────
@@ -311,7 +313,7 @@ jobs:
           cargo check
 
   # ── Repo tooling (turbo config, Makefile, docs index, commitlint,
-  #    CODEOWNERS) ──────────────────────────────────────────────────────────
+  #    CODEOWNERS, Sentry source-map upload) ──────────────────────────────
   tooling:
     needs: changes
     if: ${{ needs.changes.outputs.tooling == 'true' }}

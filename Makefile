@@ -192,8 +192,8 @@ test-contracts-relayer: ## Run settlement proof relay Foundry tests
 	$(call timed,test-contracts-relayer,$(FORGE) test --root $(RELAYER))
 
 .PHONY: test-tooling
-test-tooling: ## Test repo tooling: Makefile, turbo config, docs index
-	$(NODE) --test scripts/*.test.mjs
+test-tooling: ## Test repo tooling: Makefile, turbo config, docs index, commitlint, CODEOWNERS, Sentry upload
+	$(NODE) --test scripts/*.test.mjs infra/sentry/*.test.mjs
 
 .PHONY: test-integration
 test-integration: ## Run integration tests in docker, then tear the stack down
