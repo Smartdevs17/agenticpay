@@ -142,6 +142,31 @@ A link can be used by anyone who holds it until it expires, so keep the lifetime
 
 **Breaking change:** `GET /api/v1/receipts/:tokenId/pdf` without a valid grant now returns 401. No code in this repository called the endpoint directly. External callers must first call `download-url`.
 
+## 5. Workspace scopes prefetched at authentication (#1464)
+
+`authMiddleware` (`backend/src/middleware/auth.ts`) loads the principal's
+workspace memberships once, right after a strategy succeeds, and attaches them
+as `req.workspaceScopes`: `{ userId, roles: Map<workspaceId, role> }`.
+`requirePermission` and `requireRole` (`backend/src/middleware/rbac.ts`) read
+the role from there. Before, every check rescanned the whole membership store,
+so a route with several checks paid for several scans.
+
+- **Same decisions.** The prefetched role is the one `getMemberRole` would
+  return; a workspace missing from the map means "not a member" (403).
+- **Bound to one user.** Scopes are used only when `userId` matches the user
+  being checked. Any other user falls back to a direct lookup, and scopes
+  present on the request before authentication are cleared, never trusted.
+- **Fails open on lookup, never on access.** If loading scopes throws, the
+  request is still authenticated, a `workspace scope prefetch failed` warning is
+  logged, and RBAC falls back to per-check lookups.
+- **Routes without `authMiddleware`** (those that set `req.userId` themselves)
+  keep the direct lookup.
+
+`createAuthMiddleware(strategies, { loadWorkspaceScopes })` accepts a custom
+loader (for example a database query) or `false` to turn prefetching off.
+`getScopePrefetchStats()` reports prefetch count, failures, and last and
+average duration.
+
 ## Rollout notes
 
 - Set `RECEIPT_DOWNLOAD_SECRET` in every environment before deploying.
