@@ -27,6 +27,7 @@ import { tokenAuthMiddleware } from './token-auth.js';
 import { getSession } from '../services/session.js';
 import { lookupApiKeyRecord } from '../services/api-key-registry.js';
 import type { AccessTokenClaims } from '../auth/jwt.js';
+import { mergeLogContext } from '../logging/context.js';
 
 export type AuthMethod = 'session' | 'hmac' | 'token' | 'apiKey';
 
@@ -169,6 +170,7 @@ export function createAuthMiddleware(strategies: AuthStrategy[] = DEFAULT_AUTH_S
       try {
         const principal = await applicable[i].authenticate(req, res);
         req.user = principal;
+        mergeLogContext({ tenantId: principal.tenantId });
         next();
         return;
       } catch (err) {
