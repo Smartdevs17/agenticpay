@@ -15,6 +15,8 @@
 | WS_ENABLED           | Enable/disable WebSocket support    | true    | No       |
 | WS_PORT              | WebSocket port                      | 3001    | No       |
 | PAYOUT_APPROVAL_THRESHOLD | Payouts at or above this amount require approval | 10000 | No |
+| HIGH_VALUE_WITHDRAWAL_THRESHOLD | Withdrawals at or above this amount require a fresh requester signature (see docs/security/request-hardening.md) | 10000 | No |
+| RECEIPT_DOWNLOAD_SECRET | HMAC key for signed receipt download links, min 32 chars. Required in production; other environments use a per-process secret | - | Prod |
 | JWT_SECRET | HS256 signing secret for access tokens (min 32 chars). Required in production; dev/test fall back to a per-process random secret | - | Prod |
 | JWT_SECRET_PREVIOUS | Previous signing secret, still accepted for verification during key rotation | - | No |
 | JWT_ACCESS_TOKEN_TTL_SECONDS | Access token lifetime, clamped to 60–3600 | 900 | No |
