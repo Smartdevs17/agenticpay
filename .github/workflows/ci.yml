@@ -65,6 +65,7 @@ jobs:
               - 'commitlint.config.js'
               - '.husky/**'
               - '.releaserc.json'
+              - '.github/CODEOWNERS'
               - '.github/workflows/ci.yml'
 
   # ── Backend ───────────────────────────────────────────────────────────────
@@ -309,7 +310,8 @@ jobs:
           cargo build --target wasm32-unknown-unknown --release
           cargo check
 
-  # ── Repo tooling (turbo config, Makefile, docs index, commitlint) ───────
+  # ── Repo tooling (turbo config, Makefile, docs index, commitlint,
+  #    CODEOWNERS) ──────────────────────────────────────────────────────────
   tooling:
     needs: changes
     if: ${{ needs.changes.outputs.tooling == 'true' }}
@@ -335,3 +337,20 @@ jobs:
 
       - name: Test repo tooling
         run: make test-tooling
+
+      # Offline tests can't tell whether an owner exists or has write access;
+      # GitHub can. Unknown owners make their CODEOWNERS rule silently inert.
+      - name: Validate CODEOWNERS against GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ! errors=$(gh api "repos/${GITHUB_REPOSITORY}/codeowners/errors?ref=${REF}" --jq '.errors'); then
+            echo "::warning title=CODEOWNERS::Could not query the CODEOWNERS errors API for ${REF}; skipping owner validation."
+            exit 0
+          fi
+          if [ "$errors" != "[]" ]; then
+            echo "$errors" | jq -r '.[] | "::error file=.github/CODEOWNERS,line=\(.line),col=\(.column)::\(.kind): \(.message)"'
+            exit 1
+          fi
+          echo "CODEOWNERS: no errors reported by GitHub."

@@ -10,6 +10,7 @@ Use this page as the entry point for the repository's maintained guides. API-spe
 - [Deployment guide](deployment.md)
 - [Troubleshooting](troubleshooting.md)
 - [Contributing](../CONTRIBUTING.md)
+- [Code owners and review rules](CODEOWNERS.md)
 
 ## Payments and billing
 
