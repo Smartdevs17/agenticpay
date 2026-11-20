@@ -252,9 +252,14 @@ up: ## Start the docker-compose stack in the background
 	$(call require,$(DOCKER),install Docker Desktop or Docker Engine)
 	$(COMPOSE) up -d
 
+.PHONY: up-app
+up-app: ## Build and start the full stack: infra, backend API and frontend
+	$(call require,$(DOCKER),install Docker Desktop or Docker Engine)
+	$(COMPOSE) --profile app up -d --build
+
 .PHONY: down
-down: ## Stop the docker-compose stack
-	$(COMPOSE) down
+down: ## Stop the docker-compose stack (including up-app services)
+	$(COMPOSE) --profile app down
 
 .PHONY: logs
 logs: ## Follow docker-compose logs

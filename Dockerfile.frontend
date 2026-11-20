@@ -6,6 +6,10 @@ COPY packages ./packages
 RUN npm ci
 
 FROM deps AS builder
+# NEXT_PUBLIC_* values are compiled into the client bundle, so they must be
+# set at build time, not at container start.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 COPY frontend ./frontend
 WORKDIR /app/frontend
 RUN npm run build
