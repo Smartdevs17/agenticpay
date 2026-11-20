@@ -10,6 +10,8 @@ const bundleAnalyzer = withBundleAnalyzer({
 });
 
 const nextConfig: NextConfig = {
+  // Standalone output gives Dockerfile.frontend a self-contained server.js (#1500).
+  output: "standalone",
   experimental: {
     optimizePackageImports: [
       "lucide-react",

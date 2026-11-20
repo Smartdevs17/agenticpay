@@ -67,3 +67,31 @@ and default to the constants above when omitted.
 
 - A timestamp that does not parse as a date is rejected with `Timestamp is not a valid date`. An invalid date yields `NaN` in the tolerance check, and `NaN > tolerance` is false, so it previously passed the replay window.
 - Digests are compared with `crypto.timingSafeEqual` over the decoded bytes. A non-hex or wrong-length signature fails closed without throwing.
+
+## Outbound egress policy
+
+Webhook deliveries are outbound requests to merchant-supplied URLs, so they are an SSRF surface. Every destination is checked by `backend/src/services/webhooks/egress-policy.ts` at two points: when an endpoint is registered (`POST /webhooks/endpoints` returns `400` with a `reason`), and again immediately before each delivery attempt. The second check matters because a hostname can change its DNS answer after registration.
+
+A destination is allowed only if all of these hold:
+
+- the URL parses and uses `https:`, with no `user:password@` userinfo;
+- the effective port is in `WEBHOOK_EGRESS_ALLOWED_PORTS` (default `443`);
+- the hostname matches `WEBHOOK_EGRESS_ALLOWED_HOSTS`, either exactly or through a `*.suffix` wildcard (`*.partner.io` matches `a.partner.io`, not `partner.io` or `evilpartner.io`);
+- the hostname, and every address it resolves to, is not loopback, private (RFC 1918, CGNAT), link-local (including the `169.254.169.254` metadata address), multicast, or unspecified. IPv6 and IPv4-mapped addresses are judged the same way. An allow-list entry cannot override this.
+
+Denials use these reasons: `malformed_url`, `scheme_not_allowed`, `credentials_in_url`, `port_not_allowed`, `host_not_allowed`, `private_address`.
+
+Behaviour at dispatch:
+
+- A denial dead-letters the delivery at once with `failureCategory: invalid_endpoint`. It is not retried, and no request is sent.
+- A DNS lookup failure is transient. The delivery is retried on the normal backoff.
+- Requests use `redirect: 'manual'`, so a `3xx` cannot send the payload to a destination that was never checked.
+
+**Operators must set `WEBHOOK_EGRESS_ALLOWED_HOSTS` before webhooks will deliver.** An empty allow-list denies all egress. Example:
+
+```bash
+WEBHOOK_EGRESS_ALLOWED_HOSTS=hooks.merchant.example,*.partner.io
+WEBHOOK_EGRESS_ALLOWED_PORTS=443
+```
+
+Limitation: the DNS check runs before the request, not inside the socket connection, so a DNS answer that changes between the check and the connect is not caught. Pinning the resolved address into the HTTP agent would close that gap. It is not done here.

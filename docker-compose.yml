@@ -1,5 +1,13 @@
-# Backend services for local development and Devcontainer networking.
-# Start: docker compose up -d
+# Local stack for AgenticPay (#1500).
+#
+#   docker compose up -d                       infra only: Postgres, Redis, Loki, Grafana
+#   docker compose --profile app up -d --build infra + backend API + frontend
+#   make up-app                                same as the second line
+#
+# The backend and frontend run from the production Dockerfiles, so they are
+# built from source, not bind-mounted. Run `make db-migrate` once against a new
+# database. The frontend's NEXT_PUBLIC_* values are compiled in at build time;
+# change them with `--build-arg` (see the frontend service below).
 
 services:
   postgres:
@@ -56,6 +64,41 @@ services:
       - ./infra/logging/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
     depends_on:
       - loki
+
+  backend:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    ports:
+      - '3001:3001'
+    environment:
+      PORT: '3001'
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agenticpay
+      REDIS_URL: redis://redis:6379
+      REDIS_ENABLED: 'true'
+      CORS_ALLOWED_ORIGINS: 'http://localhost:3000,http://localhost:3001'
+      STELLAR_NETWORK: testnet
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api/v1}
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    depends_on:
+      - backend
 
 volumes:
   agenticpay-postgres:

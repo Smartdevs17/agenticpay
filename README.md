@@ -80,7 +80,21 @@ scripts/devcontainer.sh up
 
 # Or start only the infra (Postgres + Redis) on the host:
 docker compose up -d
+
+# Or the full app (infra + backend API + frontend) from the root compose file:
+make up-app
+make db-migrate   # first run against a new database
 ```
+
+### Generated SDKs
+
+Typed clients are generated from the backend OpenAPI spec. CI regenerates them on every push.
+
+```bash
+cd backend && npm run sdk:generate:typescript   # also: sdk:generate:python, sdk:generate:go
+```
+
+This runs the pinned `openapi-generator-cli` Docker image, so Docker is required. Use `node scripts/sdk/generate-sdk.mjs typescript --print` to see the command without running it. Settings come from `backend/openapi-generator.config.json`.
 
 ## Prerequisites
 

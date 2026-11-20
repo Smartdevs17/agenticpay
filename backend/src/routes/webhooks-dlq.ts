@@ -23,6 +23,7 @@ import {
   registerEndpoint,
   DEFAULT_RETRY_POLICY,
 } from '../services/webhooks/delivery-manager.js';
+import { EgressDeniedError } from '../services/webhooks/egress-policy.js';
 import {
   listDLQ,
   getDLQEntry,
@@ -164,15 +165,22 @@ router.post('/endpoints', (req: Request, res: Response) => {
     return;
   }
 
-  const endpoint = registerEndpoint({
-    merchantId,
-    url,
-    secret,
-    enabled: enabled ?? true,
-    retryPolicy: { ...DEFAULT_RETRY_POLICY, ...(retryPolicy ?? {}) },
-  });
-
-  res.status(201).json(endpoint);
+  try {
+    const endpoint = registerEndpoint({
+      merchantId,
+      url,
+      secret,
+      enabled: enabled ?? true,
+      retryPolicy: { ...DEFAULT_RETRY_POLICY, ...(retryPolicy ?? {}) },
+    });
+    res.status(201).json(endpoint);
+  } catch (err: unknown) {
+    if (err instanceof EgressDeniedError) {
+      res.status(400).json({ error: 'webhook destination not allowed', reason: err.reason });
+      return;
+    }
+    throw err;
+  }
 });
 
 router.put('/endpoints/:id/retry-policy', (req: Request, res: Response) => {

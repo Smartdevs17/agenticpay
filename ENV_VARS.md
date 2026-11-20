@@ -35,6 +35,8 @@
 | WOOCOMMERCE_CONSUMER_KEY | WooCommerce REST API consumer key | - | No |
 | WOOCOMMERCE_CONSUMER_SECRET | WooCommerce REST API consumer secret | - | No |
 | WOOCOMMERCE_WEBHOOK_SECRET | Secret used to verify `X-WC-Webhook-Signature` | - | No |
+| WEBHOOK_EGRESS_ALLOWED_HOSTS | Hosts webhook deliveries may be sent to. Exact hostnames or `*.suffix` wildcards, comma-separated. Empty denies every delivery (fail closed). Private, loopback and link-local addresses are always denied. See [WEBHOOK_VERIFICATION.md](./WEBHOOK_VERIFICATION.md#outbound-egress-policy) | - | **Yes** for webhooks |
+| WEBHOOK_EGRESS_ALLOWED_PORTS | Ports webhook deliveries may use, comma-separated. Applies to HTTPS only | 443 | No |
 | SALESFORCE_INSTANCE_URL | Salesforce instance URL (e.g. `https://acme.my.salesforce.com`) | - | No |
 | SALESFORCE_ACCESS_TOKEN | Salesforce OAuth access token | - | No |
 | SALESFORCE_API_VERSION | Salesforce REST API version | 59.0 | No |
