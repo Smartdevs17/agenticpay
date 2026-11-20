@@ -175,9 +175,8 @@ cp backend/.env.example backend/.env   # if present
 
 `.devcontainer/post-create.sh` runs automatically and:
 
-1. Adds the `wasm32-unknown-unknown` Rust target
-2. Installs Soroban CLI via Cargo
-3. Runs `npm ci` for all workspaces
+1. Verifies the Rust toolchain through `scripts/setup.sh`: the `wasm32-unknown-unknown` target, `clippy`, `rustfmt`, and the pinned Soroban CLI. The image already ships all of these, so this is a quick check. If one is missing, it is installed.
+2. Runs `npm ci` for all workspaces
 4. Generates Prisma client
 5. Builds Soroban contracts (`contracts/`)
 6. Generates OpenAPI documentation
@@ -189,6 +188,15 @@ Re-run manually if needed:
 ```bash
 bash .devcontainer/post-create.sh
 ```
+
+To check or repair only the Rust/Soroban toolchain (on the host or in the container):
+
+```bash
+scripts/setup.sh --check   # report status; exit 1 if anything is missing
+scripts/setup.sh           # install what is missing
+```
+
+The Soroban CLI version is pinned in `scripts/setup.sh` (`SOROBAN_CLI_VERSION`) and built into the image through the `SOROBAN_CLI_VERSION` build arg in `.devcontainer/Dockerfile`. A test keeps them in step with `soroban-sdk` in `contracts/Cargo.toml`. Changing the version means rebuilding the container image.
 
 ## ARM (Apple Silicon) & Windows Notes
 
