@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: canary-10 # Links to the environment
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Deploy 10%
         run: bash scripts/deploy_canary.sh ${{ github.sha }} 10
       - name: Automated Health Check
@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: canary-50
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Deploy 50%
         run: bash scripts/deploy_canary.sh ${{ github.sha }} 50
       - name: Automated Health Check
@@ -36,7 +36,7 @@ jobs:
     # This environment has "Required Reviewers" set in GitHub UI
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Deploy 100%
         run: bash scripts/deploy_canary.sh ${{ github.sha }} 100
 

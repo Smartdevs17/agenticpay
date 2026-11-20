@@ -125,6 +125,25 @@ Preview what the next release would contain with
    - screenshots or recordings for UI changes, if applicable
 6. Respond to review feedback with follow-up commits unless a maintainer asks for a squash or rebase.
 
+### GitHub Actions workflows
+
+Every third-party action is pinned to a full 40-character commit SHA, with the
+release it corresponds to as a trailing comment. A tag or branch can be moved
+to different code after review; a commit SHA cannot.
+
+```yaml
+- uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+```
+
+To add or change an action, look up the commit for the release
+(`gh api repos/OWNER/REPO/commits/vX.Y.Z --jq .sha`) and pin that, reusing the
+SHA already used elsewhere for the same release. `dtolnay/rust-toolchain`
+selects the toolchain by its ref, so once pinned it needs
+`with: toolchain: stable` (or `nightly`). Dependabot's `github-actions` entry
+in `.github/dependabot.yml` bumps the SHA and the comment together each week.
+`scripts/workflow-pins.test.mjs` (run by `make test-tooling` in CI) fails on any
+unpinned reference.
+
 ## Testing Requirements
 
 Every contribution should be verified before review.
