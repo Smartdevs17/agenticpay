@@ -140,6 +140,51 @@ const signature = crypto
 - Timestamps older than 5 minutes are rejected
 - Duplicate event IDs within 24 hours are rejected
 
+## Domain-Sharded Dispatch
+
+The delivery worker (`backend/src/services/webhooks.ts`) ticks every second and
+hands due deliveries to a sharded dispatcher
+(`backend/src/services/webhooks/shard-dispatcher.ts`). Deliveries are grouped by
+the destination host of the merchant's webhook URL. Each group (a shard) drains
+on its own lane:
+
+- **One request at a time per host, oldest first.** A merchant endpoint never
+  receives concurrent requests from us.
+- **Hosts drain in parallel.** Up to `WEBHOOK_DISPATCH_MAX_CONCURRENT_SHARDS`
+  hosts (default 8) are served at once, so a slow or hanging endpoint holds only
+  its own lane until its attempt times out. Previously every delivery shared one
+  sequential pass, and a single slow host delayed all merchants.
+- **No double sends.** A host whose lane is still busy is skipped on later
+  ticks, and its deliveries are picked up once the lane frees.
+- **Bounded runs.** A lane drains at most `WEBHOOK_DISPATCH_MAX_BATCH_PER_SHARD`
+  deliveries (default 25) before giving the lane back, so a large backlog for
+  one host cannot monopolise it. When every lane is busy, the hosts that have
+  waited longest get the next free lanes.
+
+The shard key is the lowercased hostname; the port and path are ignored.
+Retries, backoff and dead-lettering are unchanged and stay per delivery.
+
+### Dispatch stats
+
+`GET /api/v1/webhooks/dispatch-stats` returns:
+
+| Field | Meaning |
+|-------|---------|
+| `activeShards` | Hosts draining right now |
+| `dueBacklog` | Due deliveries seen by the last pass |
+| `queueWaitMs` | `p50`/`p95`/`p99`/`max` time from due to send start, over the last 1,024 deliveries. This is the tail-latency signal |
+| `shardRunMs` | Percentiles of one lane run |
+| `busyShardSkips` | Ticks that found a host still draining |
+| `deferredShards` | Times a host waited because every lane was busy |
+| `deliverErrors` | Unexpected throws while delivering (each is logged with its shard) |
+| `config` | The active concurrency and batch limits |
+
+A rising `deferredShards` with a high `queueWaitMs.p99` means the lanes are
+saturated. The worker also logs `webhook dispatch saturated` (at most once a
+minute). Raise `WEBHOOK_DISPATCH_MAX_CONCURRENT_SHARDS` if this persists.
+Invalid values for either setting stop the worker at startup with a message
+naming the variable.
+
 ## Monitoring and Debugging
 
 ### Webhook Logs
@@ -286,6 +331,7 @@ await sdk.webhooks.updateConfig({
 ## Changelog
 
 - **2024-10-17**: Initial webhook retry strategy documentation (Issue #1158)
+- Domain-sharded dispatch and `GET /webhooks/dispatch-stats` (Issue #1462)
 
 ## Related Documentation
 

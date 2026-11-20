@@ -1,4 +1,13 @@
 import { createHmac, randomUUID } from 'node:crypto';
+import { logger } from '../utils/logger.js';
+import {
+  ShardedDispatcher,
+  readShardDispatcherOptions,
+  shardKeyForUrl,
+  UNPARSEABLE_URL_SHARD,
+  type DispatchPassResult,
+  type DispatchStatsSnapshot,
+} from './webhooks/shard-dispatcher.js';
 
 export type WebhookDeliveryStatus =
   | 'pending'
@@ -48,8 +57,6 @@ export interface WebhookDeliveryLog {
 type WorkerState = {
   timer?: NodeJS.Timeout;
   running: boolean;
-  /** True while a pass over due deliveries is in flight, so the 1s ticker never overlaps itself. */
-  processing: boolean;
 };
 
 const MAX_ATTEMPTS = 5;
@@ -62,7 +69,7 @@ const deliveries = new Map<string, WebhookDeliveryLog>();
 const idempotencyIndex = new Map<string, string>();
 const deadLetterQueue: WebhookDeliveryLog[] = [];
 
-const worker: WorkerState = { running: false, processing: false };
+const worker: WorkerState = { running: false };
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -239,33 +246,73 @@ async function deliverOne(delivery: WebhookDeliveryLog): Promise<void> {
   }
 }
 
-async function processDueDeliveries(): Promise<void> {
-  const now = Date.now();
-  const due = Array.from(deliveries.values()).filter((d) => {
+/** The shard (destination host) a delivery is sent to (#1462). */
+function deliveryShardKey(delivery: WebhookDeliveryLog): string {
+  const config = webhookConfigs.get(delivery.configId);
+  return config ? shardKeyForUrl(config.url) : UNPARSEABLE_URL_SHARD;
+}
+
+let dispatcher: ShardedDispatcher<WebhookDeliveryLog> | undefined;
+
+/**
+ * Deliveries are sharded by destination host so one slow or hanging endpoint
+ * only delays its own deliveries instead of every merchant's (#1462). See
+ * `webhooks/shard-dispatcher.ts`. Created lazily so configuration is read
+ * when the worker starts, and a bad value fails there.
+ */
+function getDispatcher(): ShardedDispatcher<WebhookDeliveryLog> {
+  dispatcher ??= new ShardedDispatcher(readShardDispatcherOptions(), {
+    shardKey: deliveryShardKey,
+    dueAt: (delivery) => (delivery.nextAttemptAt ? Date.parse(delivery.nextAttemptAt) : undefined),
+    deliver: deliverOne,
+    logger,
+  });
+  return dispatcher;
+}
+
+function dueDeliveries(now = Date.now()): WebhookDeliveryLog[] {
+  return Array.from(deliveries.values()).filter((d) => {
     if (d.status !== 'pending' && d.status !== 'retrying') return false;
     if (!d.nextAttemptAt) return false;
     return new Date(d.nextAttemptAt).getTime() <= now;
   });
+}
 
-  for (const delivery of due) {
-    await deliverOne(delivery);
-  }
+/**
+ * Starts a run for every idle shard with due deliveries. A shard still
+ * draining from an earlier pass is skipped, which is what keeps a delivery
+ * from being sent twice: overlapping ticks can no longer pick up the same
+ * still-"pending"/"retrying" delivery, yet other hosts keep flowing.
+ */
+function processDueDeliveries(): DispatchPassResult {
+  return getDispatcher().dispatch(dueDeliveries());
+}
+
+/**
+ * Dispatches every due delivery and waits until all shards are idle. Used by
+ * tests and by operational tooling that needs a synchronous drain.
+ */
+export async function drainWebhookDeliveries(): Promise<void> {
+  await processDueDeliveries().settled;
+  await getDispatcher().idle();
+}
+
+/** Destination hosts whose deliveries are currently draining. */
+export function getActiveWebhookShards(): string[] {
+  return dispatcher?.activeShards() ?? [];
+}
+
+/** Dispatcher counters and queue-wait percentiles, served by GET /webhooks/dispatch-stats. */
+export function getWebhookDispatchStats(): DispatchStatsSnapshot & { config: ReturnType<typeof readShardDispatcherOptions> } {
+  return { ...getDispatcher().stats(), config: readShardDispatcherOptions() };
 }
 
 export function startWebhookWorker(): void {
   if (worker.running) return;
+  getDispatcher();
   worker.running = true;
   worker.timer = setInterval(() => {
-    // A pass that is still in flight (e.g. a slow endpoint, or a backlog bigger
-    // than one tick can clear) must finish before another one starts. Without
-    // this guard, the next 1s tick starts a second, overlapping pass that can
-    // pick up and deliver the same still-"pending"/"retrying" delivery a
-    // second time before the first pass has marked it "processing".
-    if (worker.processing) return;
-    worker.processing = true;
-    void processDueDeliveries().finally(() => {
-      worker.processing = false;
-    });
+    processDueDeliveries();
   }, 1_000);
 }
 
@@ -273,7 +320,6 @@ export function stopWebhookWorker(): void {
   if (worker.timer) clearInterval(worker.timer);
   worker.timer = undefined;
   worker.running = false;
-  worker.processing = false;
 }
 
 export function listWebhookDeliveries(): WebhookDeliveryLog[] {

@@ -37,6 +37,8 @@
 | WOOCOMMERCE_WEBHOOK_SECRET | Secret used to verify `X-WC-Webhook-Signature` | - | No |
 | WEBHOOK_EGRESS_ALLOWED_HOSTS | Hosts webhook deliveries may be sent to. Exact hostnames or `*.suffix` wildcards, comma-separated. Empty denies every delivery (fail closed). Private, loopback and link-local addresses are always denied. See [WEBHOOK_VERIFICATION.md](./WEBHOOK_VERIFICATION.md#outbound-egress-policy) | - | **Yes** for webhooks |
 | WEBHOOK_EGRESS_ALLOWED_PORTS | Ports webhook deliveries may use, comma-separated. Applies to HTTPS only | 443 | No |
+| WEBHOOK_DISPATCH_MAX_CONCURRENT_SHARDS | Destination hosts whose webhook deliveries may drain at the same time (1 to 256). Each host gets one request at a time. See [WEBHOOK_RETRY_STRATEGY.md](./docs/WEBHOOK_RETRY_STRATEGY.md#domain-sharded-dispatch) | 8 | No |
+| WEBHOOK_DISPATCH_MAX_BATCH_PER_SHARD | Deliveries one host drains per run before yielding its lane (1 to 1000) | 25 | No |
 | SALESFORCE_INSTANCE_URL | Salesforce instance URL (e.g. `https://acme.my.salesforce.com`) | - | No |
 | SALESFORCE_ACCESS_TOKEN | Salesforce OAuth access token | - | No |
 | SALESFORCE_API_VERSION | Salesforce REST API version | 59.0 | No |
