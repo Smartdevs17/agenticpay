@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
+    inputs:
+      update_visual_snapshots:
+        description: Re-record visual baselines and upload them as an artifact to commit
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -104,3 +109,69 @@ jobs:
           name: playwright-trace-${{ matrix.project }}
           path: frontend/test-results
           retention-days: 14
+
+  # Pixel comparison of dashboard pages against baselines committed under
+  # frontend/tests/e2e/visual/__screenshots__. Runs in the Playwright image so
+  # rendering matches `npm run test:visual:docker` exactly. See
+  # frontend/tests/e2e/visual/README.md.
+  visual:
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch' }}
+    name: Visual regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      # Keep in sync with @playwright/test in frontend/package-lock.json.
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-visual-npm-${{ hashFiles('frontend/package-lock.json', 'package-lock.json') }}
+
+      - name: Run visual regression
+        env:
+          CI: 'true'
+        run: >-
+          frontend/tests/e2e/visual/run.sh
+          ${{ inputs.update_visual_snapshots && '--update-snapshots' || '' }}
+
+      - name: Summarise snapshot diffs
+        if: ${{ !cancelled() }}
+        run: |
+          results=frontend/test-results/visual/results.json
+          [ -f "$results" ] || exit 0
+          node -e '
+            const r = require(process.argv[1]);
+            const failed = [];
+            const walk = (s) => { (s.suites || []).forEach(walk); (s.specs || []).forEach((sp) => sp.tests.forEach((t) => {
+              if (t.status === "unexpected") failed.push(`| ${t.projectName} | ${sp.title} |`);
+            })); };
+            r.suites.forEach(walk);
+            const { expected = 0, unexpected = 0, flaky = 0 } = r.stats;
+            const lines = [`### Visual regression: ${expected} passed, ${unexpected} failed, ${flaky} flaky`];
+            if (failed.length) lines.push("", "| Project | Test |", "| --- | --- |", ...failed, "",
+              "Download the **visual-report** artifact and open `index.html` to compare expected / actual / diff.",
+              "If the change is intended, re-record with `npm run test:visual:docker -- --update-snapshots`.");
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          ' "$PWD/$results"
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-report
+          path: frontend/playwright-report/visual
+          retention-days: 14
+
+      - name: Upload re-recorded baselines
+        if: ${{ inputs.update_visual_snapshots }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines
+          path: frontend/tests/e2e/visual/__screenshots__
+          retention-days: 7
