@@ -92,7 +92,7 @@
     "typescript-eslint": "^8.0.0",
     "vitest": "^4.1.1",
     "autocannon": "^7.15.0",
-    "openapi-fetch": "^0.13.5",
+    "openapi-fetch": "^0.17.0",
     "openapi-typescript": "^7.4.4",
     "pino-pretty": "^13.0.0"
   }
