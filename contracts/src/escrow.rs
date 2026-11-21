@@ -1,5 +1,67 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{contracttype, Address, Env, String, Vec};
 use crate::common::{self, *};
+
+/// Typed domain events for escrow state machine transitions (#1420).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum EscrowTransitionEvent {
+    Created { project_id: u64, client: Address, freelancer: Address, amount: i128 },
+    Funded { project_id: u64, amount: i128 },
+    WorkSubmitted { project_id: u64, github_repo: String },
+    Completed { project_id: u64, amount_released: i128 },
+    Disputed { project_id: u64, caller: Address },
+    Resolved { project_id: u64, released_to_freelancer: bool },
+    Expired { project_id: u64, refund_amount: i128 },
+}
+
+/// Emit an escrow state machine transition domain event.
+/// Uses an exhaustive match over `EscrowTransitionEvent` ensuring all transitions are explicitly covered.
+pub fn emit_escrow_transition(env: &Env, transition: &EscrowTransitionEvent) {
+    match transition {
+        EscrowTransitionEvent::Created { project_id, client, freelancer, amount } => {
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("created")),
+                (*project_id, client.clone(), freelancer.clone(), *amount),
+            );
+        }
+        EscrowTransitionEvent::Funded { project_id, amount } => {
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("funded")),
+                (*project_id, *amount),
+            );
+        }
+        EscrowTransitionEvent::WorkSubmitted { project_id, github_repo } => {
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("work_sub")),
+                (*project_id, github_repo.clone()),
+            );
+        }
+        EscrowTransitionEvent::Completed { project_id, amount_released } => {
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("completed")),
+                (*project_id, *amount_released),
+            );
+        }
+        EscrowTransitionEvent::Disputed { project_id, caller } => {
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("disputed")),
+                (*project_id, caller.clone()),
+            );
+        }
+        EscrowTransitionEvent::Resolved { project_id, released_to_freelancer } => {
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("resolved")),
+                (*project_id, *released_to_freelancer),
+            );
+        }
+        EscrowTransitionEvent::Expired { project_id, refund_amount } => {
+            env.events().publish(
+                (symbol_short!("escrow"), symbol_short!("expired")),
+                (*project_id, *refund_amount),
+            );
+        }
+    }
+}
 
 pub fn create_project(
     env: &Env,
@@ -41,7 +103,17 @@ pub fn create_project(
 
     env.events().publish(
         (symbol_short!("project"), symbol_short!("created")),
-        (count, client, freelancer, amount),
+        (count, client.clone(), freelancer.clone(), amount),
+    );
+
+    emit_escrow_transition(
+        env,
+        &EscrowTransitionEvent::Created {
+            project_id: count,
+            client,
+            freelancer,
+            amount,
+        },
     );
 
     common::_release_lock(env);
@@ -89,7 +161,17 @@ pub fn batch_create_projects(
 
         env.events().publish(
             (symbol_short!("project"), symbol_short!("created")),
-            (count, client.clone(), input.freelancer, input.amount),
+            (count, client.clone(), input.freelancer.clone(), input.amount),
+        );
+
+        emit_escrow_transition(
+            env,
+            &EscrowTransitionEvent::Created {
+                project_id: count,
+                client: client.clone(),
+                freelancer: input.freelancer.clone(),
+                amount: input.amount,
+            },
         );
 
         ids.push_back(count);
@@ -133,6 +215,14 @@ pub fn fund_project(env: &Env, project_id: u64, client: Address, amount: i128) {
         (project_id, amount),
     );
 
+    emit_escrow_transition(
+        env,
+        &EscrowTransitionEvent::Funded {
+            project_id,
+            amount,
+        },
+    );
+
     common::_release_lock(env);
 }
 
@@ -165,7 +255,15 @@ pub fn submit_work(env: &Env, project_id: u64, freelancer: Address, github_repo:
 
     env.events().publish(
         (symbol_short!("project"), symbol_short!("work_sub")),
-        (project_id, github_repo),
+        (project_id, github_repo.clone()),
+    );
+
+    emit_escrow_transition(
+        env,
+        &EscrowTransitionEvent::WorkSubmitted {
+            project_id,
+            github_repo,
+        },
     );
 
     common::_release_lock(env);
@@ -202,6 +300,14 @@ pub fn approve_work(env: &Env, project_id: u64, client: Address) {
     env.events().publish(
         (symbol_short!("project"), symbol_short!("payment")),
         (project_id, amount_released),
+    );
+
+    emit_escrow_transition(
+        env,
+        &EscrowTransitionEvent::Completed {
+            project_id,
+            amount_released,
+        },
     );
 
     record_receipt(env, project_id, amount_released, String::from_str(env, "XLM"), project_client, freelancer);
@@ -282,6 +388,14 @@ pub fn check_deadline(env: &Env, project_id: u64) -> bool {
     env.events().publish(
         (symbol_short!("project"), symbol_short!("expired")),
         (project_id, refund_amount),
+    );
+
+    emit_escrow_transition(
+        env,
+        &EscrowTransitionEvent::Expired {
+            project_id,
+            refund_amount,
+        },
     );
 
     common::_release_lock(env);

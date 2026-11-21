@@ -4,3 +4,4 @@ export * from './event-store.js';
 export * from './projections.js';
 export * from './dead-letter-queue.js';
 export * from './idempotent-handler.js';
+export * from './escrow-events.js';
