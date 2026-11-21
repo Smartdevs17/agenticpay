@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DashboardStatsSkeleton } from '@/components/ui/loading-skeletons';
+import { ChunkErrorBoundary } from '@/components/ui/ChunkErrorBoundary';
 
 
 const DashboardCharts = dynamic(() => import('./DashboardCharts'), {
@@ -117,7 +118,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Charts Section - dynamically imported to keep recharts out of the initial route chunk. */}
-      <DashboardCharts trendData={trendData} distributionData={distributionData} />
+      <ChunkErrorBoundary fallbackTitle="Dashboard Charts">
+        <DashboardCharts trendData={trendData} distributionData={distributionData} />
+      </ChunkErrorBoundary>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
