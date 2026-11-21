@@ -28,6 +28,7 @@ export * from './CategoryRepository.js';
 export * from './ComplianceRepository.js';
 export * from './APIKeyRepository.js';
 export * from './OnboardingRepository.js';
+export * from './DisputeEvidenceRepository.js';
 
 import { PaymentRepository } from './PaymentRepository.js';
 import { UserRepository } from './UserRepository.js';
@@ -40,6 +41,7 @@ import { EmailRepository } from './EmailRepository.js';
 import { ReportRepository } from './ReportRepository.js';
 import { InstallmentRepository } from './InstallmentRepository.js';
 import { SandboxRepository } from './SandboxRepository.js';
+import { DisputeEvidenceRepository } from './DisputeEvidenceRepository.js';
 
 export interface TransactionRepositories {
   payment: PaymentRepository;
@@ -53,6 +55,7 @@ export interface TransactionRepositories {
   report: ReportRepository;
   installment: InstallmentRepository;
   sandbox: SandboxRepository;
+  disputeEvidence: DisputeEvidenceRepository;
 }
 
 /**
@@ -76,6 +79,7 @@ export async function runInTransaction<T>(
       report: new ReportRepository(tx),
       installment: new InstallmentRepository(tx),
       sandbox: new SandboxRepository(tx),
+      disputeEvidence: new DisputeEvidenceRepository(tx),
     };
     return fn(repos);
   });

@@ -27,6 +27,7 @@ backend/src/repositories/
 ├── ReportRepository.ts           # Financial report job and archive queries
 ├── InstallmentRepository.ts      # InstallmentPlan and Installment queries
 ├── SandboxRepository.ts          # SandboxAccount and SandboxTransaction queries
+├── DisputeEvidenceRepository.ts  # DisputeEvidence queries with O(1) batched fanout (Issue #1460)
 └── __tests__/                    # Verbatim query argument tests with mock client
 ```
 
