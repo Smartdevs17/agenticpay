@@ -47,7 +47,7 @@
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.1",
     "helmet": "^7.1.0",
-    "ioredis": "^5.11.0",
+    "ioredis": "^5.11.1",
     "node-cron": "^3.0.3",
     "openai": "^4.67.0",
     "pino": "^9.6.0",
