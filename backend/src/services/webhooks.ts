@@ -1,6 +1,13 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import {
+  prepareWebhookPayload,
+  webhookMetrics,
+  DEFAULT_COMPRESSION_MIN_BYTES,
+  DEFAULT_MAX_PAYLOAD_BYTES,
+  type PreparedPayload,
+} from './webhooks/compression.js';
+import {
   ShardedDispatcher,
   readShardDispatcherOptions,
   shardKeyForUrl,
@@ -8,6 +15,8 @@ import {
   type DispatchPassResult,
   type DispatchStatsSnapshot,
 } from './webhooks/shard-dispatcher.js';
+
+export { webhookMetrics, prepareWebhookPayload };
 
 export type WebhookDeliveryStatus =
   | 'pending'
@@ -24,6 +33,8 @@ export interface MerchantWebhookConfig {
   enabled: boolean;
   currentSecret: string;
   previousSecrets: string[];
+  compressPayloads?: boolean;
+  compressionMinBytes?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,6 +58,10 @@ export interface WebhookDeliveryLog {
   maxAttempts: number;
   statusCode?: number;
   responseBody?: string;
+  payload?: string;
+  isCompressed?: boolean;
+  rawBytes?: number;
+  compressedBytes?: number;
   lastError?: string;
   nextAttemptAt?: string;
   deliveredAt?: string;
@@ -90,6 +105,8 @@ export function upsertWebhookConfig(input: {
   url: string;
   secret: string;
   enabled?: boolean;
+  compressPayloads?: boolean;
+  compressionMinBytes?: number;
 }): MerchantWebhookConfig {
   const existing = Array.from(webhookConfigs.values()).find((x) => x.merchantId === input.merchantId);
   const ts = nowIso();
@@ -98,6 +115,8 @@ export function upsertWebhookConfig(input: {
     existing.url = input.url;
     existing.currentSecret = input.secret;
     existing.enabled = input.enabled ?? true;
+    if (input.compressPayloads !== undefined) existing.compressPayloads = input.compressPayloads;
+    if (input.compressionMinBytes !== undefined) existing.compressionMinBytes = input.compressionMinBytes;
     existing.updatedAt = ts;
     webhookConfigs.set(existing.id, existing);
     return existing;
@@ -110,6 +129,8 @@ export function upsertWebhookConfig(input: {
     enabled: input.enabled ?? true,
     currentSecret: input.secret,
     previousSecrets: [],
+    compressPayloads: input.compressPayloads ?? false,
+    compressionMinBytes: input.compressionMinBytes ?? DEFAULT_COMPRESSION_MIN_BYTES,
     createdAt: ts,
     updatedAt: ts,
   };
@@ -157,6 +178,7 @@ export function enqueueWebhookEvent(input: {
     return { accepted: false, reason: 'Duplicate idempotency key', delivery: existingDelivery };
   }
 
+  const serializedEvent = JSON.stringify(event);
   const delivery: WebhookDeliveryLog = {
     id: `whdel_${randomUUID()}`,
     configId: config.id,
@@ -169,7 +191,8 @@ export function enqueueWebhookEvent(input: {
     createdAt: nowIso(),
     updatedAt: nowIso(),
     nextAttemptAt: nowIso(),
-    responseBody: JSON.stringify(event),
+    payload: serializedEvent,
+    responseBody: serializedEvent,
   };
 
   deliveries.set(delivery.id, delivery);
@@ -187,26 +210,47 @@ async function deliverOne(delivery: WebhookDeliveryLog): Promise<void> {
     return;
   }
 
-  const body = delivery.responseBody ?? '{}';
-  const signature = buildSignature(config.currentSecret, body);
+  // Raw JSON body remains uncompressed in storage across retries
+  const rawBody = delivery.payload ?? delivery.responseBody ?? '{}';
+
+  // Dynamic per-attempt payload preparation (compression + signature over uncompressed body)
+  const prepared = await prepareWebhookPayload(rawBody, config.currentSecret, {
+    enabled: config.compressPayloads ?? false,
+    minBytes: config.compressionMinBytes ?? DEFAULT_COMPRESSION_MIN_BYTES,
+  });
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ATTEMPT_TIMEOUT_MS);
 
   delivery.attempt += 1;
   delivery.status = 'processing';
+  delivery.isCompressed = prepared.isCompressed;
+  delivery.rawBytes = prepared.rawBytes;
+  delivery.compressedBytes = prepared.compressedBytes;
   delivery.updatedAt = nowIso();
 
   try {
+    const headers: Record<string, string> = {
+      ...prepared.headers,
+      'X-Webhook-Idempotency-Key': delivery.idempotencyKey,
+      'X-Webhook-Event-Id': delivery.eventId,
+    };
+
     const response = await fetch(config.url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Webhook-Signature': signature,
-        'X-Webhook-Idempotency-Key': delivery.idempotencyKey,
-        'X-Webhook-Event-Id': delivery.eventId,
-      },
-      body,
+      headers,
+      body: prepared.body,
       signal: controller.signal,
+    });
+
+    webhookMetrics.recordDelivery(prepared.isCompressed, prepared.rawBytes, prepared.compressedBytes);
+    logger.info('[Webhook] Delivery attempt completed', {
+      deliveryId: delivery.id,
+      attempt: delivery.attempt,
+      isCompressed: prepared.isCompressed,
+      rawBytes: prepared.rawBytes,
+      compressedBytes: prepared.compressedBytes,
+      compressionRatio: `${(prepared.compressionRatio * 100).toFixed(1)}%`,
     });
 
     const responseText = await response.text().catch(() => '');
