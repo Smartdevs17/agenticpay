@@ -1,7 +1,7 @@
 import { Server as HTTPServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { pushService } from './push.js';
-import { prisma } from '../db.js';
+import { defaultNotificationRepository } from '../repositories/NotificationRepository.js';
 import { NotificationCategory } from '@prisma/client';
 
 interface AuthenticatedSocket extends Socket {
@@ -326,7 +326,7 @@ class WebSocketService {
     }
 
     for (const userId of userIds) {
-      const notificationLog = await prisma.notificationLog.create({
+      const notificationLog = await defaultNotificationRepository.createNotificationLog({
         data: {
           tenantId,
           userId,
