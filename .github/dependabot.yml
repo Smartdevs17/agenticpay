@@ -74,38 +74,35 @@ updates:
       - "root"
     versioning-strategy: "increase"
 
-# Enable security updates
-security-updates:
-  - package-ecosystem: "npm"
-    directory: "/backend"
+  # GitHub Actions (#1468). Every workflow pins each action to a full commit
+  # SHA with the release tag as a trailing comment, e.g.
+  #   uses: actions/checkout@<40-char sha> # v4.4.0
+  # Dependabot bumps the SHA and the comment together. Minor and patch bumps
+  # arrive as one grouped PR; a major bump gets its own PR so its changelog
+  # can be reviewed. scripts/workflow-pins.test.mjs fails CI on any unpinned
+  # `uses:` reference.
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: "daily"
-    open-pull-requests-limit: 10
-    reviewers:
-      - "mmesolove"
-    assignees:
-      - "mmesolove"
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
     commit-message:
-      prefix: "security"
+      prefix: "ci"
       include: "scope"
     labels:
-      - "security"
       - "dependencies"
-      - "backend"
+      - "github-actions"
+    groups:
+      github-actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
-  - package-ecosystem: "npm"
-    directory: "/frontend"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 10
-    reviewers:
-      - "mmesolove"
-    assignees:
-      - "mmesolove"
-    commit-message:
-      prefix: "security"
-      include: "scope"
-    labels:
-      - "security"
-      - "dependencies"
-      - "frontend"
+# Security updates are not configured in this file: Dependabot v2 rejects
+# unknown top-level keys, and the former `security-updates:` block made the
+# whole config invalid. Enable "Dependabot security updates" under
+# Settings > Code security instead; they then cover every ecosystem above.

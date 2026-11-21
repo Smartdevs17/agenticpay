@@ -119,6 +119,17 @@ const nextConfig: NextConfig = {
   headers: async () => {
     return [
       {
+        // Static hardening headers. The Content-Security-Policy is set per
+        // request in middleware.ts because it carries a fresh nonce, and so is
+        // X-Frame-Options, because the embeddable forms must stay frameable
+        // (#1466); see lib/csp.ts.
+        source: "/(.*)",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+      {
         // HTTP/2 server push hints for critical assets on every page load
         source: "/(.*)",
         headers: [

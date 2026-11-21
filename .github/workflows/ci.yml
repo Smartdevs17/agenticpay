@@ -44,8 +44,8 @@ jobs:
       contracts: ${{ steps.filter.outputs.contracts }}
       tooling:   ${{ steps.filter.outputs.tooling }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
         id: filter
         with:
           filters: |
@@ -66,9 +66,11 @@ jobs:
               - '.husky/**'
               - '.releaserc.json'
               - '.github/CODEOWNERS'
-              - '.github/workflows/release.yml'
+              # Any workflow or Dependabot change re-runs the action-pin
+              # policy in scripts/workflow-pins.test.mjs (#1468).
+              - '.github/workflows/**'
+              - '.github/dependabot.yml'
               - 'infra/sentry/**'
-              - '.github/workflows/ci.yml'
 
   # ── Backend ───────────────────────────────────────────────────────────────
   backend:
@@ -94,10 +96,10 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -106,7 +108,7 @@ jobs:
       # Cache the installed node_modules between runs with the same lock file.
       # This shaves ~30s off each run after the first on a given branch.
       - name: Cache node_modules
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: backend/node_modules
           key: ${{ runner.os }}-backend-modules-node${{ matrix.node-version }}-${{ hashFiles('backend/package-lock.json') }}
@@ -146,7 +148,7 @@ jobs:
 
       # Local fallback for turbo's cache when the remote cache is not configured.
       - name: Cache turbo artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: node_modules/.cache/turbo
           key: ${{ runner.os }}-turbo-backend-node${{ matrix.node-version }}-${{ github.sha }}
@@ -206,17 +208,17 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Cache node_modules
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: frontend/node_modules
           key: ${{ runner.os }}-frontend-modules-node${{ matrix.node-version }}-${{ hashFiles('frontend/package-lock.json') }}
@@ -225,7 +227,7 @@ jobs:
 
       # Next.js build cache (incremental compilation)
       - name: Cache Next.js build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/frontend/.next/cache
           key: ${{ runner.os }}-nextjs-node${{ matrix.node-version }}-${{ hashFiles('frontend/package-lock.json') }}-${{ hashFiles('frontend/src/**') }}
@@ -265,7 +267,7 @@ jobs:
           fi
 
       - name: Cache turbo artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: node_modules/.cache/turbo
           key: ${{ runner.os }}-turbo-frontend-node${{ matrix.node-version }}-${{ github.sha }}
@@ -294,15 +296,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: "contracts -> target"
 
@@ -321,10 +324,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm

@@ -19,6 +19,7 @@ import { getWebhookAuditLog } from '../services/webhooks/audit.js';
 import {
   enqueueWebhookEvent,
   getWebhookDelivery,
+  getWebhookDispatchStats,
   listDeadLetterQueue,
   listWebhookConfigs,
   listWebhookDeliveries,
@@ -229,5 +230,14 @@ webhooksRouter.get(
   '/dead-letter',
   asyncHandler(async (_req, res) => {
     res.json({ data: listDeadLetterQueue() });
+  })
+);
+
+// Domain-sharded dispatch health (#1462): active shards, backlog, skips,
+// saturation and queue-wait percentiles.
+webhooksRouter.get(
+  '/dispatch-stats',
+  asyncHandler(async (_req, res) => {
+    res.json(getWebhookDispatchStats());
   })
 );

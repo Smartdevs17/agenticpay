@@ -1,6 +1,25 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from './errorHandler.js';
-import { hasPermission, ResourceAction } from '../services/workspaces.js';
+import {
+    getMemberRole,
+    roleHasPermission,
+    type ResourceAction,
+    type WorkspaceRole,
+} from '../services/workspaces.js';
+
+/**
+ * The user's role in a workspace. Uses the scopes the auth middleware
+ * prefetched for this request when they belong to the same user (#1464);
+ * otherwise falls back to a direct lookup, e.g. on routes that set
+ * `req.userId` without going through `authMiddleware`.
+ */
+function resolveRole(req: Request, workspaceId: string, userId: string): WorkspaceRole | undefined {
+    const scopes = req.workspaceScopes;
+    if (scopes && scopes.userId === userId) {
+        return scopes.roles.get(workspaceId);
+    }
+    return getMemberRole(workspaceId, userId);
+}
 
 /**
  * Middleware factory that checks if the authenticated user has the required
@@ -24,7 +43,8 @@ export function requirePermission(action: ResourceAction, getWorkspaceId?: (req:
             return;
         }
 
-        if (!hasPermission(workspaceId, userId, action)) {
+        const role = resolveRole(req, workspaceId, userId);
+        if (!role || !roleHasPermission(role, action)) {
             next(new AppError(403, 'Insufficient permissions for this action', 'FORBIDDEN'));
             return;
         }
@@ -80,9 +100,7 @@ export function requireRole(minimumRole: 'admin' | 'owner') {
             return;
         }
 
-        // Import dynamically to avoid circular deps
-        const { getMemberRole } = require('../services/workspaces.js');
-        const role = getMemberRole(workspaceId, userId);
+        const role = resolveRole(req, workspaceId, userId);
 
         if (!role) {
             next(new AppError(403, 'Not a member of this workspace', 'FORBIDDEN'));

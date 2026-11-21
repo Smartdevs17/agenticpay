@@ -21,8 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: grafana/setup-k6-action@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: grafana/setup-k6-action@c47136d33d365efbeb9ae7266908b5dcf98cdece # v1.3.0
       - name: Run health smoke test
         env:
           BASE_URL: ${{ inputs.base_url }}
@@ -34,7 +34,7 @@ jobs:
         run: k6 run --summary-export=k6-summary.json tests/load/k6/payment-flow.js
       - name: Upload load-test summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: k6-summary
           path: k6-summary.json

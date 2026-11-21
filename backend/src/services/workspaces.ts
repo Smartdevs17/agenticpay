@@ -473,6 +473,25 @@ export function requirePermission(
     }
 }
 
+/** Whether `role` grants `action`. */
+export function roleHasPermission(role: WorkspaceRole, action: ResourceAction): boolean {
+    return ROLE_PERMISSIONS[role].includes(action);
+}
+
+/**
+ * Every workspace `userId` belongs to, with their role, collected in a single
+ * pass over the member store. The auth middleware calls this once per request
+ * so RBAC checks on that request read the result instead of each rescanning
+ * the store (#1464).
+ */
+export function getWorkspaceScopes(userId: string): Map<string, WorkspaceRole> {
+    const scopes = new Map<string, WorkspaceRole>();
+    for (const member of memberStore.values()) {
+        if (member.userId === userId) scopes.set(member.workspaceId, member.role);
+    }
+    return scopes;
+}
+
 export function getRolePermissions(role: WorkspaceRole): ResourceAction[] {
     return [...ROLE_PERMISSIONS[role]];
 }

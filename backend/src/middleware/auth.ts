@@ -25,9 +25,11 @@ import { AppError } from './errorHandler.js';
 import { hmacAuthMiddleware, HEADER_SIGNATURE } from './hmac-auth.js';
 import { tokenAuthMiddleware } from './token-auth.js';
 import { getSession } from '../services/session.js';
-import { lookupApiKeyRecord } from '../services/api-key-registry.js';
+import { lookupApiKey } from '../services/api-key-registry.js';
 import type { AccessTokenClaims } from '../auth/jwt.js';
 import { mergeLogContext } from '../logging/context.js';
+import { getWorkspaceScopes, type WorkspaceRole } from '../services/workspaces.js';
+import { logger } from '../utils/logger.js';
 
 export type AuthMethod = 'session' | 'hmac' | 'token' | 'apiKey';
 
@@ -36,6 +38,80 @@ export interface AuthPrincipal {
   tenantId: string;
   role: string;
   method: AuthMethod;
+}
+
+/**
+ * The principal's workspace memberships (workspace id → role), loaded once
+ * per request right after authentication (#1464). `userId` records whose
+ * scopes these are, so a check for a different user never reads them.
+ */
+export interface WorkspaceScopes {
+  userId: string;
+  roles: ReadonlyMap<string, WorkspaceRole>;
+}
+
+export type WorkspaceScopeLoader = (
+  principal: AuthPrincipal,
+) => ReadonlyMap<string, WorkspaceRole> | Promise<ReadonlyMap<string, WorkspaceRole>>;
+
+export const defaultWorkspaceScopeLoader: WorkspaceScopeLoader = (principal) => getWorkspaceScopes(principal.id);
+
+export interface AuthMiddlewareOptions {
+  /** Loads the principal's workspace scopes; pass `false` to skip prefetching. */
+  loadWorkspaceScopes?: WorkspaceScopeLoader | false;
+}
+
+export interface ScopePrefetchStats {
+  prefetches: number;
+  failures: number;
+  lastDurationMs: number;
+  averageDurationMs: number;
+}
+
+const prefetchStats = { prefetches: 0, failures: 0, lastDurationMs: 0, totalDurationMs: 0 };
+
+/** Scope prefetch counters and timing since process start (or the last reset). */
+export function getScopePrefetchStats(): ScopePrefetchStats {
+  return {
+    prefetches: prefetchStats.prefetches,
+    failures: prefetchStats.failures,
+    lastDurationMs: prefetchStats.lastDurationMs,
+    averageDurationMs:
+      prefetchStats.prefetches === 0 ? 0 : prefetchStats.totalDurationMs / prefetchStats.prefetches,
+  };
+}
+
+export function resetScopePrefetchStatsForTests(): void {
+  prefetchStats.prefetches = 0;
+  prefetchStats.failures = 0;
+  prefetchStats.lastDurationMs = 0;
+  prefetchStats.totalDurationMs = 0;
+}
+
+/**
+ * Attaches the principal's workspace scopes to the request. A loader failure
+ * never fails authentication: the request continues without prefetched
+ * scopes, and RBAC falls back to looking the role up directly, so access
+ * decisions stay correct.
+ */
+async function prefetchWorkspaceScopes(req: Request, principal: AuthPrincipal, load: WorkspaceScopeLoader): Promise<void> {
+  const started = performance.now();
+  try {
+    const roles = await load(principal);
+    req.workspaceScopes = { userId: principal.id, roles };
+    const duration = performance.now() - started;
+    prefetchStats.prefetches += 1;
+    prefetchStats.lastDurationMs = duration;
+    prefetchStats.totalDurationMs += duration;
+  } catch (err) {
+    prefetchStats.failures += 1;
+    req.workspaceScopes = undefined;
+    logger.warn('workspace scope prefetch failed; RBAC will look roles up per check', {
+      principalId: principal.id,
+      method: principal.method,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 // `req.user` is read throughout the codebase (errorHandler, BaseController,
@@ -48,6 +124,8 @@ declare global {
       accessToken?: string;
       /** Verified JWT claims, set by `tokenAuthMiddleware`. */
       accessTokenClaims?: AccessTokenClaims;
+      /** Workspace memberships prefetched by the auth middleware (#1464). */
+      workspaceScopes?: WorkspaceScopes;
     }
   }
 }
@@ -137,7 +215,8 @@ export const apiKeyStrategy: AuthStrategy = {
   applies: (req) => Boolean(getHeader(req, 'x-api-key')),
   async authenticate(req) {
     const key = getHeader(req, 'x-api-key')!;
-    const record = await lookupApiKeyRecord(key);
+    // Renamed from lookupApiKeyRecord in #979; the stale import made this strategy throw.
+    const record = lookupApiKey(key);
     if (!record) throw new AppError(401, 'Invalid API key', 'API_KEY_INVALID');
     return {
       id: record.key,
@@ -157,9 +236,19 @@ export const DEFAULT_AUTH_STRATEGIES: AuthStrategy[] = [sessionStrategy, hmacStr
  * `req.user`. If none of the applicable strategies succeed, the last
  * failure is forwarded to the error handler; if no strategy's credential is
  * present at all, responds 401 "Authentication required".
+ *
+ * After a successful authentication the principal's workspace scopes are
+ * loaded once and attached as `req.workspaceScopes`, so downstream RBAC
+ * checks (`middleware/rbac.ts`) do not each repeat the membership lookup.
  */
-export function createAuthMiddleware(strategies: AuthStrategy[] = DEFAULT_AUTH_STRATEGIES): RequestHandler {
+export function createAuthMiddleware(
+  strategies: AuthStrategy[] = DEFAULT_AUTH_STRATEGIES,
+  options: AuthMiddlewareOptions = {},
+): RequestHandler {
+  const loadScopes = options.loadWorkspaceScopes ?? defaultWorkspaceScopeLoader;
   return async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+    // Never let scopes from an earlier middleware run (or a spoofed object) leak in.
+    req.workspaceScopes = undefined;
     const applicable = strategies.filter((s) => s.applies(req));
     if (applicable.length === 0) {
       next(new AppError(401, 'Authentication required', 'AUTH_REQUIRED'));
@@ -171,6 +260,7 @@ export function createAuthMiddleware(strategies: AuthStrategy[] = DEFAULT_AUTH_S
         const principal = await applicable[i].authenticate(req, res);
         req.user = principal;
         mergeLogContext({ tenantId: principal.tenantId });
+        if (loadScopes) await prefetchWorkspaceScopes(req, principal, loadScopes);
         next();
         return;
       } catch (err) {
