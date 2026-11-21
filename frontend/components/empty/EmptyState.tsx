@@ -1,6 +1,81 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { LucideIcon } from 'lucide-react'
+import { assertNever } from '@/components/common/discriminated-union'
+import { cn } from '@/lib/utils'
+
+export type EmptyStateProps =
+  | {
+      variant?: 'default'
+      icon: LucideIcon
+      title: string
+      description: string
+      action?: {
+        label: string
+        onClick: () => void
+      }
+      className?: string
+    }
+  | {
+      variant: 'action'
+      icon: LucideIcon
+      title: string
+      description: string
+      action: {
+        label: string
+        onClick: () => void
+      }
+      className?: string
+    }
+  | {
+      variant: 'info'
+      icon: LucideIcon
+      title: string
+      description: string
+      action?: never
+      className?: string
+    }
+
+export function EmptyState(props: EmptyStateProps) {
+  const Icon = props.icon
+
+  switch (props.variant ?? 'default') {
+    case 'default':
+      return (
+        <div className={cn('flex flex-col items-center justify-center py-12 px-4', props.className)}>
+          <Icon className="h-12 w-12 text-gray-400 mb-4" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">{props.title}</h3>
+          <p className="text-sm text-gray-600 text-center max-w-md mb-4">{props.description}</p>
+          {props.action && (
+            <Button onClick={props.action.onClick}>{props.action.label}</Button>
+          )}
+        </div>
+      )
+    case 'action':
+      return (
+        <div className={cn('flex flex-col items-center justify-center py-12 px-4', props.className)}>
+          <Icon className="h-12 w-12 text-gray-400 mb-4" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">{props.title}</h3>
+          <p className="text-sm text-gray-600 text-center max-w-md mb-4">{props.description}</p>
+          <Button onClick={props.action.onClick}>{props.action.label}</Button>
+        </div>
+      )
+    case 'info':
+      return (
+        <div className={cn('flex flex-col items-center justify-center py-12 px-4', props.className)}>
+          <Icon className="h-12 w-12 text-gray-400 mb-4" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">{props.title}</h3>
+          <p className="text-sm text-gray-600 text-center max-w-md mb-4">{props.description}</p>
+        </div>
+      )
+    default: {
+      const _exhaustive: never = props
+      return assertNever(_exhaustive)
+    }
+  }
+}
 
 export interface PollingConfig {
   initialInterval?: number
