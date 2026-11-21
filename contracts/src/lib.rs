@@ -1,5 +1,10 @@
 #![no_std]
 
+pub mod anchor;
+pub mod factoring;
+pub mod policies;
+pub mod spend_policy;
+
 #[cfg(test)]
 extern crate std;
 
