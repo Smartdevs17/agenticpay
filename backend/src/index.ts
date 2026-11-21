@@ -8,6 +8,7 @@ import { apiExpressRateLimit } from './middleware/express-api-rate-limit.js';
 import { compressionMiddleware, getCompressionMetrics } from './middleware/compression.js';
 import { poolMetrics } from './config/database.js';
 import { config } from './config.js';
+import { createApiV1Router } from './routes/index.js';
 import { versionMiddleware } from './middleware/versioning.js';
 import { verificationRouter } from './routes/verification.js';
 import { invoiceRouter } from './routes/invoice.js';
@@ -302,118 +303,7 @@ app.use(auditSensitiveOperations());
 
 app.use('/api/', versionMiddleware);
 
-const apiV1Router = express.Router();
-apiV1Router.use('/verification', verificationRouter);
-apiV1Router.use('/invoice', invoiceLimiter, invoiceRouter);
-apiV1Router.use('/stellar', stellarRouter);
-apiV1Router.use('/catalog', catalogRouter);
-apiV1Router.use('/jobs', jobsRouter);
-apiV1Router.use('/queue', queueRouter);
-apiV1Router.use('/queue', bullMQMonitorRouter);
-apiV1Router.use('/sla', slaRouter);
-apiV1Router.use('/onboarding', onboardingRouter);
-apiV1Router.use('/legacy', legacyRouter);
-apiV1Router.use('/flags', flagsRouter);
-apiV1Router.use('/rate-limit', rateLimitAnalyticsRouter);
-apiV1Router.use('/zk-identity', zkIdentityRouter);
-apiV1Router.use('/kyb', kybRouter);
-apiV1Router.use('/kyc', kycRouter);
-apiV1Router.use('/batch', batchRouter);
-apiV1Router.use('/relayer', relayerRouter);
-apiV1Router.use('/queue/payments', paymentQueueRouter);
-apiV1Router.use('/splits', splitsRouter);
-apiV1Router.use('/refunds', refundsRouter);
-apiV1Router.use('/allowances', allowancesRouter);
-  apiV1Router.use('/payouts', payoutsRouter);
-  apiV1Router.use('/reports', reportsRouter);
-  // Transaction reconciliation report — Issue #937
-  apiV1Router.use('/reconciliation', reconciliationRouter);
-apiV1Router.use('/forms', formsRouter);
-// Webhook management and verification
-apiV1Router.use('/webhooks', webhooksRouter);
-apiV1Router.use('/disputes', disputeRoutes);
-apiV1Router.use('/emails', emailRouter);
-apiV1Router.use('/portfolio', portfolioRouter);
-apiV1Router.use('/backup', backupRouter);
-apiV1Router.use('/ip-allowlist', ipAllowlistRouter);
-apiV1Router.use('/push', pushRouter);
-// Stripe card payments
-apiV1Router.use('/stripe', stripeRouter);
-// Automated tax reporting, export, and calendar — Issues #690–#693
-apiV1Router.use('/tax-reporting', taxReportingRouter);
-// Cross-chain wallet abstraction & unified balance aggregation — Issue #711
-apiV1Router.use('/wallet', walletRouter);
-// GDPR data subject rights: erasure, portability, consent, retention — Issue #713
-apiV1Router.use('/gdpr', gdprRouter);
-// GDPR-aware data export jobs & scheduling — Issue #713
-apiV1Router.use('/data-export', dataExportRouter);
-// Automated security scanning findings & remediation tracking — Issue #712
-apiV1Router.use('/security', securityRouter);
-// Project collaboration: threaded comments, reactions, activity feed — Issue #714
-apiV1Router.use('/comments', commentsRouter);
-// Real-time collaboration: presence, field locks, edit history — Issue #714
-apiV1Router.use('/collaboration', collaborationRouter);
-// Multi-chain payment processing via the PaymentProvider strategy pattern — Issue #726
-apiV1Router.use('/payment-strategies', paymentStrategiesRouter);
-// Large dataset streaming exports
-apiV1Router.use('/exports', streamingExportRouter);
-// Performance and pool monitoring
-apiV1Router.use('/monitoring', poolMonitorRouter);
-apiV1Router.use('/database', databaseRouter);
-// Soft delete archival sweep + restore — Issue #884
-apiV1Router.use('/archive', archiveRouter);
-// Full-text search — Issue #885
-apiV1Router.use('/search', searchRouter);
-apiV1Router.use('/analytics/cohorts', cohortAnalyticsRouter);
-apiV1Router.use('/analytics/churn', churnPredictionRouter);
-apiV1Router.use('/integrations/slack', slackRouter);
-apiV1Router.use('/integrations/github', githubIntegrationRouter);
-apiV1Router.use('/integrations/woocommerce', wooCommerceRouter);
-apiV1Router.use('/integrations/salesforce', salesforceRouter);
-apiV1Router.use('/integrations/xero', xeroRouter);
-apiV1Router.use('/integrations/quickbooks', quickBooksRouter);
-apiV1Router.use('/plugins', pluginsRouter);
-apiV1Router.use('/funnels', funnelTrackingRouter);
-apiV1Router.use('/forecast/ml', mlForecastRouter);
-apiV1Router.use('/ab-tests', abTestingRouter);
-apiV1Router.use('/customer-health', customerHealthRouter);
-apiV1Router.use('/reports/pnl', pnlRouter);
-apiV1Router.use('/clv', clvRouter);
-apiV1Router.use('/payment-methods/analytics', paymentMethodAnalyticsRouter);
-apiV1Router.use('/cash-flow', cashFlowRouter);
-apiV1Router.use('/nfc', nfcRouter);
-apiV1Router.use('/cache', cacheRouter);
-apiV1Router.use('/circuit-breaker', circuitBreakerRouter);
-apiV1Router.use('/fraud-detection', fraudDetectionRouter);
-apiV1Router.use('/bridge', bridgeRouter);
-apiV1Router.use('/tokenization', tokenizationRouter);
-apiV1Router.use('/routing', routingRouter);
-apiV1Router.use('/escrow', escrowRouter);
-apiV1Router.use('/disputes', disputesRouter);
-apiV1Router.use('/subscriptions', subscriptionsRouter);
-apiV1Router.use('/workspaces', workspacesRouter);
-apiV1Router.use('/marketplace-escrow', marketplaceEscrowRouter);
-apiV1Router.use('/teams', teamsRouter);
-apiV1Router.use('/wallet-payments', walletPaymentsRouter);
-apiV1Router.use('/merchant-audit', merchantAuditRouter);
-apiV1Router.use('/billing', subscriptionBillingRouter);
-apiV1Router.use('/installments', installmentsRouter);
-apiV1Router.use('/job-queue', jobQueueRouter);
-apiV1Router.use('/recurring-payments', recurringBillingRouter);
-apiV1Router.use('/split-payments', splitPaymentsRouter);
-apiV1Router.use('/transfers', transfersRouter);
-// 3D Secure card-payment authentication — Issue #925
-apiV1Router.use('/3ds', threeDSRouter);
-// Merchant onboarding risk tiering — Issue #928
-apiV1Router.use('/merchant-risk', merchantRiskRouter);
-// Chargeback management with evidence submission — Issue #926
-apiV1Router.use('/chargebacks', chargebacksRouter);
-apiV1Router.get('/compression/metrics', (_req, res) => {
-  res.json(getCompressionMetrics());
-});
-apiV1Router.get('/pool/metrics', (_req, res) => {
-  res.json(poolMetrics.snapshot());
-});
+const apiV1Router = createApiV1Router({ invoiceLimiter });
 
 app.use('/api/v1', ipAllowlistMiddleware(), apiV1Router);
 
