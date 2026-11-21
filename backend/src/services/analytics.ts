@@ -1,6 +1,8 @@
 // Real-time payment analytics service — Issue #192
 // Tracks payment funnel metrics, time-series revenue, and anomaly detection.
 
+import { analyticsRollupCache, invalidateAnalyticsRollups } from './analytics-cache.js';
+
 export interface FunnelStep {
   stage: 'initiated' | 'confirmed' | 'completed' | 'failed';
   count: number;
@@ -110,15 +112,47 @@ export class PaymentAnalyticsService {
   private readonly dropRateThreshold = 0.25; // alert if failure rate > 25%
   private readonly volumeSpikeMultiplier = 3; // alert if volume > 3x baseline
 
-  trackPayment(payment: Omit<PaymentRecord, 'timestamp'> & { timestamp?: Date }): void {
+  trackPayment(payment: Omit<PaymentRecord, 'timestamp'> & { timestamp?: Date; tenantId?: string }): void {
+    const ts = payment.timestamp ?? new Date();
     this.payments.push({
       ...payment,
-      timestamp: payment.timestamp ?? new Date(),
+      timestamp: ts,
     });
 
     // Keep only last 7 days of in-memory data
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
     this.payments = this.payments.filter((p) => p.timestamp.getTime() > cutoff);
+
+    // Invalidate cached analytics rollups on incoming payment write
+    const tenantId = (payment as any).tenantId || 'default';
+    invalidateAnalyticsRollups({ tenantId, timestamp: ts }).catch(() => {});
+  }
+
+  async buildTimeSeriesCached(
+    granularity: 'hour' | 'day' = 'hour',
+    since?: Date,
+    tenantId = 'default',
+  ): Promise<RevenuePoint[]> {
+    return analyticsRollupCache.getOrCompute(
+      {
+        tenantId,
+        metric: 'timeSeries',
+        partitionDate: since,
+        filters: { granularity },
+      },
+      async () => this.buildTimeSeries(granularity, since),
+    );
+  }
+
+  async buildSummaryCached(since?: Date, tenantId = 'default'): Promise<AnalyticsSummary> {
+    return analyticsRollupCache.getOrCompute(
+      {
+        tenantId,
+        metric: 'summary',
+        partitionDate: since,
+      },
+      async () => this.buildSummary(since),
+    );
   }
 
   buildFunnel(since?: Date): FunnelStep[] {

@@ -6,6 +6,7 @@
  */
 
 import { prisma, PrismaClient } from '../lib/prisma.js';
+import { invalidateAnalyticsRollups } from '../services/analytics-cache.js';
 
 type DbClient = PrismaClient | any;
 
@@ -86,25 +87,34 @@ export class PaymentRepository {
   }
 
   async create(data: PaymentCreateInput) {
-    return this.db.payment.create({
+    const res = await this.db.payment.create({
       data,
     });
+    const tenantId = (data as any).tenantId || (res as any)?.tenantId || 'default';
+    invalidateAnalyticsRollups({ tenantId, timestamp: (res as any)?.createdAt }).catch(() => {});
+    return res;
   }
 
   async update(id: string, data: PaymentUpdateInput) {
-    return this.db.payment.update({
+    const res = await this.db.payment.update({
       where: { id },
       data,
     });
+    const tenantId = (res as any)?.tenantId || 'default';
+    invalidateAnalyticsRollups({ tenantId, timestamp: (res as any)?.updatedAt }).catch(() => {});
+    return res;
   }
 
   async updateStatus(id: string, status: string, txHash?: string) {
     const data: Record<string, unknown> = { status };
     if (txHash) data.txHash = txHash;
-    return this.db.payment.update({
+    const res = await this.db.payment.update({
       where: { id },
       data,
     });
+    const tenantId = (res as any)?.tenantId || 'default';
+    invalidateAnalyticsRollups({ tenantId, timestamp: (res as any)?.updatedAt }).catch(() => {});
+    return res;
   }
 
   async countByStatus(status?: string): Promise<number> {

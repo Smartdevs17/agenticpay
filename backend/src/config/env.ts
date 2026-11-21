@@ -31,6 +31,12 @@ const envSchema = z.object({
   REDIS_URL: z.string().default(''),
   REDIS_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
   CACHE_WARMING_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
+  // Analytics Rollup Cache (Issue #1458)
+  ANALYTICS_CACHE_ENABLED: z.coerce.string().transform((val) => val !== 'false').default('true'),
+  ANALYTICS_CACHE_OPEN_TTL_SECONDS: z.coerce.number().default(60),
+  ANALYTICS_CACHE_CLOSED_TTL_SECONDS: z.coerce.number().default(86400),
+  ANALYTICS_CACHE_MAX_ENTRIES: z.coerce.number().default(2000),
+  ANALYTICS_CACHE_SCHEMA_VERSION: z.coerce.number().default(1),
   DB_QUERY_LOGGING_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),
   DB_SLOW_QUERY_THRESHOLD_MS: z.coerce.number().default(100),
   // Transaction monitor (Issue #402)
