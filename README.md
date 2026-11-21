@@ -603,15 +603,46 @@ cargo build --target wasm32-unknown-unknown --release
 
 ### Verify the WASM hash matches the deployed contract
 
-```bash
-# Get the on-chain WASM hash
-soroban contract inspect --id $NEXT_PUBLIC_CONTRACT_ID --network testnet
+`scripts/verify-contract-hash.sh` fetches the deployed WASM from Stellar,
+hashes it, compares it with the locally built WASM and with
+`contracts/build-manifest.json`:
 
-# Compute the local WASM hash
-sha256sum target/wasm32-unknown-unknown/release/agenticpay.wasm
+```bash
+./scripts/verify-contract-hash.sh --contract-id $SOROBAN_CONTRACT_ID --network testnet
 ```
 
-The SHA-256 hash of the locally compiled WASM should match the on-chain contract hash, confirming the deployed bytecode was produced from this source.
+After a verified deployment, regenerate the manifest that the backend reads at
+startup (commit it with the release):
+
+```bash
+./scripts/verify-contract-hash.sh --contract-id $SOROBAN_CONTRACT_ID --network testnet --write
+```
+
+The manifest records the contract ID, network and expected WASM SHA-256:
+
+```json
+{
+  "contractId": "C...",
+  "network": "testnet",
+  "wasmSha256": "<64 hex chars>",
+  "wasmFile": "contracts/target/wasm32-unknown-unknown/release/agenticpay.wasm",
+  "builtAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+At startup the backend fetches the deployed bytecode via Soroban RPC, hashes it
+and compares it with the manifest. Behaviour is controlled by
+`CONTRACT_HASH_VERIFICATION`:
+
+| Value     | Behaviour                                                        |
+| --------- | ---------------------------------------------------------------- |
+| `enforce` | Default. Refuse to start on any mismatch or manifest error.       |
+| `warn`    | Log the failure and continue starting (rollout / debugging only). |
+| `off`     | Skip the check entirely.                                          |
+
+Verification is active only when `SOROBAN_CONTRACT_ID` is set. On the public
+network `SOROBAN_RPC_URL` is required; on testnet it defaults to
+`https://soroban-testnet.stellar.org`.
 
 ### Verification status
 

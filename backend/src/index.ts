@@ -630,7 +630,13 @@ server.listen(config.server.port, () => {
 const shutdown = (signal: string) => {
   console.log(`${signal} received. Starting graceful shutdown...`);
 
-  server.close(() => {
+  const serverInstance = server;
+  if (!serverInstance) {
+    console.log('HTTP server was never started. Exiting.');
+    process.exit(0);
+  }
+
+  serverInstance.close(() => {
     console.log('HTTP server closed.');
 
     try {
@@ -695,5 +701,11 @@ const shutdown = (signal: string) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+bootstrap().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`AgenticPay backend failed to start: ${message}`);
+  process.exit(1);
+});
 
 export default app;

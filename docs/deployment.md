@@ -41,7 +41,11 @@ GITHUB_TOKEN=ghp_...
 STELLAR_NETWORK=MAINNET
 STELLAR_RPC_URL=https://soroban-testnet.stellar.org
 SOROBAN_CONTRACT_ID=... # Updated after contract deployment
+SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+CONTRACT_HASH_VERIFICATION=enforce
 ```
+
+The backend verifies at startup that the bytecode deployed under `SOROBAN_CONTRACT_ID` matches `contracts/build-manifest.json`. With the default `enforce` mode it exits instead of serving traffic on a mismatch. Set `CONTRACT_HASH_VERIFICATION=warn` only for a controlled rollout.
 
 ### 3. Frontend Web Application (`frontend/.env.local`)
 Create a `.env.local` file in the `frontend/` directory:
@@ -74,6 +78,14 @@ AgenticPay must be deployed in a specific order: Smart Contracts first, then Bac
      --network mainnet
    ```
 4. **Save the output Contract ID**. You will need to add this to both the Backend and Frontend `.env` files.
+5. **Record and verify the build hash**. Generate the manifest the backend checks at startup and commit it with the release:
+   ```bash
+   ./scripts/verify-contract-hash.sh \
+     --contract-id "$SOROBAN_CONTRACT_ID" \
+     --network testnet \
+     --write
+   ```
+   The script fails if the deployed bytecode differs from the local WASM, so a mismatch is caught before the backend is rolled out.
 
 ### Step 2: Deploy the Backend API Server
 
