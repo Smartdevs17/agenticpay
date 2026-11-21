@@ -1,0 +1,31 @@
+{
+  "name": "@agenticpay/sdk-core",
+  "version": "0.1.0",
+  "description": "Shared Stellar SDK wrappers and utilities for AgenticPay",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^12.0.0"
+  },
+  "devDependencies": {
+    "@agenticpay/typescript-config": "*",
+    "@types/node": "^22.5.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.1"
+  }
+}

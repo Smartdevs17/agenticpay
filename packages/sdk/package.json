@@ -25,6 +25,9 @@
   ],
   "license": "MIT",
   "sideEffects": false,
+  "dependencies": {
+    "@agenticpay/sdk-core": "*"
+  },
   "publishConfig": {
     "access": "public"
   },

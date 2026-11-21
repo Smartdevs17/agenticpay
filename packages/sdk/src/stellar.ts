@@ -1,6 +1,14 @@
 import { AgenticPayClient } from './client.js';
+import type { StellarNetwork } from '@agenticpay/sdk-core';
 
-export type StellarNetwork = 'testnet' | 'public';
+export type { StellarNetwork };
+export {
+  isValidStellarAddress,
+  isValidContractId,
+  isValidTransactionHash,
+  parseAsset,
+  formatAmount,
+} from '@agenticpay/sdk-core';
 
 export type StellarTransaction = {
   hash: string;

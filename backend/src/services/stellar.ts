@@ -3,6 +3,17 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as StellarSdk from '@stellar/stellar-sdk';
+import {
+  isValidStellarAddress,
+  isValidTransactionHash,
+  isValidContractId,
+  computeContractWasmHash,
+  parseContractBuildManifest,
+  InvalidStellarInputError,
+  getHorizonUrl,
+  getNetworkPassphrase,
+  type ContractBuildManifest,
+} from '@agenticpay/sdk-core';
 import { config } from '../config/env.js';
 import { withQueryProfiling } from '../config/database.js';
 import { withCircuitBreaker, CircuitBreakerError } from '../middleware/circuit-breaker.js';
@@ -34,12 +45,7 @@ export class ValidationError extends Error {
   }
 }
 
-export class InvalidStellarInputError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'InvalidStellarInputError';
-  }
-}
+export { InvalidStellarInputError };
 
 export class UnitOfWorkError extends Error {
   operation: string;
@@ -836,15 +842,7 @@ export function getFeeHistory() {
   return gasEstimator.getFeeHistory();
 }
 
-export function isValidStellarAddress(address: string) {
-  if (!address?.trim()) return false;
-  return StellarSdk.StrKey.isValidEd25519PublicKey(address);
-}
-
-export function isValidTransactionHash(hash: string) {
-  if (!hash?.trim()) return false;
-  return /^[A-Fa-f0-9]{64}$/.test(hash);
-}
+export { isValidStellarAddress, isValidTransactionHash };
 
 function assertValidStellarAddress(address: string) {
   if (!isValidStellarAddress(address)) {
@@ -966,58 +964,7 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function isValidContractId(contractId: string): boolean {
-  if (!contractId?.trim()) {
-    return false;
-  }
-
-  return StellarSdk.StrKey.isValidContract(contractId.trim());
-}
-
-/** SHA-256 of the raw WASM bytecode, hex encoded (the format Soroban uses). */
-export function computeContractWasmHash(wasm: Uint8Array): string {
-  return createHash('sha256').update(wasm).digest('hex');
-}
-
-export function parseContractBuildManifest(raw: string): ContractBuildManifest {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new ContractHashVerificationError('Contract build manifest is not valid JSON', 'MANIFEST_INVALID');
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new ContractHashVerificationError('Contract build manifest must be a JSON object', 'MANIFEST_INVALID');
-  }
-
-  const record = parsed as Record<string, unknown>;
-  const contractId = typeof record.contractId === 'string' ? record.contractId.trim() : '';
-  const network = record.network;
-  const wasmSha256 = typeof record.wasmSha256 === 'string' ? record.wasmSha256.trim().toLowerCase() : '';
-
-  if (!contractId) {
-    throw new ContractHashVerificationError('Contract build manifest is missing contractId', 'MANIFEST_INVALID');
-  }
-  if (!isValidContractId(contractId)) {
-    throw new ContractHashVerificationError('Contract build manifest contains an invalid contractId', 'MANIFEST_INVALID_CONTRACT_ID');
-  }
-  if (network !== 'testnet' && network !== 'public') {
-    throw new ContractHashVerificationError('Contract build manifest network must be "testnet" or "public"', 'MANIFEST_INVALID_NETWORK');
-  }
-  if (!WASM_SHA256_PATTERN.test(wasmSha256)) {
-    throw new ContractHashVerificationError('Contract build manifest wasmSha256 must be a 64-character hex SHA-256 hash', 'MANIFEST_INVALID_HASH');
-  }
-
-  return {
-    contractId,
-    network,
-    wasmSha256,
-    wasmFile: typeof record.wasmFile === 'string' ? record.wasmFile : undefined,
-    builtAt: typeof record.builtAt === 'string' ? record.builtAt : undefined,
-  };
-}
+export { isValidContractId, computeContractWasmHash, parseContractBuildManifest };
 
 /** Resolves the manifest path, trying the repo root and the backend directory. */
 export function resolveContractBuildManifestPath(explicit?: string): string {
