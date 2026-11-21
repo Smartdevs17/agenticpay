@@ -1,10 +1,7 @@
 // Sandbox Database Service
-// Provides database persistence for sandbox accounts and transactions
+// Provides database persistence for sandbox accounts and transactions via SandboxRepository (Issue #1404)
 
-import { PrismaClient } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
-
-const prisma = new PrismaClient();
+import { SandboxRepository, defaultSandboxRepository } from '../repositories/SandboxRepository.js';
 
 export interface CreateSandboxAccountParams {
   tenantId: string;
@@ -28,21 +25,21 @@ export interface CreateSandboxTransactionParams {
 }
 
 export class SandboxDatabaseService {
+  constructor(private readonly repo: SandboxRepository = defaultSandboxRepository) {}
+
   /**
    * Create a sandbox account with fake balance
    */
   async createAccount(params: CreateSandboxAccountParams) {
-    const account = await prisma.sandboxAccount.create({
-      data: {
-        tenantId: params.tenantId,
-        userId: params.userId,
-        name: params.name,
-        email: params.email,
-        walletAddress: params.walletAddress,
-        fakeBalance: params.fakeBalance,
-        currency: params.currency || 'XLM',
-        expiresAt: params.expiresAt,
-      },
+    const account = await this.repo.createAccount({
+      tenantId: params.tenantId,
+      userId: params.userId,
+      name: params.name,
+      email: params.email,
+      walletAddress: params.walletAddress,
+      fakeBalance: params.fakeBalance,
+      currency: params.currency || 'XLM',
+      expiresAt: params.expiresAt,
     });
 
     return account;
@@ -52,13 +49,10 @@ export class SandboxDatabaseService {
    * Get sandbox account by ID
    */
   async getAccountById(id: string) {
-    return await prisma.sandboxAccount.findUnique({
-      where: { id },
-      include: {
-        transactions: {
-          orderBy: { createdAt: 'desc' },
-          take: 50,
-        },
+    return await this.repo.findAccountById(id, {
+      transactions: {
+        orderBy: { createdAt: 'desc' },
+        take: 50,
       },
     });
   }
@@ -67,13 +61,10 @@ export class SandboxDatabaseService {
    * Get sandbox account by wallet address
    */
   async getAccountByWalletAddress(walletAddress: string) {
-    return await prisma.sandboxAccount.findUnique({
-      where: { walletAddress },
-      include: {
-        transactions: {
-          orderBy: { createdAt: 'desc' },
-          take: 50,
-        },
+    return await this.repo.findAccountByWalletAddress(walletAddress, {
+      transactions: {
+        orderBy: { createdAt: 'desc' },
+        take: 50,
       },
     });
   }
@@ -82,18 +73,10 @@ export class SandboxDatabaseService {
    * Get sandbox account by tenant and email
    */
   async getAccountByTenantEmail(tenantId: string, email: string) {
-    return await prisma.sandboxAccount.findUnique({
-      where: {
-        tenantId_email: {
-          tenantId,
-          email,
-        },
-      },
-      include: {
-        transactions: {
-          orderBy: { createdAt: 'desc' },
-          take: 50,
-        },
+    return await this.repo.findAccountByTenantEmail(tenantId, email, {
+      transactions: {
+        orderBy: { createdAt: 'desc' },
+        take: 50,
       },
     });
   }
@@ -107,13 +90,9 @@ export class SandboxDatabaseService {
       where.isActive = true;
     }
 
-    return await prisma.sandboxAccount.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        _count: {
-          select: { transactions: true },
-        },
+    return await this.repo.listAccounts(where, { createdAt: 'desc' }, {
+      _count: {
+        select: { transactions: true },
       },
     });
   }
@@ -122,30 +101,21 @@ export class SandboxDatabaseService {
    * Update account balance
    */
   async updateAccountBalance(accountId: string, newBalance: number) {
-    return await prisma.sandboxAccount.update({
-      where: { id: accountId },
-      data: { fakeBalance: newBalance },
-    });
+    return await this.repo.updateAccount(accountId, { fakeBalance: newBalance });
   }
 
   /**
    * Deactivate sandbox account
    */
   async deactivateAccount(accountId: string) {
-    return await prisma.sandboxAccount.update({
-      where: { id: accountId },
-      data: { isActive: false },
-    });
+    return await this.repo.updateAccount(accountId, { isActive: false });
   }
 
   /**
    * Delete sandbox account (soft delete)
    */
   async deleteAccount(accountId: string) {
-    return await prisma.sandboxAccount.update({
-      where: { id: accountId },
-      data: { deletedAt: new Date() },
-    });
+    return await this.repo.updateAccount(accountId, { deletedAt: new Date() });
   }
 
   /**
@@ -154,17 +124,15 @@ export class SandboxDatabaseService {
   async createTransaction(params: CreateSandboxTransactionParams) {
     const txHash = this.generateTxHash();
 
-    const transaction = await prisma.sandboxTransaction.create({
-      data: {
-        accountId: params.accountId,
-        txHash,
-        fromAddress: params.fromAddress,
-        toAddress: params.toAddress,
-        amount: params.amount,
-        currency: params.currency || 'XLM',
-        type: params.type || 'payment',
-        mockData: params.mockData,
-      },
+    const transaction = await this.repo.createTransaction({
+      accountId: params.accountId,
+      txHash,
+      fromAddress: params.fromAddress,
+      toAddress: params.toAddress,
+      amount: params.amount,
+      currency: params.currency || 'XLM',
+      type: params.type || 'payment',
+      mockData: params.mockData,
     });
 
     return transaction;
@@ -174,11 +142,8 @@ export class SandboxDatabaseService {
    * Get transaction by hash
    */
   async getTransactionByHash(txHash: string) {
-    return await prisma.sandboxTransaction.findUnique({
-      where: { txHash },
-      include: {
-        account: true,
-      },
+    return await this.repo.findTransactionByHash(txHash, {
+      account: true,
     });
   }
 
@@ -191,10 +156,7 @@ export class SandboxDatabaseService {
       updateData.confirmedAt = new Date();
     }
 
-    return await prisma.sandboxTransaction.update({
-      where: { txHash },
-      data: updateData,
-    });
+    return await this.repo.updateTransaction(txHash, updateData);
   }
 
   /**
@@ -206,10 +168,7 @@ export class SandboxDatabaseService {
       where.status = options.status;
     }
 
-    return await prisma.sandboxTransaction.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
+    return await this.repo.listTransactions(where, { createdAt: 'desc' });
   }
 
   /**
@@ -217,15 +176,11 @@ export class SandboxDatabaseService {
    */
   async getTenantStatistics(tenantId: string) {
     const [accountCount, transactionCount, totalBalance] = await Promise.all([
-      prisma.sandboxAccount.count({
-        where: { tenantId, isActive: true },
+      this.repo.countAccounts({ tenantId, isActive: true }),
+      this.repo.countTransactions({
+        account: { tenantId },
       }),
-      prisma.sandboxTransaction.count({
-        where: {
-          account: { tenantId },
-        },
-      }),
-      prisma.sandboxAccount.aggregate({
+      this.repo.aggregateAccounts({
         where: { tenantId, isActive: true },
         _sum: { fakeBalance: true },
       }),
@@ -242,26 +197,19 @@ export class SandboxDatabaseService {
    * Cleanup expired sandbox accounts
    */
   async cleanupExpiredAccounts() {
-    const expiredAccounts = await prisma.sandboxAccount.findMany({
-      where: {
-        expiresAt: {
-          lte: new Date(),
-        },
-        isActive: true,
-      },
-    });
+    const expiredAccounts = await this.repo.findExpiredAccounts(new Date());
 
-    const deactivated = await prisma.sandboxAccount.updateMany({
-      where: {
+    const deactivated = await this.repo.updateManyAccounts(
+      {
         expiresAt: {
           lte: new Date(),
         },
         isActive: true,
       },
-      data: {
+      {
         isActive: false,
-      },
-    });
+      }
+    );
 
     return {
       deactivatedCount: deactivated.count,
@@ -276,26 +224,22 @@ export class SandboxDatabaseService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOld);
 
-    const deletedTransactions = await prisma.sandboxTransaction.deleteMany({
-      where: {
-        createdAt: {
-          lte: cutoffDate,
-        },
-        account: {
-          isActive: false,
-        },
+    const deletedTransactions = await this.repo.deleteManyTransactions({
+      createdAt: {
+        lte: cutoffDate,
+      },
+      account: {
+        isActive: false,
       },
     });
 
-    const deletedAccounts = await prisma.sandboxAccount.deleteMany({
-      where: {
-        createdAt: {
-          lte: cutoffDate,
-        },
-        isActive: false,
-        deletedAt: {
-          not: null,
-        },
+    const deletedAccounts = await this.repo.deleteManyAccounts({
+      createdAt: {
+        lte: cutoffDate,
+      },
+      isActive: false,
+      deletedAt: {
+        not: null,
       },
     });
 

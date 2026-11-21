@@ -2,7 +2,7 @@ import webpush from 'web-push';
 const { setVapidDetails } = webpush;
 import { config } from '../config.js';
 import { generateVapidKeys, VapidKeys } from './vapid.js';
-import { prisma } from '../db.js';
+import { NotificationRepository, defaultNotificationRepository } from '../repositories/NotificationRepository.js';
 import { NotificationCategory } from '@prisma/client';
 
 interface PushSubscriptionInput {
@@ -48,7 +48,7 @@ interface NotificationPreferences {
 class PushService {
   private vapidKeys: VapidKeys | null = null;
 
-  constructor() {
+  constructor(private readonly repo: NotificationRepository = defaultNotificationRepository) {
     this.initializeVapidKeys();
   }
 
@@ -86,41 +86,37 @@ class PushService {
   ): Promise<{ success: boolean; subscriptionId: string }> {
     try {
       // Check if subscription already exists
-      const existing = await prisma.pushSubscription.findFirst({
-        where: {
-          tenantId,
-          userId,
-          endpoint: subscription.endpoint,
-        },
+      const existing = await this.repo.findFirstSubscription({
+        tenantId,
+        userId,
+        endpoint: subscription.endpoint,
       });
 
       let subscriptionId: string;
 
       if (existing) {
         // Update existing subscription
-        await prisma.pushSubscription.update({
-          where: { id: existing.id },
-          data: {
+        await this.repo.updateSubscription(
+          { id: existing.id },
+          {
             auth: subscription.keys.auth,
             p256dh: subscription.keys.p256dh,
             userAgent: userAgent || existing.userAgent,
             isActive: true,
             lastUsedAt: new Date(),
-          },
-        });
+          }
+        );
         subscriptionId = existing.id;
       } else {
         // Create new subscription
-        const newSubscription = await prisma.pushSubscription.create({
-          data: {
-            tenantId,
-            userId,
-            endpoint: subscription.endpoint,
-            auth: subscription.keys.auth,
-            p256dh: subscription.keys.p256dh,
-            userAgent,
-            isActive: true,
-          },
+        const newSubscription = await this.repo.createSubscription({
+          tenantId,
+          userId,
+          endpoint: subscription.endpoint,
+          auth: subscription.keys.auth,
+          p256dh: subscription.keys.p256dh,
+          userAgent,
+          isActive: true,
         });
         subscriptionId = newSubscription.id;
       }
@@ -135,17 +131,17 @@ class PushService {
 
   async unsubscribe(tenantId: string, userId: string, endpoint: string): Promise<void> {
     try {
-      await prisma.pushSubscription.updateMany({
-        where: {
+      await this.repo.updateManySubscriptions(
+        {
           tenantId,
           userId,
           endpoint,
         },
-        data: {
+        {
           isActive: false,
           deletedAt: new Date(),
-        },
-      });
+        }
+      );
 
       console.log(`[Push] User ${userId} unsubscribed from ${endpoint}`);
     } catch (error) {
@@ -198,7 +194,7 @@ class PushService {
 
       if (categoryPreferenceMap[category] && !preferences[categoryPreferenceMap[category]]) {
         // Create notification log with skipped status
-        const log = await prisma.notificationLog.create({
+        const log = await this.repo.createNotificationLog({
           data: {
             tenantId,
             userId,
@@ -217,13 +213,11 @@ class PushService {
       }
 
       // Get active subscriptions
-      const subscriptions = await prisma.pushSubscription.findMany({
-        where: {
-          tenantId,
-          userId,
-          isActive: true,
-          deletedAt: null,
-        },
+      const subscriptions = await this.repo.findManySubscriptions({
+        tenantId,
+        userId,
+        isActive: true,
+        deletedAt: null,
       });
 
       const payload: PushNotificationPayload = {
@@ -246,7 +240,7 @@ class PushService {
       let failed = 0;
 
       // Create notification log
-      const notificationLog = await prisma.notificationLog.create({
+      const notificationLog = await this.repo.createNotificationLog({
         data: {
           tenantId,
           userId,
@@ -267,20 +261,20 @@ class PushService {
           await webpush.sendNotification(subscription, JSON.stringify(payload));
           
           // Update subscription last used time
-          await prisma.pushSubscription.update({
-            where: { id: subscription.id },
-            data: { lastUsedAt: new Date() },
-          });
+          await this.repo.updateSubscription(
+            { id: subscription.id },
+            { lastUsedAt: new Date() }
+          );
 
           // Update notification log
-          await prisma.notificationLog.update({
-            where: { id: notificationLog.id },
-            data: {
+          await this.repo.updateNotificationLog(
+            { id: notificationLog.id },
+            {
               subscriptionId: subscription.id,
               status: 'sent',
               sentAt: new Date(),
-            },
-          });
+            }
+          );
 
           sent++;
         } catch (error) {
@@ -294,27 +288,27 @@ class PushService {
           }
 
           // Log error
-          await prisma.notificationLog.update({
-            where: { id: notificationLog.id },
-            data: {
+          await this.repo.updateNotificationLog(
+            { id: notificationLog.id },
+            {
               subscriptionId: subscription.id,
               status: 'failed',
               error: String(error),
               retryCount: 1,
-            },
-          });
+            }
+          );
         }
       }
 
       // Update final notification log status
       if (sent > 0) {
-        await prisma.notificationLog.update({
-          where: { id: notificationLog.id },
-          data: {
+        await this.repo.updateNotificationLog(
+          { id: notificationLog.id },
+          {
             status: 'delivered',
             deliveredAt: new Date(),
-          },
-        });
+          }
+        );
       }
 
       return { sent, failed, notificationLogId: notificationLog.id };
@@ -329,15 +323,13 @@ class PushService {
     userId: string
   ): Promise<NotificationPreferences> {
     try {
-      let preferences = await prisma.pushPreference.findUnique({
-        where: {
-          tenantId_userId: { tenantId, userId },
-        },
+      let preferences = await this.repo.findPreference({
+        tenantId_userId: { tenantId, userId },
       });
 
       if (!preferences) {
         // Create default preferences
-        preferences = await prisma.pushPreference.create({
+        preferences = await this.repo.createPreference({
           data: {
             tenantId,
             userId,
@@ -385,14 +377,12 @@ class PushService {
     preferences: Partial<NotificationPreferences>
   ): Promise<NotificationPreferences> {
     try {
-      let existing = await prisma.pushPreference.findUnique({
-        where: {
-          tenantId_userId: { tenantId, userId },
-        },
+      let existing = await this.repo.findPreference({
+        tenantId_userId: { tenantId, userId },
       });
 
       if (!existing) {
-        existing = await prisma.pushPreference.create({
+        existing = await this.repo.createPreference({
           data: {
             tenantId,
             userId,
@@ -400,12 +390,12 @@ class PushService {
           },
         });
       } else {
-        existing = await prisma.pushPreference.update({
-          where: {
+        existing = await this.repo.updatePreference(
+          {
             tenantId_userId: { tenantId, userId },
           },
-          data: preferences,
-        });
+          preferences
+        );
       }
 
       console.log(`[Push] Preferences updated for user ${userId}`);
@@ -436,14 +426,14 @@ class PushService {
     limit: number = 50
   ): Promise<any[]> {
     try {
-      return await prisma.notificationLog.findMany({
-        where: {
+      return await this.repo.findManyLogs(
+        {
           tenantId,
           userId,
         },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-      });
+        limit,
+        { createdAt: 'desc' }
+      );
     } catch (error) {
       console.error('[Push] Failed to get notification history:', error);
       throw error;
@@ -455,13 +445,13 @@ class PushService {
     notificationLogId: string
   ): Promise<void> {
     try {
-      await prisma.notificationLog.update({
-        where: { id: notificationLogId },
-        data: {
+      await this.repo.updateNotificationLog(
+        { id: notificationLogId },
+        {
           status: 'clicked',
           clickedAt: new Date(),
-        },
-      });
+        }
+      );
 
       console.log(`[Push] Notification ${notificationLogId} marked as clicked`);
     } catch (error) {
