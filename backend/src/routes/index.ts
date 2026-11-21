@@ -55,6 +55,7 @@ import { securityRouter } from './security.js';
 import { commentsRouter } from './comments.js';
 import { collaborationRouter } from './collaboration.js';
 import { paymentStrategiesRouter } from './payment-strategies.js';
+import { agentMarketplaceRouter } from './agent-marketplace.js';
 import { streamingExportRouter } from './streaming-export.js';
 import { poolMonitorRouter } from './pool-monitor.js';
 import { databaseRouter } from './database.js';
@@ -192,6 +193,7 @@ export function createApiV1Router(options: CreateApiV1RouterOptions = {}): Route
   router.use('/comments', commentsRouter);
   router.use('/collaboration', collaborationRouter);
   router.use('/payment-strategies', paymentStrategiesRouter);
+  router.use('/marketplace', agentMarketplaceRouter);
   router.use('/exports', streamingExportRouter);
   router.use('/monitoring', poolMonitorRouter);
   router.use('/database', databaseRouter);

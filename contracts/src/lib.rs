@@ -1,5 +1,8 @@
 #![no_std]
 
+pub mod identity;
+pub mod stream;
+
 #[cfg(test)]
 extern crate std;
 
