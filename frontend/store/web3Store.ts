@@ -8,65 +8,6 @@ import { devtools, persist, subscribeWithSelector, createJSONStorage } from 'zus
 export type ProviderType = 'injected' | 'walletconnect' | 'web3auth' | null;
 export type TxStatus = 'pending' | 'confirmed' | 'failed';
 
-// ─── Multi-chain wallet / balance types (#1009) ────────────────────────────────
-
-export type SupportedChain = 'stellar' | 'ethereum' | 'polygon' | 'base' | 'arbitrum' | 'optimism';
-
-export interface ConnectedWallet {
-  id: string;
-  userId: string;
-  chainType: SupportedChain;
-  address: string;
-  providerName: string;
-  connectedAt: string;
-  lastUsedAt: string;
-  isActive: boolean;
-}
-
-/** Balance for a single currency, isolated from every other currency. */
-export interface CurrencyBalance {
-  currency: string;
-  amount: number;
-  balanceUSD: number;
-  chains: SupportedChain[];
-  includesNative?: boolean;
-}
-
-export interface WalletChainBalance {
-  chainId: string;
-  chainType: SupportedChain;
-  address: string;
-  nativeBalance: string;
-  nativeBalanceUSD: number;
-}
-
-export interface WalletTokenBalance {
-  assetCode: string;
-  balance: string;
-  balanceUSD: number;
-}
-
-export interface AggregatedBalance {
-  totalUSD: number;
-  /** Per-currency balances. Rendered so each currency is shown on its own line. */
-  byCurrency: CurrencyBalance[];
-  chains: WalletChainBalance[];
-  topAssets: WalletTokenBalance[];
-  lastUpdated?: string;
-  isLoading: boolean;
-  error?: string;
-}
-
-const EMPTY_AGGREGATED_BALANCE: AggregatedBalance = {
-  totalUSD: 0,
-  byCurrency: [],
-  chains: [],
-  topAssets: [],
-  isLoading: false,
-};
-
-const WALLET_API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
 export interface TransactionRecord {
   hash: string;
   status: TxStatus;
@@ -78,6 +19,21 @@ export interface TransactionRecord {
   value?: string;
 }
 
+export interface AggregatedWalletBalance {
+  totalUSD: number;
+  chains: Array<{
+    chainId: string;
+    chainType: string;
+    address: string;
+    nativeBalance: string;
+    nativeBalanceRaw: string;
+    nativeBalanceUSD: number;
+    tokens: Array<Record<string, unknown>>;
+    lastUpdated: string;
+  }>;
+  lastUpdated: string;
+}
+
 interface Web3State {
   account: `0x${string}` | null;
   chainId: number | null;
@@ -87,9 +43,7 @@ interface Web3State {
   providerType: ProviderType;
   connectionError: string | null;
   transactions: TransactionRecord[];
-  connectedWallets: ConnectedWallet[];
-  aggregatedBalance: AggregatedBalance;
-  activeChain: SupportedChain | null;
+  aggregatedBalance: AggregatedWalletBalance | null;
 }
 
 interface Web3Actions {
@@ -103,13 +57,7 @@ interface Web3Actions {
   addTransaction: (tx: Omit<TransactionRecord, 'timestamp'>) => void;
   updateTransaction: (hash: string, status: TxStatus) => void;
   clearTransactions: () => void;
-  /** Adds or replaces a connected wallet in local state. */
-  addWallet: (wallet: ConnectedWallet) => void;
-  /** Removes a wallet locally and best-effort disconnects it on the API. */
-  removeWallet: (walletId: string) => void;
-  setActiveChain: (chain: SupportedChain | null) => void;
-  /** Loads the per-currency aggregated balance for a user (#1009). */
-  fetchAggregatedBalance: (userId: string) => Promise<void>;
+  setAggregatedBalance: (balance: AggregatedWalletBalance | null) => void;
 }
 
 export type Web3Store = Web3State & Web3Actions;
@@ -117,7 +65,7 @@ export type Web3Store = Web3State & Web3Actions;
 // Persisted slice — only serialisable fields
 type PersistedWeb3 = Pick<
   Web3State,
-  'account' | 'chainId' | 'providerType' | 'isConnected' | 'transactions'
+  'account' | 'chainId' | 'providerType' | 'isConnected' | 'transactions' | 'aggregatedBalance'
 >;
 
 // ─── Lightweight XOR-based storage encryption ─────────────────────────────────
@@ -191,9 +139,7 @@ const INITIAL_STATE: Web3State = {
   providerType: null,
   connectionError: null,
   transactions: [],
-  connectedWallets: [],
-  aggregatedBalance: EMPTY_AGGREGATED_BALANCE,
-  activeChain: null,
+  aggregatedBalance: null,
 };
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -261,72 +207,8 @@ export const useWeb3Store = create<Web3Store>()(
           clearTransactions: () =>
             set({ transactions: [] }, false, 'web3/clearTransactions'),
 
-          addWallet: (wallet) =>
-            set(
-              (state) => ({
-                connectedWallets: [...state.connectedWallets.filter((w) => w.id !== wallet.id), wallet],
-              }),
-              false,
-              'web3/addWallet'
-            ),
-
-          removeWallet: (walletId) => {
-            set(
-              (state) => ({
-                connectedWallets: state.connectedWallets.filter((w) => w.id !== walletId),
-              }),
-              false,
-              'web3/removeWallet'
-            );
-            // Best-effort server-side disconnect; local state is already updated.
-            void fetch(`${WALLET_API_BASE}/api/v1/wallet/${walletId}`, { method: 'DELETE' }).catch(() => {});
-          },
-
-          setActiveChain: (activeChain) => set({ activeChain }, false, 'web3/setActiveChain'),
-
-          fetchAggregatedBalance: async (userId) => {
-            set(
-              (state) => ({
-                aggregatedBalance: { ...state.aggregatedBalance, isLoading: true, error: undefined },
-              }),
-              false,
-              'web3/fetchAggregatedBalance/start'
-            );
-            try {
-              const response = await fetch(
-                `${WALLET_API_BASE}/api/v1/wallet/aggregated?userId=${encodeURIComponent(userId)}`
-              );
-              if (!response.ok) throw new Error(`Failed to fetch balances (${response.status})`);
-              const body = await response.json();
-              const data = (body?.data ?? {}) as Partial<AggregatedBalance>;
-              set(
-                {
-                  aggregatedBalance: {
-                    totalUSD: Number(data.totalUSD ?? 0),
-                    byCurrency: data.byCurrency ?? [],
-                    chains: data.chains ?? [],
-                    topAssets: data.topAssets ?? [],
-                    lastUpdated: data.lastUpdated,
-                    isLoading: false,
-                  },
-                },
-                false,
-                'web3/fetchAggregatedBalance/success'
-              );
-            } catch (error) {
-              set(
-                (state) => ({
-                  aggregatedBalance: {
-                    ...state.aggregatedBalance,
-                    isLoading: false,
-                    error: (error as Error).message,
-                  },
-                }),
-                false,
-                'web3/fetchAggregatedBalance/error'
-              );
-            }
-          },
+          setAggregatedBalance: (aggregatedBalance) =>
+            set({ aggregatedBalance }, false, 'web3/setAggregatedBalance'),
         }),
         {
           name: 'agenticpay-web3',
@@ -338,6 +220,7 @@ export const useWeb3Store = create<Web3Store>()(
             providerType: state.providerType,
             isConnected: state.isConnected,
             transactions: state.transactions,
+            aggregatedBalance: state.aggregatedBalance,
           }),
         }
       )
@@ -402,6 +285,7 @@ export const selectIsReconnecting = (s: Web3Store) => s.isReconnecting;
 export const selectProviderType = (s: Web3Store) => s.providerType;
 export const selectConnectionError = (s: Web3Store) => s.connectionError;
 export const selectTransactions = (s: Web3Store) => s.transactions;
+export const selectAggregatedBalance = (s: Web3Store) => s.aggregatedBalance;
 export const selectPendingTxs = (s: Web3Store) =>
   s.transactions.filter((tx) => tx.status === 'pending');
 export const selectConfirmedTxs = (s: Web3Store) =>

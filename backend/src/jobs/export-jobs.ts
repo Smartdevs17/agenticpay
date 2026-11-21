@@ -76,6 +76,7 @@ async function processQueuedExports(): Promise<void> {
         downloadUrl,
         fileSizeBytes,
         rowCount: processedData.length,
+        content,
       });
 
       if (!completeResult.ok) {

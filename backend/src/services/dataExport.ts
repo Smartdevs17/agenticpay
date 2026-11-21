@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { BaseService } from './BaseService.js';
 import type { Result } from '../lib/result.js';
 import { createGdprRequest, updateGdprRequestStatus } from './gdpr.js';
+import { encrypt } from '../encryption/column-encryptor.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,8 @@ export interface ExportJob {
   deliveryEmail?: string;
   /** ID of the scheduled export that triggered this, if any */
   scheduledExportId?: string;
+  /** AES-256-GCM envelope for generated content; plaintext is never retained. */
+  encryptedContent?: string;
 }
 
 export interface ScheduledExport {
@@ -201,7 +204,7 @@ export class DataExportService extends BaseService {
 
   completeExport(
     jobId: string,
-    result: { downloadUrl: string; fileSizeBytes: number; rowCount: number },
+    result: { downloadUrl: string; fileSizeBytes: number; rowCount: number; content?: string },
   ): Result<ExportJob> {
     const job = exportJobs.get(jobId);
     if (!job) return this.notFoundFailure('ExportJob', jobId);
@@ -211,6 +214,9 @@ export class DataExportService extends BaseService {
 
     job.status = 'completed';
     job.downloadUrl = result.downloadUrl;
+    if (typeof result.content === 'string') {
+      job.encryptedContent = encrypt(result.content, job.userId);
+    }
     job.fileSizeBytes = result.fileSizeBytes;
     job.rowCount = result.rowCount;
     job.completedAt = new Date().toISOString();
