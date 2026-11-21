@@ -1181,3 +1181,13 @@ export async function verifyContractHashAtStartup(
       : new ContractHashVerificationError(message, 'VERIFICATION_FAILED');
   }
 }
+
+// ─── Consolidated Fluent Soroban Transaction Builder (#1416) ──────────────────
+export {
+  SorobanTransactionBuilder,
+  createSorobanTransactionBuilder,
+  type SorobanNetwork,
+  type ContractInvocationOptions,
+  type PaymentOperationOptions,
+  type SorobanBuilderOptions,
+} from '../../../packages/sdk/src/soroban-transaction-builder.js';

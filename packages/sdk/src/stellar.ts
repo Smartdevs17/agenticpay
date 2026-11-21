@@ -10,6 +10,15 @@ export {
   formatAmount,
 } from '@agenticpay/sdk-core';
 
+export {
+  SorobanTransactionBuilder,
+  createSorobanTransactionBuilder,
+  type SorobanNetwork,
+  type ContractInvocationOptions,
+  type PaymentOperationOptions,
+  type SorobanBuilderOptions,
+} from './soroban-transaction-builder.js';
+
 export type StellarTransaction = {
   hash: string;
   status: 'pending' | 'success' | 'failed';

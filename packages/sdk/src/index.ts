@@ -10,6 +10,7 @@ export * from './errors.js';
 export * from './auth.js';
 export * from './idempotency.js';
 export * from './stellar.js';
+export * from './soroban-transaction-builder.js';
 export { SANDBOX_MOCK_PAYMENTS, createMockPaymentResult } from './sandbox.js';
 export * from './playground.js';
 
