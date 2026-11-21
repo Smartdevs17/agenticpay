@@ -3,8 +3,6 @@ Total output lines: 1876
 
 #![no_std]
 
-pub mod identity;
-pub mod stream;
 pub mod anchor;
 pub mod factoring;
 pub mod policies;
