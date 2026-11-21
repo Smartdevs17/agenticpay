@@ -1,20 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import dynamic from 'next/dynamic';
 import { AlertTriangle, Calendar, Loader2, RefreshCw } from 'lucide-react';
+import { ChunkErrorBoundary } from '@/components/ui/ChunkErrorBoundary';
+import { PayoutFailureChartsSkeleton } from '@/components/dashboard/ChartSkeletons';
+
+const PayoutFailureCharts = dynamic(() => import('@/components/dashboard/PayoutFailureCharts'), {
+  ssr: false,
+  loading: () => <PayoutFailureChartsSkeleton />,
+});
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -203,63 +198,10 @@ export default function PayoutFailureAnalyticsPage() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Failures over time</CardTitle>
-            <CardDescription>Failed payouts per day across the selected range.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {trend.length === 0 ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">No payout activity yet.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={trend}>
-                  <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                  <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Area
-                    type="monotone"
-                    dataKey="failures"
-                    stroke="#ef4444"
-                    fill="#ef4444"
-                    fillOpacity={0.15}
-                    name="Failures"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Failures by root cause</CardTitle>
-            <CardDescription>Classified error codes for the failed payouts.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {breakdown.length === 0 ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">No failures to classify.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={breakdown}>
-                  <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                  <XAxis dataKey="code" tick={{ fontSize: 11 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="count" name="Failures">
-                    {breakdown.map((entry, index) => (
-                      <Cell key={entry.code} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      {/* Charts - Code-split with dynamic import, loading skeleton and error boundary */}
+      <ChunkErrorBoundary fallbackTitle="Payout Failure Visualizations">
+        <PayoutFailureCharts trend={trend} breakdown={breakdown} colors={COLORS} />
+      </ChunkErrorBoundary>
 
       <Card>
         <CardHeader>
