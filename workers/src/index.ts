@@ -33,6 +33,7 @@ import {
   getContinentFromCf,
   isBotUserAgent,
 } from './utilities';
+import { createEdgeErrorResponse } from './errors';
 
 // ── Env binding types ─────────────────────────────────────────────────────────
 
@@ -253,7 +254,11 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   // ── Bot detection ───────────────────────────────────────────────────────────
   const isBot = isBotUserAgent(request.headers.get('user-agent') ?? '');
   if (isBot && !path.startsWith('/sitemap')) {
-    return new Response('Forbidden', { status: 403 });
+    return createEdgeErrorResponse({
+      code: 'ERR_AUTH_FORBIDDEN',
+      message: 'Forbidden',
+      status: 403,
+    });
   }
 
   // ── Auth ────────────────────────────────────────────────────────────────────
@@ -275,22 +280,16 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   );
 
   if (!rateLimitResult.allowed) {
-    return new Response(
-      JSON.stringify({
-        error: {
-          code: 'RATE_LIMIT_EXCEEDED',
-          message: 'Too many requests',
-          retryAfter: Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000),
-        },
-      }),
+    return createEdgeErrorResponse(
       {
+        code: 'ERR_RATE_LIMIT_EXCEEDED',
+        message: 'Too many requests',
         status: 429,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-RateLimit-Remaining': '0',
-          'X-RateLimit-Reset': String(Math.ceil(rateLimitResult.resetAt / 1000)),
-          'Access-Control-Allow-Origin': '*',
-        },
+        retryAfter: Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000),
+      },
+      {
+        'X-RateLimit-Remaining': '0',
+        'X-RateLimit-Reset': String(Math.ceil(rateLimitResult.resetAt / 1000)),
       }
     );
   }
@@ -301,10 +300,11 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   );
 
   if (!isPublicPath && !userId) {
-    return new Response(
-      JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }),
-      { status: 401, headers: { 'Content-Type': 'application/json' } }
-    );
+    return createEdgeErrorResponse({
+      code: 'ERR_AUTH_UNAUTHENTICATED',
+      message: 'Authentication required',
+      status: 401,
+    });
   }
 
   // ── Edge cache (GET only) ───────────────────────────────────────────────────
@@ -379,10 +379,11 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
       },
     });
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: { code: 'EDGE_ERROR', message: 'Failed to process request' } }),
-      { status: 502, headers: { 'Content-Type': 'application/json' } }
-    );
+    return createEdgeErrorResponse({
+      code: 'ERR_BLOCKCHAIN_TRANSACTION_FAILED',
+      message: 'Failed to process request',
+      status: 502,
+    });
   }
 }
 
@@ -396,10 +397,11 @@ export default {
     try {
       return await handleRequest(request, env);
     } catch (error) {
-      return new Response(
-        JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Edge worker error' } }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
+      return createEdgeErrorResponse({
+        code: 'ERR_INTERNAL',
+        message: 'Edge worker error',
+        status: 500,
+      });
     }
   },
 

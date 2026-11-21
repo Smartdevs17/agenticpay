@@ -104,7 +104,7 @@ export const ERROR_CODE_REGISTRY = {
 
 export type ErrorCode = keyof typeof ERROR_CODE_REGISTRY;
 
-const LEGACY_CODE_MAP: Record<string, ErrorCode> = {
+export const LEGACY_CODE_MAP: Record<string, ErrorCode> = {
   AUTHENTICATION_ERROR: 'ERR_AUTH_UNAUTHENTICATED',
   AUTHORIZATION_ERROR: 'ERR_AUTH_FORBIDDEN',
   FORBIDDEN: 'ERR_AUTH_FORBIDDEN',
@@ -114,6 +114,8 @@ const LEGACY_CODE_MAP: Record<string, ErrorCode> = {
   RATE_LIMIT_EXCEEDED: 'ERR_RATE_LIMIT_EXCEEDED',
   NOT_FOUND: 'ERR_RESOURCE_NOT_FOUND',
   INTERNAL_SERVER_ERROR: 'ERR_INTERNAL',
+  INTERNAL_ERROR: 'ERR_INTERNAL',
+  EDGE_ERROR: 'ERR_BLOCKCHAIN_TRANSACTION_FAILED',
   UNSUPPORTED_API_VERSION: 'ERR_RESOURCE_NOT_FOUND',
 };
 
@@ -130,9 +132,63 @@ export function resolveErrorCode(code?: string, status?: number): ErrorCode {
   if (status === 404) return 'ERR_RESOURCE_NOT_FOUND';
   if (status === 409) return 'ERR_CONFIG_CONFLICT';
   if (status === 429) return 'ERR_RATE_LIMIT_EXCEEDED';
+  if (status === 502) return 'ERR_BLOCKCHAIN_TRANSACTION_FAILED';
   return 'ERR_INTERNAL';
 }
 
 export function listErrorCodes(): ErrorCodeDefinition[] {
   return Object.values(ERROR_CODE_REGISTRY);
+}
+
+// ── Unified Error Response Contract (Issue #1402) ───────────────────────────
+
+export interface UnifiedErrorPayload {
+  code: string;
+  message: string;
+  status: number;
+  details?: unknown;
+  requestId?: string;
+  retryAfter?: number;
+}
+
+export interface UnifiedErrorResponse {
+  error: UnifiedErrorPayload;
+}
+
+export interface FormatErrorOptions {
+  code?: string;
+  message?: string;
+  status?: number;
+  details?: unknown;
+  requestId?: string;
+  retryAfter?: number;
+}
+
+/**
+ * Pure mapping function creating the unified error response format.
+ * Usable across Express backend, Cloudflare Workers, and SDKs.
+ */
+export function formatUnifiedError(options: FormatErrorOptions): UnifiedErrorResponse {
+  const status = options.status ?? 500;
+  const canonicalCode = resolveErrorCode(options.code, status);
+  const fallbackMessage = ERROR_CODE_REGISTRY[canonicalCode]?.message ?? 'An error occurred';
+  const message = options.message || fallbackMessage;
+
+  const payload: UnifiedErrorPayload = {
+    code: canonicalCode,
+    message,
+    status,
+  };
+
+  if (options.details !== undefined) {
+    payload.details = options.details;
+  }
+  if (options.requestId) {
+    payload.requestId = options.requestId;
+  }
+  if (options.retryAfter !== undefined) {
+    payload.retryAfter = options.retryAfter;
+  }
+
+  return { error: payload };
 }
