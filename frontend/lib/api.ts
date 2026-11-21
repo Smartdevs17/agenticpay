@@ -23,6 +23,174 @@ export interface InvoiceRequest {
     hourlyRate: number;
 }
 
+export interface FormFieldOption {
+  label: string;
+  value: string;
+}
+
+export interface FormFieldDefinition {
+  id: string;
+  name: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'file' | 'select';
+  required?: boolean;
+  placeholder?: string;
+  helpText?: string;
+  accept?: string;
+  pattern?: string;
+  min?: number;
+  max?: number;
+  maxSizeBytes?: number;
+  options?: FormFieldOption[];
+  visibleIf?: {
+    fieldName: string;
+    value: string;
+  };
+}
+
+export interface FormSchema {
+  id: string;
+  name: string;
+  description?: string;
+  fields: FormFieldDefinition[];
+  analytics?: {
+    views: number;
+    submissions: number;
+    completions: number;
+    completionRate: number;
+  };
+}
+
+export interface FormListResponse {
+  forms: FormSchema[];
+  total: number;
+}
+
+export interface FormCreateRequest {
+  name: string;
+  description?: string;
+  fields: FormFieldDefinition[];
+}
+
+export interface FormSubmission {
+  id: string;
+  formId: string;
+  submittedAt: string;
+  values: Record<string, unknown>;
+  success: boolean;
+}
+
+export interface FormSubmissionsResponse {
+  submissions: FormSubmission[];
+  total: number;
+}
+
+export interface FormDraft {
+  id: string;
+  formId: string;
+  values: Record<string, unknown>;
+  savedAt: string;
+}
+
+export interface FormDraftsResponse {
+  drafts: FormDraft[];
+  total: number;
+}
+
+export interface WebhookSecret {
+  id: string;
+  provider: 'stripe' | 'paypal' | 'github' | 'custom';
+  isActive: boolean;
+  createdAt: string;
+  expiresAt?: string;
+  lastUsedAt?: string;
+}
+
+export interface WebhookEvent {
+  id: string;
+  provider: 'stripe' | 'paypal' | 'github' | 'custom';
+  eventType: string;
+  payload: any;
+  signature: string;
+  timestamp: string;
+  verified: boolean;
+  processed: boolean;
+  createdAt: string;
+  processedAt?: string;
+  error?: string;
+  retryCount: number;
+}
+
+export interface WebhookSecretsResponse {
+  secrets: WebhookSecret[];
+  total: number;
+}
+
+export interface WebhookEventsResponse {
+  events: WebhookEvent[];
+  total: number;
+}
+
+export interface CreateWebhookSecretRequest {
+  provider: 'stripe' | 'paypal' | 'github' | 'custom';
+  secret: string;
+  expiresAt?: string;
+}
+
+export interface RotateWebhookSecretRequest {
+  newSecret: string;
+  gracePeriodHours?: number;
+}
+
+export interface BatchPaymentItem {
+  recipient: string;
+  amount: string;
+  asset: string;
+  memo?: string;
+}
+
+export interface BatchEstimate {
+  totalPayments: number;
+  totalAmount: string;
+  byAsset: Record<string, string>;
+  estimatedGasUnits: number;
+  duplicateCount: number;
+  invalidAddressCount: number;
+  estimatedDurationMs: number;
+}
+
+export interface BatchRecord {
+  id: string;
+  label?: string;
+  status: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  payments: BatchPaymentItem[];
+  results: Array<{
+    index: number;
+    recipient: string;
+    amount: string;
+    asset: string;
+    status: string;
+    txHash?: string;
+    error?: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduledBatch {
+  id: string;
+  label?: string;
+  payments: BatchPaymentItem[];
+  scheduledAt: string;
+  executeAt: string;
+  status: string;
+  result?: BatchRecord;
+  createdAt: string;
+}
+
 export const api = {
     /**
      * AI Work Verification
@@ -57,5 +225,103 @@ export const api = {
         return apiCall(`/verification/${id}`, {
             method: 'GET',
         });
-    }
+    },
+
+    /**
+     * Forms API
+     */
+    forms: {
+      listForms: async () => apiCall<FormListResponse>('/forms', { method: 'GET' }),
+      getForm: async (id: string) => apiCall<FormSchema>(`/forms/${id}`, { method: 'GET' }),
+      createForm: async (payload: FormCreateRequest) => apiCall<FormSchema>('/forms', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      updateForm: async (id: string, payload: FormCreateRequest) => apiCall<FormSchema>(`/forms/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+      deleteForm: async (id: string) => apiCall<void>(`/forms/${id}`, {
+        method: 'DELETE',
+      }),
+      submitForm: async (id: string, values: Record<string, unknown>) => apiCall(`/forms/${id}/submissions`, {
+        method: 'POST',
+        body: JSON.stringify({ values }),
+      }),
+      getSubmissions: async (id: string) => apiCall<FormSubmissionsResponse>(`/forms/${id}/submissions`, {
+        method: 'GET',
+      }),
+      saveDraft: async (id: string, values: Record<string, unknown>) => apiCall<FormDraft>(`/forms/${id}/drafts`, {
+        method: 'POST',
+        body: JSON.stringify({ values }),
+      }),
+      getDrafts: async (id: string) => apiCall<FormDraftsResponse>(`/forms/${id}/drafts`, {
+        method: 'GET',
+      }),
+      deleteDraft: async (id: string, draftId: string) => apiCall<void>(`/forms/${id}/drafts/${draftId}`, {
+        method: 'DELETE',
+      }),
+    },
+
+    /**
+     * Webhook Management API
+     */
+    webhooks: {
+      // Secret management
+      listSecrets: async () => apiCall<WebhookSecretsResponse>('/webhooks/secrets', { method: 'GET' }),
+      createSecret: async (payload: CreateWebhookSecretRequest) => apiCall<WebhookSecret>('/webhooks/secrets', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      rotateSecret: async (provider: string, payload: RotateWebhookSecretRequest) => apiCall<WebhookSecret>(`/webhooks/secrets/${provider}/rotate`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      deleteSecret: async (secretId: string) => apiCall<void>(`/webhooks/secrets/${secretId}`, {
+        method: 'DELETE',
+      }),
+
+      // Event management
+      listEvents: async (limit?: number) => apiCall<WebhookEventsResponse>(`/webhooks/events${limit ? `?limit=${limit}` : ''}`, { method: 'GET' }),
+      listQueuedEvents: async (limit?: number) => apiCall<WebhookEventsResponse>(`/webhooks/events/queued${limit ? `?limit=${limit}` : ''}`, { method: 'GET' }),
+      retryEvent: async (eventId: string) => apiCall(`/webhooks/events/${eventId}/retry`, {
+        method: 'POST',
+      }),
+      markEventProcessed: async (eventId: string) => apiCall(`/webhooks/events/${eventId}/process`, {
+        method: 'POST',
+      }),
+    },
+
+    /**
+     * Batch Payment API
+     */
+    batch: {
+      parse: async (payload: { payments: BatchPaymentItem[] }) => apiCall(`/batch/parse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }),
+      parseCSV: async (csv: string) => apiCall(`/batch/parse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        body: csv,
+      }),
+      estimate: async (payload: { payments: BatchPaymentItem[] }) => apiCall<BatchEstimate>(`/batch/estimate`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      submit: async (payload: { payments: BatchPaymentItem[]; label?: string }) => apiCall<BatchRecord>(`/batch/submit`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      schedule: async (payload: { payments: BatchPaymentItem[]; executeAt: string; label?: string }) => apiCall<ScheduledBatch>(`/batch/schedule`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+      list: async () => apiCall<{ batches: BatchRecord[] }>(`/batch`, { method: 'GET' }),
+      get: async (id: string) => apiCall<BatchRecord>(`/batch/${id}`, { method: 'GET' }),
+      getReport: async (id: string) => apiCall(`/batch/${id}/report`, { method: 'GET' }),
+      listScheduled: async () => apiCall<{ batches: ScheduledBatch[] }>(`/batch/scheduled`, { method: 'GET' }),
+      cancelScheduled: async (id: string) => apiCall<ScheduledBatch>(`/batch/scheduled/${id}`, { method: 'DELETE' }),
+    },
 };

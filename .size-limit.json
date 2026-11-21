@@ -1,0 +1,27 @@
+{
+  "name": "agenticpay",
+  "repository": "https://github.com/Smartdevs17/agenticpay",
+  "sizeLimit": [
+    {
+      "name": "frontend framework chunk (gzip)",
+      "path": "frontend/.next/static/chunks/framework-*.js",
+      "limit": "210 kB",
+      "gzip": true,
+      "running": false
+    },
+    {
+      "name": "frontend main app chunks (gzip)",
+      "path": "frontend/.next/static/chunks/*.js",
+      "limit": "1500 kB",
+      "gzip": true,
+      "running": false
+    },
+    {
+      "name": "frontend css (gzip)",
+      "path": "frontend/.next/static/css/*.css",
+      "limit": "200 kB",
+      "gzip": true,
+      "running": false
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+# Sandbox services for smart contract development and testing — Issue #524
+# Usage: docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d sandbox
+
+version: '3.8'
+
+services:
+  hardhat-node:
+    image: node:20-alpine
+    working_dir: /contracts
+    command: npx hardhat node --hostname 0.0.0.0
+    ports:
+      - '8545:8545'
+    environment:
+      NODE_ENV: development
+      HARDHAT_NETWORK: localhost
+    volumes:
+      - ./contracts:/contracts
+      - hardhat-cache:/contracts/.hardhat
+    networks:
+      - default
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:8545']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  soroban-quickstart:
+    image: stellar/stellar-quickstart:latest
+    ports:
+      - '8000:8000'
+      - '5432:5432'
+      - '6379:6379'
+      - '7001:7001'
+    environment:
+      SOROBAN_RPC_HOST: 0.0.0.0
+      SOROBAN_RPC_PORT: 8000
+      PUBNET: 'false'
+      TESTNET: 'false'
+    volumes:
+      - soroban-data:/opt/stellar
+    networks:
+      - default
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', 'http://localhost:8000/health']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  hardhat-cache:
+  soroban-data:

@@ -1,0 +1,111 @@
+name: Gas Benchmarks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/gas-checks.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/gas-checks.yml'
+
+env:
+  RUST_TOOLCHAIN: 'stable'
+
+jobs:
+  gas-benchmarks:
+    name: Gas Regression Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
+
+      - name: Build contract (WASM release)
+        run: cargo build --target wasm32-unknown-unknown --release
+        working-directory: contracts
+        continue-on-error: false
+
+      - name: Run gas benchmarks
+        run: cargo test --features gas_benchmarks -- --nocapture
+        working-directory: contracts
+        continue-on-error: false
+
+      - name: Extract benchmark results
+        id: benchmark-results
+        run: |
+          cargo test --features gas_benchmarks -- --nocapture 2>&1 | \
+            grep -E '^[a-z_]+\..+:' | \
+            sed 's/^/  /' > /tmp/gas-results.txt
+          cat /tmp/gas-results.txt
+
+      - name: Check gas results against baseline
+        run: |
+          BASELINE_FILE="contracts/gas-baseline.json"
+          if [ -f "$BASELINE_FILE" ]; then
+            echo "Checking gas results against baseline..."
+            # Parse out "create_project: X (ΔY)" lines, compare to baseline.
+            # Fail if any operation is >10% over baseline.
+            while IFS= read -r line; do
+              op=$(echo "$line" | grep -oP '^[a-z_]+(?=:)')
+              cost=$(echo "$line" | grep -oP '(?<=Δ)\d+')
+              if [ -n "$op" ] && [ -n "$cost" ]; then
+                baseline=$(jq -r --arg op "$op" '.[$op] // 0' "$BASELINE_FILE")
+                if [ "$baseline" != "0" ]; then
+                  threshold=$(echo "$baseline * 1.1 / 1" | bc)
+                  if [ "$cost" -gt "$threshold" ]; then
+                    echo "FAIL: $op cost $cost exceeds 110% of baseline $baseline (threshold $threshold)"
+                    exit 1
+                  fi
+                  echo "OK: $op cost $cost (baseline $baseline, threshold $threshold)"
+                fi
+              fi
+            done < /tmp/gas-results.txt
+            echo "All gas benchmarks within tolerance."
+          else
+            echo "No baseline file found ($BASELINE_FILE). Creating from this run."
+            # Generate baseline JSON from results
+            echo "{" > "$BASELINE_FILE"
+            first=true
+            while IFS= read -r line; do
+              op=$(echo "$line" | grep -oP '^[a-z_]+(?=:)')
+              cost=$(echo "$line" | grep -oP '(?<=Δ)\d+')
+              if [ -n "$op" ] && [ -n "$cost" ]; then
+                if [ "$first" = true ]; then first=false; else echo "," >> "$BASELINE_FILE"; fi
+                echo "  \"$op\": $cost" >> "$BASELINE_FILE"
+              fi
+            done < /tmp/gas-results.txt
+            echo "}" >> "$BASELINE_FILE"
+            echo "Created baseline at $BASELINE_FILE"
+          fi
+        shell: bash
+
+      - name: Upload gas results
+        uses: actions/upload-artifact@v4
+        with:
+          name: gas-benchmark-results
+          path: /tmp/gas-results.txt
+          retention-days: 30
+
+      - name: Upload gas baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: gas-baseline
+          path: contracts/gas-baseline.json
+          retention-days: 90

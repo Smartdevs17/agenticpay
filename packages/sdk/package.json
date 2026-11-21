@@ -1,0 +1,38 @@
+{
+  "name": "@agenticpay/sdk",
+  "version": "0.1.0",
+  "description": "Official TypeScript SDK for AgenticPay APIs",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "docs": "typedoc --options typedoc.json",
+    "test": "vitest run --passWithNoTests",
+    "example:getting-started": "tsx examples/getting-started.ts",
+    "example:split": "tsx examples/split-payment.ts",
+    "example:errors": "tsx examples/error-handling.ts"
+  },
+  "keywords": [
+    "agenticpay",
+    "sdk",
+    "typescript",
+    "payments"
+  ],
+  "license": "MIT",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "typedoc": "^0.28.0",
+    "typescript": "~5.7.2",
+    "vitest": "^4.1.1"
+  }
+}

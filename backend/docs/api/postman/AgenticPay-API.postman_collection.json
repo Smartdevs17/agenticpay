@@ -1,0 +1,386 @@
+{
+  "info": {
+    "name": "AgenticPay API",
+    "description": "Auto-generated from OpenAPI spec",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001/api/v1"
+    },
+    {
+      "key": "token",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Service health check",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Readiness probe",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/ready",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ready"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Verify work submission",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/verification/verify",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "verification",
+            "verify"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Batch verify work submissions",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/verification/verify/batch",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "verification",
+            "verify",
+            "batch"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Generate invoice",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/invoice/generate",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "invoice",
+            "generate"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Create merchant onboarding",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/onboarding",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "onboarding"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Submit onboarding document",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/onboarding/:id/documents",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "onboarding",
+            "{id}",
+            "documents"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Create escrow agreement",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/escrow",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "escrow"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Fund escrow",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/escrow/:id/fund",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "escrow",
+            "{id}",
+            "fund"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Confirm milestone payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/escrow/:id/milestones/:milestoneId/confirm",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "escrow",
+            "{id}",
+            "milestones",
+            "{milestoneId}",
+            "confirm"
+          ]
+        }
+      }
+    },
+    {
+      "name": "File a dispute",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/disputes",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "disputes"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Respond to dispute",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/disputes/:id/respond",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "disputes",
+            "{id}",
+            "respond"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Resolve dispute",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/disputes/:id/resolve",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "disputes",
+            "{id}",
+            "resolve"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Stellar payment status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/stellar/payment/:transactionHash",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "stellar",
+            "payment",
+            "{transactionHash}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Sandbox environment status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/sandbox/status",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "sandbox",
+            "status"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Process mock payment (sandbox)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3001/api/v1/sandbox/payments/process",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "sandbox",
+            "payments",
+            "process"
+          ]
+        }
+      }
+    }
+  ]
+}

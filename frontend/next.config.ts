@@ -1,7 +1,183 @@
 import type { NextConfig } from "next";
+import withBundleAnalyzer from "@next/bundle-analyzer";
+import { withSentryConfig } from "@sentry/nextjs";
+import createNextIntlPlugin from "next-intl/plugin";
+
+const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
+
+const bundleAnalyzer = withBundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+});
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Standalone output gives Dockerfile.frontend a self-contained server.js (#1500).
+  output: "standalone",
+  experimental: {
+    optimizePackageImports: [
+      "lucide-react",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-select",
+      "@radix-ui/react-popover",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-avatar",
+      "@radix-ui/react-label",
+    ],
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  webpack: (config, { isServer, defaultLoaders, nextRuntime }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+      };
+    }
+
+    config.optimization = {
+      ...config.optimization,
+      splitChunks: {
+        chunks: "all",
+        minSize: 20000,
+        maxSize: 244000,
+        cacheGroups: {
+          default: false,
+          vendors: false,
+          framework: {
+            name: "framework",
+            chunks: "all",
+            test: /[\\/]node_modules[\\/](react|react-dom|scheduler|prop-types|use-subscription)[\\/]/,
+            priority: 40,
+            enforce: true,
+          },
+          lib: {
+            test(module: any) {
+              const context =
+                typeof module?.context === "string" ? module.context : "";
+              return (
+                !context.match(/[\\/]node_modules[\\/]/) ||
+                /lodash/.test(context) ||
+                /moment/.test(context)
+              );
+            },
+            name(module: any) {
+              const context =
+                typeof module?.context === "string" ? module.context : "";
+              const packageName =
+                context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)?.[1] ||
+                "vendors";
+              return `npm.${packageName.replace("@", "")}`;
+            },
+            priority: 30,
+            minChunks: 1,
+            reuseExistingChunk: true,
+          },
+          commons: {
+            name: "commons",
+            minChunks: 2,
+            priority: 10,
+          },
+          shared: {
+            name: "shared",
+            priority: 20,
+            minChunks: 2,
+            reuseExistingChunk: true,
+          },
+        },
+      },
+    };
+
+    if (!isServer && nextRuntime === "edge") {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        perf_hooks: false,
+      };
+    }
+
+    return config;
+  },
+  images: {
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 60 * 60 * 24 * 7,
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+    remotePatterns: process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN
+      ? [
+          {
+            protocol: "https",
+            hostname: process.env.NEXT_PUBLIC_IMAGE_CDN_DOMAIN,
+            pathname: "/**",
+          },
+        ]
+      : [],
+  },
+  compress: true,
+  poweredByHeader: false,
+  headers: async () => {
+    return [
+      {
+        // HTTP/2 server push hints for critical assets on every page load
+        source: "/(.*)",
+        headers: [
+          {
+            key: "Link",
+            value: [
+              // Critical fonts — pushed before HTML is parsed
+              "</fonts/inter-var.woff2>; rel=preload; as=font; type=\"font/woff2\"; crossorigin=anonymous",
+              // Critical CSS — pushed alongside the document
+              "</_next/static/css/app/layout.css>; rel=preload; as=style",
+            ].join(", "),
+          },
+        ],
+      },
+      {
+        source: "/:path*.js",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/:path*.css",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/:path*.webp",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/:path*.avif",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+    ];
+  },
 };
 
-export default nextConfig;
+export default withSentryConfig(
+  withNextIntl(bundleAnalyzer(nextConfig)),
+  {
+    silent: true,
+    org: process.env.SENTRY_ORG || "agenticpay",
+    project: process.env.SENTRY_PROJECT || "agenticpay-frontend",
+  }
+);

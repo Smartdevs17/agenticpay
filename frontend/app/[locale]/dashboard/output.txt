@@ -1,0 +1,9 @@
+C:\Users\USER\Desktop\KING\Clones\agenticpay\frontend\app\dashboard
+├── invoices
+├── layout.tsx
+├── page.tsx
+├── payments
+└── projects
+
+directory: 3 file: 2
+

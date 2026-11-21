@@ -1,0 +1,4 @@
+# Lint the commit message against commitlint.config.js (Conventional Commits).
+# Skip for a single commit with `git commit --no-verify`, or disable all hooks
+# with HUSKY=0 (CI and the release job do this).
+npx --no -- commitlint --edit "$1"

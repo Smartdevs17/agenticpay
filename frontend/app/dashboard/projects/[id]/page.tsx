@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, ExternalLink, CheckCircle2, Clock, Circle, Loader2 } from 'lucide-react';
+import { ArrowLeft, ExternalLink, CheckCircle2, Clock, Circle, Loader2, CalendarDays } from 'lucide-react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { ProjectDetailSkeleton } from '@/components/ui/loading-skeletons';
@@ -15,9 +15,24 @@ import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { OfflineActionQueuedError } from '@/lib/offline';
 import { formatDateInTimeZone } from '@/lib/utils';
 import { useAuthStore } from '@/store/useAuthStore';
-import { OfflineActionQueuedError } from '@/lib/offline';
+import { ConfirmModal } from '@/components/transaction/ConfirmModal';
+import { MarkdownContent } from '@/components/markdown/MarkdownContent';
+import { CopyButton } from '@/components/ui/copy-button';
+import { parseEther } from 'viem';
+import { generateICS, downloadICS } from '@/lib/generateICS';
+import { buildProjectCalendarEvents, buildProjectCalendarFilename } from '@/lib/project-calendar';
+
+type PendingTransaction = {
+  functionName: string;
+  contractAddress: string;
+  args: unknown[];
+  gasEstimate?: bigint;
+  value?: bigint;
+  submit: () => void;
+};
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -25,11 +40,12 @@ export default function ProjectDetailPage() {
   const { address } = useAccount();
   const timezone = useAuthStore((state) => state.timezone);
 
-  const { useProjectDetail, fundProject, submitWork, approveWork, isPending, isConfirming, isConfirmed, error, arbitrator } = useAgenticPay();
+  const { useProjectDetail, prepareTransaction, isPending, isConfirming, isConfirmed, error, arbitrator } = useAgenticPay();
   const { project, loading, refetch } = useProjectDetail(projectId);
 
   const [repoLink, setRepoLink] = useState('');
   const [showSubmitInput, setShowSubmitInput] = useState(false);
+  const [pendingTransaction, setPendingTransaction] = useState<PendingTransaction | null>(null);
 
   useEffect(() => {
     if (isConfirmed) {
@@ -67,8 +83,12 @@ export default function ProjectDetailPage() {
   const handleFund = async () => {
     try {
       const paymentType = project.currency === 'ETH' ? 0 : 1;
-      await fundProject(project.id, project.totalAmount, paymentType);
-      toast.info('Funding transaction submitted...');
+      const prepared = await prepareTransaction(
+        'fundProject',
+        [BigInt(project.id)],
+        paymentType === 0 ? parseEther(project.totalAmount) : 0n
+      );
+      setPendingTransaction(prepared);
     } catch (e) {
       console.error(e);
     }
@@ -76,8 +96,8 @@ export default function ProjectDetailPage() {
 
   const handleApprove = async () => {
     try {
-      await approveWork(project.id);
-      toast.info('Approval transaction submitted...');
+      const prepared = await prepareTransaction('approveWork', [BigInt(project.id)]);
+      setPendingTransaction(prepared);
     } catch (e) {
       console.error(e);
     }
@@ -86,12 +106,34 @@ export default function ProjectDetailPage() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
-        return <CheckCircle2 className="h-5 w-5 text-green-600" />;
+      case 'verified':
+        return <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />;
       case 'in_progress':
-        return <Clock className="h-5 w-5 text-blue-600" />;
+        return <Clock className="h-5 w-5 text-blue-600 dark:text-blue-400" />;
       default:
-        return <Circle className="h-5 w-5 text-gray-400" />;
+        return <Circle className="h-5 w-5 text-gray-400 dark:text-gray-500" />;
     }
+  };
+
+  const handleAddToCalendar = () => {
+    // Shared with the localized page so both export identical, RFC 5545-correct
+    // calendars covering milestone dates and the project deadline (issue #65).
+    const events = buildProjectCalendarEvents({
+      projectId: project.id,
+      projectTitle: project.title,
+      currency: project.currency,
+      githubRepo: project.githubRepo,
+      deadline: project.deadline,
+      milestones: project.milestones,
+    });
+
+    if (events.length === 0) {
+      toast.info('No project or milestone dates to export.');
+      return;
+    }
+
+    downloadICS(buildProjectCalendarFilename(project.title), generateICS(events));
+    toast.success('Calendar file downloaded.');
   };
 
   return (
@@ -114,20 +156,28 @@ export default function ProjectDetailPage() {
       {/* Project Overview */}
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-start">
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
             <div>
-              <CardTitle className="text-2xl mb-2">{project.title}</CardTitle>
-              <p className="text-gray-600">Client: {project.client.address.slice(0, 6)}...{project.client.address.slice(-4)}</p>
-              <p className="text-gray-600">Freelancer: {project.freelancer.address.slice(0, 6)}...{project.freelancer.address.slice(-4)}</p>
+              <CardTitle className="text-2xl mb-2 dark:text-gray-100">{project.title}</CardTitle>
+              <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1 flex-wrap">
+                Client:
+                <span className="font-mono text-xs">{project.client.address}</span>
+                <CopyButton value={project.client.address} label="Client address copied" className="h-6 w-6" />
+              </p>
+              <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1 flex-wrap">
+                Freelancer:
+                <span className="font-mono text-xs">{project.freelancer.address}</span>
+                <CopyButton value={project.freelancer.address} label="Freelancer address copied" className="h-6 w-6" />
+              </p>
             </div>
             <span
-              className={`px-4 py-2 rounded-full text-sm font-medium ${project.status === 'active'
-                ? 'bg-blue-100 text-blue-700'
+              className={`px-4 py-2 rounded-full text-sm font-medium border ${project.status === 'active'
+                ? 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800'
                 : project.status === 'completed'
-                  ? 'bg-green-100 text-green-700'
+                  ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800'
                   : project.status === 'verified'
-                    ? 'bg-indigo-100 text-indigo-700'
-                    : 'bg-gray-100 text-gray-700'
+                    ? 'bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800'
+                    : 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
                 }`}
             >
               {project.status.toUpperCase()}
@@ -137,18 +187,24 @@ export default function ProjectDetailPage() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <p className="text-sm text-gray-600">Total Amount</p>
-              <p className="text-xl font-bold">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Total Amount</p>
+              <p className="text-xl font-bold dark:text-gray-100">
                 {project.totalAmount} {project.currency}
               </p>
             </div>
             <div>
-              <p className="text-sm text-gray-600">Created</p>
-              <p className="text-lg font-medium">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Created</p>
+              <p className="text-lg font-medium dark:text-gray-200">
                 {formatDateInTimeZone(project.createdAt, timezone)}
               </p>
             </div>
           </div>
+          {project.milestones[0]?.description && (
+            <div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Description</p>
+              <MarkdownContent content={project.milestones[0].description} previewMode />
+            </div>
+          )}
           {project.githubRepo && (
             <div>
               <p className="text-sm text-gray-600 mb-2">GitHub Repository</p>
@@ -166,6 +222,10 @@ export default function ProjectDetailPage() {
 
           {/* Action Buttons */}
           <div className="pt-4 border-t mt-4 flex gap-4 flex-wrap">
+            <Button variant="outline" onClick={handleAddToCalendar}>
+              <CalendarDays className="h-4 w-4 mr-2" />
+              Add to Calendar
+            </Button>
             {/* Client Actions */}
             {isClient && (
               <>
@@ -217,22 +277,20 @@ export default function ProjectDetailPage() {
                           toast.success("Invoice Generated");
                           refetch();
                         } catch (invError) {
-                          const err = invError as Error;
-                          if (err.name === 'OfflineActionQueuedError' || err.message.includes('queued')) {
-                            toast.info(err.message);
+                          if (invError instanceof OfflineActionQueuedError) {
+                            toast.info(invError.message);
                           } else {
-                            toast.error("Invoice error: " + err.message);
+                            toast.error("Invoice error: " + (invError as Error).message);
                           }
                         }
                       } else {
                         toast.error("Verification failed: " + verification.summary);
                       }
                     } catch (e) {
-                      const err = e as Error;
-                      if (err.name === 'OfflineActionQueuedError' || err.message.includes('queued')) {
-                        toast.info(err.message);
+                      if (e instanceof OfflineActionQueuedError) {
+                        toast.info(e.message);
                       } else {
-                        toast.error(err.message);
+                        toast.error((e as Error).message);
                       }
                     }
                   }}>
@@ -258,10 +316,8 @@ export default function ProjectDetailPage() {
                       throw new Error('You are offline. Reconnect before submitting an on-chain transaction.');
                     }
                     if (!repoLink) throw new Error("No repo link");
-                    toast.info('Submitting work to blockchain...');
-                    await submitWork(project.id, repoLink);
-                    toast.info('Transaction submitted. Once confirmed, request verification.');
-                    setShowSubmitInput(false);
+                    const prepared = await prepareTransaction('submitWork', [BigInt(project.id), repoLink]);
+                    setPendingTransaction(prepared);
                   } catch (e) {
                     toast.error('Submission failed: ' + (e as Error).message);
                   }
@@ -291,22 +347,24 @@ export default function ProjectDetailPage() {
                 transition={{ delay: index * 0.1 }}
                 className="p-4 border border-gray-200 rounded-lg"
               >
-                <div className="flex items-start justify-between mb-3">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-3">
                   <div className="flex items-start gap-3 flex-1">
                     {getStatusIcon(milestone.status)}
                     <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900">{milestone.title}</h4>
+                      <h4 className="font-semibold text-gray-900 dark:text-gray-100">{milestone.title}</h4>
                       {milestone.description && (
-                        <p className="text-sm text-gray-600 mt-1">{milestone.description}</p>
+                        <div className="mt-2">
+                          <MarkdownContent content={milestone.description} previewMode />
+                        </div>
                       )}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-gray-900">
+                  <div className="text-left sm:text-right flex items-center sm:block justify-between gap-2 border-t sm:border-t-0 pt-2 sm:pt-0">
+                    <p className="font-semibold text-gray-900 dark:text-gray-100">
                       {milestone.amount} {project.currency}
                     </p>
                     {milestone.dueDate && (
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-500 dark:text-gray-500">
                         Due: {formatDateInTimeZone(milestone.dueDate, timezone)}
                       </p>
                     )}
@@ -371,6 +429,25 @@ export default function ProjectDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {pendingTransaction && (
+        <ConfirmModal
+          open={!!pendingTransaction}
+          functionName={pendingTransaction.functionName}
+          contractAddress={pendingTransaction.contractAddress}
+          args={pendingTransaction.args}
+          gasEstimate={pendingTransaction.gasEstimate}
+          value={pendingTransaction.value}
+          isSubmitting={isPending || isConfirming}
+          onCancel={() => setPendingTransaction(null)}
+          onConfirm={() => {
+            pendingTransaction.submit();
+            setPendingTransaction(null);
+            setShowSubmitInput(false);
+            toast.info('Transaction submitted. Waiting for confirmation...');
+          }}
+        />
+      )}
     </div>
   );
 }

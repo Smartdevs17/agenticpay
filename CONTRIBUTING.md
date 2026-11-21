@@ -14,7 +14,7 @@ When possible, keep changes focused to a single area of the codebase. If a chang
 
 1. Fork the repository and clone your fork.
 2. Create a branch from `main`.
-3. Install dependencies in the area you plan to change:
+3. Install dependencies. `make doctor && make setup` checks your toolchain and installs everything, and `make` lists every dev task. To install only one area instead:
 
 ```bash
 cd backend && npm install
@@ -66,30 +66,51 @@ cd contracts && cargo build --target wasm32-unknown-unknown --release
 
 ## Commit Message Format
 
-Use a short, imperative commit message in this format:
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/) and
+are checked automatically:
+
+- **Locally** — `npm install` at the repo root installs a husky `commit-msg`
+  hook that runs commitlint against [`commitlint.config.js`](./commitlint.config.js).
+- **In CI** — the `Commitlint` workflow lints your **PR title**. PRs are
+  squash-merged, so the title is the commit that lands on `main`.
 
 ```text
-type: brief summary
+type(optional-scope)!: imperative summary, lower case, ≤ 100 chars
 ```
 
-Recommended commit types:
+| Type | Use for | Release |
+| --- | --- | --- |
+| `feat` | new functionality | minor |
+| `fix` | bug fixes | patch |
+| `perf` | performance improvements | patch |
+| `revert` | reverting a previous commit | patch |
+| `docs`, `style`, `refactor`, `test`, `build`, `ci`, `chore` | everything else | none |
 
-- `feat`: new functionality
-- `fix`: bug fixes
-- `docs`: documentation updates
-- `refactor`: code changes that do not change behavior
-- `test`: adding or updating tests
-- `chore`: maintenance work
+A `!` after the type/scope, or a `BREAKING CHANGE:` footer, triggers a major
+release.
 
 Examples:
 
 ```text
-docs: add contributing guide
+feat(payments): add razorpay gateway
 fix: handle missing invoice validation
-feat: add project payment status badge
+feat(api)!: drop v1 invoice routes
+docs: add contributing guide
 ```
 
-Try to keep the summary under 72 characters and make each commit represent one logical change.
+Make each commit one logical change. To bypass the hook for a work-in-progress
+commit use `git commit --no-verify`; the PR title check still applies.
+
+### Changelog and releases
+
+Every push to `main` runs [semantic-release](https://semantic-release.gitbook.io/)
+(`.github/workflows/release.yml`, configured in [`.releaserc.json`](./.releaserc.json)).
+It reads the commits since the last tag, picks the next version from the table
+above, prepends the release notes to [`CHANGELOG.md`](./CHANGELOG.md), tags the
+release and publishes a GitHub Release. Never edit `CHANGELOG.md` by hand.
+
+Preview what the next release would contain with
+`npx semantic-release --dry-run --no-ci` (needs a `GITHUB_TOKEN`).
 
 ## Pull Request Process
 

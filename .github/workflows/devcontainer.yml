@@ -1,0 +1,49 @@
+name: Devcontainer
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - '.devcontainer/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/devcontainer.yml'
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - '.devcontainer/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/devcontainer.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: devcontainer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-devcontainer:
+    name: Build Devcontainer image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build devcontainer image
+        uses: devcontainers/ci@v0.3
+        with:
+          runCmd: echo "Devcontainer image built successfully"
+          configFile: .devcontainer/devcontainer.json
+          noCache: false
+          push: never
+
+  validate-compose:
+    name: Validate Docker Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate root compose file
+        run: docker compose -f docker-compose.yml config
+
+      - name: Validate devcontainer compose file
+        run: docker compose -f .devcontainer/docker-compose.yml config

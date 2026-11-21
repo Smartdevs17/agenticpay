@@ -42,6 +42,7 @@ jobs:
 
   rollback:
     name: Auto-Rollback
+    needs: [canary-10, canary-50, production-rollout]
     if: failure()
     runs-on: ubuntu-latest
     steps:

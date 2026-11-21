@@ -1,0 +1,107 @@
+# Local stack for AgenticPay (#1500).
+#
+#   docker compose up -d                       infra only: Postgres, Redis, Loki, Grafana
+#   docker compose --profile app up -d --build infra + backend API + frontend
+#   make up-app                                same as the second line
+#
+# The backend and frontend run from the production Dockerfiles, so they are
+# built from source, not bind-mounted. Run `make db-migrate` once against a new
+# database. The frontend's NEXT_PUBLIC_* values are compiled in at build time;
+# change them with `--build-arg` (see the frontend service below).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agenticpay
+    volumes:
+      - agenticpay-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d agenticpay']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - agenticpay-redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  loki:
+    image: grafana/loki:3.0.0
+    restart: unless-stopped
+    ports:
+      - '3100:3100'
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - agenticpay-loki:/loki
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    restart: unless-stopped
+    ports:
+      - '3002:3000'
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - agenticpay-grafana:/var/lib/grafana
+      - ./infra/logging/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    depends_on:
+      - loki
+
+  backend:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    ports:
+      - '3001:3001'
+    environment:
+      PORT: '3001'
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agenticpay
+      REDIS_URL: redis://redis:6379
+      REDIS_ENABLED: 'true'
+      CORS_ALLOWED_ORIGINS: 'http://localhost:3000,http://localhost:3001'
+      STELLAR_NETWORK: testnet
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api/v1}
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    depends_on:
+      - backend
+
+volumes:
+  agenticpay-postgres:
+  agenticpay-redis:
+  agenticpay-loki:
+  agenticpay-grafana:

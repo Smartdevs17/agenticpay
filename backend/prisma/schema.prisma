@@ -1,0 +1,769 @@
+// Prisma schema — Issue #207
+// Full type-safe schema with soft deletes, indexes, and relations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// npm run db:seed
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserTier {
+  free
+  pro
+  enterprise
+}
+
+enum PaymentStatus {
+  pending
+  processing
+  completed
+  failed
+  cancelled
+  refunded
+}
+
+enum PaymentType {
+  milestone_payment
+  full_payment
+  refund
+}
+
+enum ProjectStatus {
+  draft
+  active
+  completed
+  cancelled
+  disputed
+}
+
+enum MilestoneStatus {
+  pending
+  in_progress
+  submitted
+  approved
+  rejected
+  completed
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  paid
+  overdue
+  cancelled
+}
+
+enum WebhookStatus {
+  active
+  disabled
+  failed
+}
+
+enum PaymentLinkStatus {
+  active
+  expired
+  used
+  disabled
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  email         String
+  tier          UserTier  @default(free)
+  walletAddress String?   @map("wallet_address")
+  timezone      String    @default("UTC")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  payments     Payment[]
+  webhooks     Webhook[]
+  auditLogs    AuditLog[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, email])
+  @@index([walletAddress])
+  @@map("users")
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  tenantId        String        @map("tenant_id")
+  txHash          String?       @unique @map("tx_hash")
+  amount          Decimal       @db.Decimal(20, 8)
+  currency        String        @default("XLM")
+  network         String        @default("stellar")
+  status          PaymentStatus @default(pending)
+  type            PaymentType   @default(milestone_payment)
+  projectTitle    String?       @map("project_title")
+  projectId       String?       @map("project_id")
+  milestoneId     String?       @map("milestone_id")
+  userId          String?       @map("user_id")
+  fromAddress     String?       @map("from_address")
+  toAddress       String?       @map("to_address")
+  metadata        Json?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  deletedAt       DateTime?     @map("deleted_at")
+
+  user      User?      @relation(fields: [userId], references: [id])
+  project   Project?   @relation(fields: [projectId], references: [id])
+  milestone Milestone? @relation(fields: [milestoneId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([status], map: "payments_active_status_idx")
+  @@index([txHash])
+  @@index([projectId])
+  @@map("payments")
+}
+
+model Project {
+  id                String        @id @default(uuid())
+  title             String
+  description       String?
+  status            ProjectStatus @default(active)
+  totalAmount       Decimal       @map("total_amount") @db.Decimal(20, 8)
+  currency          String        @default("XLM")
+  clientAddress     String        @map("client_address")
+  freelancerAddress String        @map("freelancer_address")
+  tenantId          String        @map("tenant_id")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  deletedAt         DateTime?     @map("deleted_at")
+
+  milestones Milestone[]
+  invoices   Invoice[]
+  payments   Payment[]
+
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@map("projects")
+}
+
+model Milestone {
+  id        String          @id @default(uuid())
+  projectId String          @map("project_id")
+  title     String
+  amount    Decimal         @db.Decimal(20, 8)
+  currency  String          @default("XLM")
+  status    MilestoneStatus @default(pending)
+  order     Int             @default(0)
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  deletedAt DateTime?       @map("deleted_at")
+
+  project  Project   @relation(fields: [projectId], references: [id])
+  invoices Invoice[]
+  payments Payment[]
+
+  @@index([projectId])
+  @@map("milestones")
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  projectId     String        @map("project_id")
+  milestoneId   String?       @map("milestone_id")
+  tenantId      String        @map("tenant_id")
+  amount        Decimal       @db.Decimal(20, 8)
+  currency      String        @default("XLM")
+  status        InvoiceStatus @default(draft)
+  generatedAt   DateTime      @default(now()) @map("generated_at")
+  dueAt         DateTime?     @map("due_at")
+  paidAt        DateTime?     @map("paid_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  deletedAt     DateTime?     @map("deleted_at")
+
+  project   Project    @relation(fields: [projectId], references: [id])
+  milestone Milestone? @relation(fields: [milestoneId], references: [id])
+
+  @@index([tenantId, generatedAt])
+  @@index([projectId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model Webhook {
+  id        String        @id @default(uuid())
+  tenantId  String        @map("tenant_id")
+  userId    String?       @map("user_id")
+  url       String
+  events    String[]
+  secret    String
+  status    WebhookStatus @default(active)
+  failCount Int           @default(0) @map("fail_count")
+  lastFired DateTime?     @map("last_fired")
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+  deletedAt DateTime?     @map("deleted_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("webhooks")
+}
+
+model PaymentLink {
+  id          String            @id @default(uuid())
+  merchantId  String            @map("merchant_id")
+  amount      Decimal?          @db.Decimal(20, 8)
+  currency    String            @default("XLM")
+  description String?
+  status      PaymentLinkStatus @default(active)
+  expiresAt   DateTime?         @map("expires_at")
+  metadata    Json?
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  deletedAt   DateTime?         @map("deleted_at")
+
+  @@index([merchantId])
+  @@index([status])
+  @@map("payment_links")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  entityId   String   @map("entity_id")
+  entityType String   @map("entity_type")
+  action     String
+  userId     String?  @map("user_id")
+  metadata   Json?
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityId, createdAt])
+  @@index([userId])
+  @@index([entityType, action])
+  @@map("audit_logs")
+}
+
+model GasEstimate {
+  id              String   @id @default(uuid())
+  network         String   @unique
+  gasPriceGwei    Decimal  @map("gas_price_gwei") @db.Decimal(30, 9)
+  baseFeeGwei     Decimal? @map("base_fee_gwei") @db.Decimal(30, 9)
+  priorityFeeGwei Decimal? @map("priority_fee_gwei") @db.Decimal(30, 9)
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+
+  @@index([network, recordedAt])
+  @@map("gas_estimates")
+}
+
+// ─── Sandbox Models ───────────────────────────────────────────────────────────
+
+model SandboxAccount {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  userId          String?  @map("user_id")
+  name            String
+  email           String
+  walletAddress   String   @unique @map("wallet_address")
+  fakeBalance     Decimal  @map("fake_balance") @db.Decimal(20, 8)
+  currency        String   @default("XLM")
+  isActive        Boolean  @default(true) @map("is_active")
+  expiresAt       DateTime? @map("expires_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  transactions    SandboxTransaction[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([walletAddress])
+  @@index([isActive])
+  @@map("sandbox_accounts")
+}
+
+model SandboxTransaction {
+  id                String   @id @default(uuid())
+  accountId         String   @map("account_id")
+  txHash            String   @unique @map("tx_hash")
+  amount            Decimal  @db.Decimal(20, 8)
+  currency          String   @default("XLM")
+  fromAddress       String   @map("from_address")
+  toAddress         String   @map("to_address")
+  status            String   @default("pending")
+  type              String   @default("payment")
+  mockData          Json?    @map("mock_data")
+  confirmedAt       DateTime? @map("confirmed_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  account           SandboxAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([txHash])
+  @@index([status])
+  @@index([createdAt])
+  @@map("sandbox_transactions")
+}
+
+model SandboxMigration {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  sourceAccountId String   @map("source_account_id")
+  targetAccountId String?  @map("target_account_id")
+  status          String   @default("pending")
+  steps           Json?
+  error           String?
+  startedAt       DateTime @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("sandbox_migrations")
+}
+
+// ─── Email System Models ───────────────────────────────────────────────────────
+
+enum EmailCategory {
+  payment_receipt
+  payment_confirmation
+  refund_notification
+  dispute_update
+  weekly_summary
+  marketing
+  security_alert
+  onboarding
+}
+
+enum EmailStatus {
+  pending
+  queued
+  sent
+  delivered
+  opened
+  clicked
+  bounced
+  failed
+}
+
+enum NotificationCategory {
+  payment_notification
+  dispute_alert
+  project_update
+  milestone_reminder
+  security_alert
+  subscription_update
+  system_notification
+}
+
+enum NotificationStatus {
+  pending
+  sent
+  delivered
+  clicked
+  failed
+}
+
+enum DeliveryProvider {
+  smtp
+  sendgrid
+}
+
+model EmailTemplate {
+  id          String        @id @default(uuid())
+  tenantId    String        @map("tenant_id")
+  name        String
+  category    EmailCategory
+  subject     String
+  htmlBody    String        @map("html_body")
+  textBody    String?       @map("text_body")
+  variables   String[]
+  isActive    Boolean       @default(true) @map("is_active")
+  locale      String        @default("en")
+  version     Int           @default(1)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+
+  @@unique([tenantId, name, locale])
+  @@index([tenantId])
+  @@index([category])
+  @@index([locale])
+  @@index([isActive])
+  @@map("email_templates")
+}
+
+model EmailTemplateLocalization {
+  id           String   @id @default(uuid())
+  templateId   String   @map("template_id")
+  locale       String
+  subject      String
+  htmlBody     String   @map("html_body")
+  textBody     String?  @map("text_body")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([templateId, locale])
+  @@index([templateId])
+  @@index([locale])
+  @@map("email_template_localizations")
+}
+
+model EmailDelivery {
+  id              String          @id @default(uuid())
+  tenantId        String          @map("tenant_id")
+  templateId      String?         @map("template_id")
+  recipientEmail  String          @map("recipient_email")
+  recipientName   String?         @map("recipient_name")
+  subject         String
+  htmlBody        String          @map("html_body")
+  textBody        String?         @map("text_body")
+  status          EmailStatus     @default(pending)
+  provider        DeliveryProvider @default(smtp)
+  providerId      String?         @map("provider_id") // SendGrid message ID or SMTP ID
+  sentAt          DateTime?       @map("sent_at")
+  deliveredAt     DateTime?       @map("delivered_at")
+  openedAt        DateTime?       @map("opened_at")
+  clickedAt       DateTime?       @map("clicked_at")
+  bouncedAt       DateTime?       @map("bounced_at")
+  bounceReason    String?         @map("bounce_reason")
+  retryCount      Int             @default(0) @map("retry_count")
+  error           String?
+  metadata        Json?
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([recipientEmail])
+  @@index([status])
+  @@index([templateId])
+  @@index([sentAt])
+  @@index([providerId])
+  @@map("email_deliveries")
+}
+
+model EmailPreference {
+  id                String        @id @default(uuid())
+  tenantId          String        @map("tenant_id")
+  userId            String?       @map("user_id")
+  email             String
+  paymentReceipts   Boolean       @default(true) @map("payment_receipts")
+  paymentConfirmations Boolean    @default(true) @map("payment_confirmations")
+  refundNotifications Boolean     @default(true) @map("refund_notifications")
+  disputeUpdates    Boolean       @default(true) @map("dispute_updates")
+  weeklySummaries   Boolean       @default(true) @map("weekly_summaries")
+  marketing         Boolean       @default(false)
+  securityAlerts    Boolean       @default(true) @map("security_alerts")
+  onboarding        Boolean       @default(true)
+  locale            String        @default("en")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  @@unique([tenantId, email])
+  @@unique([userId])
+  @@index([tenantId])
+  @@index([email])
+  @@map("email_preferences")
+}
+
+model EmailAnalytics {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  templateId      String?  @map("template_id")
+  category        EmailCategory
+  sentCount       Int      @default(0) @map("sent_count")
+  deliveredCount  Int      @default(0) @map("delivered_count")
+  openedCount     Int      @default(0) @map("opened_count")
+  clickedCount    Int      @default(0) @map("clicked_count")
+  bouncedCount    Int      @default(0) @map("bounced_count")
+  failedCount     Int      @default(0) @map("failed_count")
+  date            DateTime @default(now()) @db.Date
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, category, date])
+  @@index([tenantId])
+  @@index([category])
+  @@index([date])
+  @@map("email_analytics")
+}
+
+// ─── Push Notification Models ──────────────────────────────────────────────────
+
+model PushSubscription {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  userId       String   @map("user_id")
+  endpoint     String
+  auth         String   // VAPID auth secret
+  p256dh       String   // VAPID public key
+  userAgent    String?  @map("user_agent")
+  isActive     Boolean  @default(true) @map("is_active")
+  lastUsedAt   DateTime? @map("last_used_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  notifications NotificationLog[]
+
+  @@unique([tenantId, userId, endpoint])
+  @@index([tenantId, userId])
+  @@index([endpoint])
+  @@index([isActive])
+  @@index([createdAt])
+  @@map("push_subscriptions")
+}
+
+model PushPreference {
+  id                         String   @id @default(uuid())
+  tenantId                   String   @map("tenant_id")
+  userId                     String   @map("user_id")
+  paymentNotifications       Boolean  @default(true) @map("payment_notifications")
+  disputeAlerts              Boolean  @default(true) @map("dispute_alerts")
+  projectUpdates             Boolean  @default(true) @map("project_updates")
+  milestoneReminders         Boolean  @default(true) @map("milestone_reminders")
+  securityAlerts             Boolean  @default(true) @map("security_alerts")
+  subscriptionUpdates        Boolean  @default(true) @map("subscription_updates")
+  systemNotifications        Boolean  @default(true) @map("system_notifications")
+  groupNotifications         Boolean  @default(true) @map("group_notifications")
+  notifySound                Boolean  @default(true) @map("notify_sound")
+  notifyBadge                Boolean  @default(true) @map("notify_badge")
+  locale                     String   @default("en")
+  timezone                   String   @default("UTC")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("push_preferences")
+}
+
+model NotificationLog {
+  id                String              @id @default(uuid())
+  tenantId          String              @map("tenant_id")
+  userId            String              @map("user_id")
+  subscriptionId    String?             @map("subscription_id")
+  category          NotificationCategory
+  status            NotificationStatus  @default(pending)
+  title             String
+  body              String
+  icon              String?
+  badge            String?
+  tag               String?             // For grouping notifications
+  data              Json?               // Custom data for deep linking
+  deepLink          String?             @map("deep_link")
+  sentAt            DateTime?           @map("sent_at")
+  deliveredAt       DateTime?           @map("delivered_at")
+  clickedAt         DateTime?           @map("clicked_at")
+  error             String?
+  retryCount        Int                 @default(0) @map("retry_count")
+  metadata          Json?
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  subscription      PushSubscription?   @relation(fields: [subscriptionId], references: [id])
+
+  @@index([tenantId, userId])
+  @@index([status])
+  @@index([category])
+  @@index([subscriptionId])
+  @@index([sentAt])
+  @@index([tag])
+  @@map("notification_logs")
+}
+
+// ─── Reports (Issues #940, #937, #938, #939) ────────────────────────────────
+
+enum ReportStatus {
+  pending
+  generating
+  completed
+  failed
+}
+
+enum ReportType {
+  reconciliation
+  settlement
+  financial_statement
+  payout_failure_analytics
+}
+
+model ReportJob {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  userId      String?  @map("user_id")
+  type        ReportType @default(reconciliation)
+  status      ReportStatus @default(pending)
+  dateFrom    DateTime @map("date_from")
+  dateTo      DateTime @map("date_to")
+  format      String   @default("json")
+  filters     Json?
+  progress    Int      @default(0)
+  errorMessage String? @map("error_message")
+  completedAt DateTime? @map("completed_at")
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  archives ReportArchive[]
+
+  @@index([tenantId, status])
+  @@index([type])
+  @@index([createdAt])
+  @@map("report_jobs")
+}
+
+model ReportArchive {
+  id        String   @id @default(uuid())
+  reportId  String   @map("report_id")
+  format    String
+  fileUrl   String   @map("file_url")
+  rowCount  Int      @default(0) @map("row_count")
+  fileSize  Int      @default(0) @map("file_size")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  report ReportJob @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([createdAt])
+  @@map("report_archives")
+}
+
+model SavedReport {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  userId      String?  @map("user_id")
+  name        String
+  description String?
+  metrics     Json
+  dimensions  Json
+  filters     Json     @default("{}")
+  chartType   String   @default("")
+  dateRange   Json     @default("{}")
+  config      Json     @default("{}")
+  isFavorite  Boolean  @default(false) @map("is_favorite")
+  isPinned    Boolean  @default(false) @map("is_pinned")
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  schedule   ScheduledReport?
+  template   ReportTemplate?
+
+  @@index([tenantId])
+  @@index([isFavorite])
+  @@map("saved_reports")
+}
+
+model ScheduledReport {
+  id         String   @id @default(uuid())
+  reportId   String   @unique @map("report_id")
+  frequency  String
+  dayOfWeek  Int?
+  dayOfMonth Int?
+  time       String   @default("09:00")
+  recipients String[]
+  nextSendAt DateTime @map("next_send_at")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  report SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@map("scheduled_reports")
+}
+
+model ReportTemplate {
+  id          String   @id @default(uuid())
+  reportId    String   @unique @map("report_id")
+  name        String
+  description String?
+  metrics     Json
+  dimensions  Json
+  filters     Json     @default("{}")
+  chartType   String   @default("")
+  dateRange   Json     @default("{}")
+  config      Json     @default("{}")
+  isPublic    Boolean  @default(false) @map("is_public")
+  usageCount  Int      @default(0) @map("usage_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  report SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([isPublic])
+  @@map("report_templates")
+}
+
+// ─── BNPL installment plans (Issue #919) ──────────────────────────────────────
+
+enum InstallmentPlanStatus {
+  active
+  completed
+  cancelled
+  defaulted
+}
+
+enum InstallmentStatus {
+  scheduled
+  due
+  paid
+  failed
+  cancelled
+}
+
+model InstallmentPlan {
+  id               String                @id @default(uuid())
+  tenantId         String                @map("tenant_id")
+  customerId       String?               @map("customer_id")
+  merchantId       String?               @map("merchant_id")
+  currency         String                @default("USD")
+  principal        Decimal               @db.Decimal(20, 8)
+  downPayment      Decimal               @default(0) @map("down_payment") @db.Decimal(20, 8)
+  financedAmount   Decimal               @map("financed_amount") @db.Decimal(20, 8)
+  installmentCount Int                   @map("installment_count")
+  frequency        String                @default("monthly")
+  status           InstallmentPlanStatus @default(active)
+  metadata         Json?
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+
+  installments Installment[]
+
+  @@index([tenantId, status])
+  @@index([customerId])
+  @@map("installment_plans")
+}
+
+model Installment {
+  id            String            @id @default(uuid())
+  planId        String            @map("plan_id")
+  tenantId      String            @map("tenant_id")
+  installmentNo Int               @map("installment_no")
+  amount        Decimal           @db.Decimal(20, 8)
+  dueAt         DateTime          @map("due_at")
+  status        InstallmentStatus @default(scheduled)
+  paidAt        DateTime?         @map("paid_at")
+  paymentId     String?           @map("payment_id")
+  failureReason String?           @map("failure_reason")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  plan InstallmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, installmentNo])
+  @@index([status, dueAt])
+  @@map("installments")
+}

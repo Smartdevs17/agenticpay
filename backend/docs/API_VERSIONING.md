@@ -13,10 +13,12 @@ API versioning can be done in two ways:
    You can explicitly specify the API version in the URL path:
    `GET /api/v1/health`
 
-2. **Header-based**
-   You can omit the version from the URL and provide it via the `API-Version`, `X-API-Version`, or `Accept-Version` headers. If omitted, it defaults to the oldest supported active version (`v1`).
+2. **Header-based or media type versioning**
+   You can omit the version from the URL and provide it via the `API-Version`, `X-API-Version`, or `Accept-Version` headers. You can also version requests through `Content-Type` or `Accept` media type versioning.
    `GET /api/health`
    `API-Version: 1`
+   `Content-Type: application/vnd.agenticpay.v1+json`
+   `Content-Type: application/json; version=1`
 
 All responses include an `X-API-Version` header indicating the API version that processed the request.
 

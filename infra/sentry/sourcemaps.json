@@ -1,0 +1,12 @@
+{
+  "$comment": "Source-map upload targets for the release pipeline. See infra/sentry/README.md.",
+  "org": "agenticpay",
+  "releasePrefix": "agenticpay",
+  "targets": [
+    {
+      "name": "frontend",
+      "project": "agenticpay-frontend",
+      "paths": ["frontend/.next/static", "frontend/.next/server"]
+    }
+  ]
+}

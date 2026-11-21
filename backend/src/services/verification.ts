@@ -37,6 +37,8 @@ export type VerificationUpdate = {
   details?: string[];
 };
 
+import { withQueryProfiling } from '../config/database.js';
+
 // In-memory store (replace with DB in production)
 const verifications = new Map<string, VerificationResult>();
 
@@ -83,7 +85,11 @@ export function storeVerification(result: VerificationResult): void {
 }
 
 export async function getVerification(id: string): Promise<VerificationResult | undefined> {
-  return verifications.get(id);
+  return withQueryProfiling(
+    'SELECT * FROM verifications WHERE id = ?',
+    'verification.service',
+    async () => verifications.get(id),
+  );
 }
 
 export function updateVerification(update: VerificationUpdate): VerificationResult | undefined {

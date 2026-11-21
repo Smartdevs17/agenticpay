@@ -1,0 +1,16 @@
+// Auto-generated MSW handler for {{operationId}}
+// Path: {{path}} [{{method}}]
+
+import { http, HttpResponse } from 'msw';
+
+export const {{camelCase operationId}}Handler = http.{{lowercase method}}(
+  '{{baseUrl}}{{path}}',
+  ({ params, request }) => {
+    return HttpResponse.json({
+      // Mock response for {{operationId}}
+      {{#each mockResponseFields}}
+      {{name}}: {{{defaultValue}}},
+      {{/each}}
+    });
+  },
+);

@@ -1,0 +1,55 @@
+{
+  // Devcontainer stack tasks — Issue #238.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "stack: up",
+      "type": "shell",
+      "command": "scripts/devcontainer.sh up",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "stack: down",
+      "type": "shell",
+      "command": "scripts/devcontainer.sh down",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "stack: status",
+      "type": "shell",
+      "command": "scripts/devcontainer.sh ps",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "stack: logs",
+      "type": "shell",
+      "command": "scripts/devcontainer.sh logs",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "chain: local stellar node",
+      "type": "shell",
+      "command": "scripts/devcontainer.sh stellar",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "chain: local EVM node",
+      "type": "shell",
+      "command": "scripts/devcontainer.sh evm",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "test: backend",
+      "type": "shell",
+      "command": "npm run test --workspace=backend",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    }
+  ]
+}

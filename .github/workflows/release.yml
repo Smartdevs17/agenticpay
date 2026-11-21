@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+env:
+  NODE_VERSION: '20'
+  # Git hooks are for humans; semantic-release's own commit must not be re-linted.
+  HUSKY: '0'
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: github.repository == 'Smartdevs17/agenticpay'
+    outputs:
+      published: ${{ steps.version.outputs.published }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
+
+      # semantic-release tags the release commit it creates; no tag on HEAD
+      # means no releasable commits were pushed.
+      - name: Resolve published version
+        id: version
+        run: |
+          if tag=$(git describe --tags --exact-match HEAD 2>/dev/null); then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+            echo "Published ${tag}"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "No release published for this push."
+          fi
+
+  # Upload production source maps so Sentry shows original TypeScript frames
+  # for errors from this release. See infra/sentry/README.md.
+  sentry-sourcemaps:
+    name: Sentry source maps
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - name: Check Sentry configuration
+        id: sentry
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::warning title=Sentry source maps skipped::SENTRY_AUTH_TOKEN secret is not set; release ${VERSION} will show minified stack traces. See infra/sentry/README.md."
+            echo "### ⚠️ Sentry source maps skipped for ${VERSION} — \`SENTRY_AUTH_TOKEN\` is not configured" >> "$GITHUB_STEP_SUMMARY"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.sentry.outputs.configured == 'true'
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          # sentry-cli `set-commits --auto` reads the local history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        if: steps.sentry.outputs.configured == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        if: steps.sentry.outputs.configured == 'true'
+        run: npm ci --prefer-offline
+
+      - name: Build frontend
+        if: steps.sentry.outputs.configured == 'true'
+        working-directory: frontend
+        env:
+          # Without a token the @sentry/nextjs plugin still emits (hidden)
+          # source maps and debug IDs but neither uploads nor deletes them, so
+          # the upload below is the single, observable upload path.
+          SENTRY_AUTH_TOKEN: ''
+          SENTRY_RELEASE: agenticpay@${{ needs.release.outputs.version }}
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npm run build
+
+      - name: Upload source maps
+        if: steps.sentry.outputs.configured == 'true'
+        run: node infra/sentry/upload-sourcemaps.mjs --release "${VERSION}"

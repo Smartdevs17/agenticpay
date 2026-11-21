@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,19 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { useAgenticPay } from '@/lib/hooks/useAgenticPay';
 import { useAccount } from 'wagmi';
+import { ConfirmModal } from '@/components/transaction/ConfirmModal';
+import { RichTextEditor } from '@/components/markdown/RichTextEditor';
+import { serializeWorkDescription } from '@/lib/projects/work-description';
+import { parseEther } from 'viem';
+
+type PendingTransaction = {
+  functionName: string;
+  contractAddress: string;
+  args: unknown[];
+  gasEstimate?: bigint;
+  value?: bigint;
+  submit: () => void;
+};
 
 const walletAddressSchema = z
   .string()
@@ -31,6 +44,37 @@ const tokenAddressSchema = z
   .string()
   .trim()
   .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid token address');
+
+// File validation configuration
+const FILE_CONFIG = {
+  maxSize: 10 * 1024 * 1024, // 10MB
+  allowedTypes: [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'application/zip',
+    'application/x-zip-compressed'
+  ],
+  allowedExtensions: ['.pdf', '.doc', '.docx', '.txt', '.jpg', '.jpeg', '.png', '.gif', '.zip']
+};
+
+const validateFile = (file: File | null): string | null => {
+  if (!file) return null;
+
+  if (file.size > FILE_CONFIG.maxSize) {
+    return `File size must be less than ${FILE_CONFIG.maxSize / (1024 * 1024)}MB`;
+  }
+
+  if (!FILE_CONFIG.allowedTypes.includes(file.type)) {
+    return `File type not allowed. Allowed types: ${FILE_CONFIG.allowedExtensions.join(', ')}`;
+  }
+
+  return null;
+};
 
 const isFutureDate = (value: string) => {
   const selectedDate = new Date(`${value}T00:00:00`);
@@ -87,10 +131,14 @@ type ProjectFormData = z.infer<typeof projectSchema>;
 export default function CreateProjectPage() {
   const router = useRouter();
   const { address } = useAccount();
-  const { createProject, isPending, isConfirming, isConfirmed, error } = useAgenticPay();
+  const { prepareTransaction, isPending, isConfirming, isConfirmed, error } = useAgenticPay();
+  const [pendingTransaction, setPendingTransaction] = useState<PendingTransaction | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors },
     watch,
@@ -131,6 +179,16 @@ export default function CreateProjectPage() {
       return;
     }
 
+    // Validate file if selected
+    if (selectedFile) {
+      const error = validateFile(selectedFile);
+      if (error) {
+        setFileError(error);
+        toast.error(error);
+        return;
+      }
+    }
+
     try {
       const paymentType = data.currency === 'ETH' ? 0 : 1;
       const tokenAddr = data.currency === 'ETH' ? '0x0000000000000000000000000000000000000000' : data.tokenAddress!;
@@ -140,22 +198,25 @@ export default function CreateProjectPage() {
       // or just use description. The contract takes `_workDescription`.
       // Let's use JSON format for better structure if we want to include milestones later, 
       // but for now just a string.
-      const workDesc = JSON.stringify({
+      // Descriptions are authored as markdown (issue #795) and persisted as
+      // both markdown and HTML (issue #90) so consumers that cannot render
+      // markdown can display the description directly.
+      const workDesc = serializeWorkDescription({
         title: data.title,
         description: data.description,
-        repo: data.githubRepo
+        repo: data.githubRepo,
       });
 
-      await createProject(
+      const prepared = await prepareTransaction('createProject', [
         data.freelancerAddress,
-        data.totalAmount,
+        parseEther(data.totalAmount),
         paymentType,
         tokenAddr,
         workDesc,
-        deadlineTimestamp
-      );
+        BigInt(deadlineTimestamp),
+      ]);
 
-      toast.info('Transaction submitted. Waiting for confirmation...');
+      setPendingTransaction(prepared);
 
     } catch (e) {
       console.error('Failed to prepare transaction:', e);
@@ -193,10 +254,19 @@ export default function CreateProjectPage() {
 
               <div>
                 <Label htmlFor="description">Description</Label>
-                <Input
-                  id="description"
-                  {...register('description')}
-                  placeholder="Brief description of work"
+                <Controller
+                  name="description"
+                  control={control}
+                  render={({ field }) => (
+                    <RichTextEditor
+                      id="description"
+                      value={field.value ?? ''}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      maxLength={5000}
+                      placeholder="Describe the work — supports **markdown**, images, and formatting"
+                    />
+                  )}
                 />
               </div>
 
@@ -289,10 +359,33 @@ export default function CreateProjectPage() {
                   <p className="text-sm text-red-600 mt-1">{errors.githubRepo.message}</p>
                 )}
               </div>
+
+              <div>
+                <Label htmlFor="projectFile">Project File (Optional)</Label>
+                <Input
+                  id="projectFile"
+                  type="file"
+                  accept={FILE_CONFIG.allowedExtensions.join(',')}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setSelectedFile(file);
+                    const error = validateFile(file);
+                    setFileError(error);
+                  }}
+                />
+                {fileError && (
+                  <p className="text-sm text-red-600 mt-1">{fileError}</p>
+                )}
+                {selectedFile && !fileError && (
+                  <p className="text-sm text-green-600 mt-1">
+                    Selected: {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="flex gap-3 pt-4">
-              <Button type="submit" disabled={isPending || isConfirming} className="flex-1">
+              <Button type="submit" disabled={isPending || isConfirming || !!fileError} className="flex-1">
                 {(isPending || isConfirming) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {isPending ? 'Confirm in Wallet...' : isConfirming ? 'Processing...' : 'Create Project'}
               </Button>
@@ -305,6 +398,24 @@ export default function CreateProjectPage() {
           </form>
         </CardContent>
       </Card>
+
+      {pendingTransaction && (
+        <ConfirmModal
+          open={!!pendingTransaction}
+          functionName={pendingTransaction.functionName}
+          contractAddress={pendingTransaction.contractAddress}
+          args={pendingTransaction.args}
+          gasEstimate={pendingTransaction.gasEstimate}
+          value={pendingTransaction.value}
+          isSubmitting={isPending || isConfirming}
+          onCancel={() => setPendingTransaction(null)}
+          onConfirm={() => {
+            pendingTransaction.submit();
+            setPendingTransaction(null);
+            toast.info('Transaction submitted. Waiting for confirmation...');
+          }}
+        />
+      )}
     </div>
   );
 }

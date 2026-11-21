@@ -1,0 +1,211 @@
+'use client';
+
+import dynamic from 'next/dynamic';
+import { useTranslations } from 'next-intl';
+import { useDashboardData } from '@/lib/hooks/useDashboardData';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DollarSign, Clock, Folder, CheckCircle2, TrendingUp } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { DashboardStatsSkeleton } from '@/components/ui/loading-skeletons';
+
+
+const DashboardCharts = dynamic(() => import('./DashboardCharts'), {
+  ssr: false,
+  loading: () => (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {[0, 1].map((item) => (
+        <Card key={item}>
+          <CardHeader>
+            <div className="h-6 w-40 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+          </CardHeader>
+          <CardContent>
+            <div className="h-80 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  ),
+});
+
+export default function DashboardPage() {
+  const t = useTranslations('dashboard');
+  const { stats, recentActivity, loading } = useDashboardData();
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t('title')}</h1>
+          <p className="text-gray-600 mt-1 dark:text-gray-400">{t('welcome')}</p>
+        </div>
+        <DashboardStatsSkeleton />
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const totalProjects = stats.completedProjects + stats.activeProjects;
+  const completedRate = totalProjects > 0 ? Math.round((stats.completedProjects / totalProjects) * 100) : 0;
+  const activeRate = totalProjects > 0 ? Math.round((stats.activeProjects / totalProjects) * 100) : 0;
+
+  const trendData = [
+    { month: 'Jan', revenue: 4200, earnings: 3800 },
+    { month: 'Feb', revenue: 5100, earnings: 4600 },
+    { month: 'Mar', revenue: 4800, earnings: 4400 },
+    { month: 'Apr', revenue: 6300, earnings: 5900 },
+    { month: 'May', revenue: 5800, earnings: 5300 },
+    { month: 'Jun', revenue: 7200, earnings: 6800 },
+  ];
+
+  const distributionData = [
+    { name: 'Completed', value: stats.completedProjects, color: '#10b981' },
+    { name: 'Active', value: stats.activeProjects, color: '#3b82f6' },
+    { name: 'Pending', value: Math.max(0, Math.round(Number(stats.pendingPayments) / 100)), color: '#f59e0b' },
+  ];
+
+  return (
+    <div className="space-y-8 pb-8">
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t('title')}</h1>
+        <p className="text-gray-600 mt-1 dark:text-gray-400">{t('welcome')}</p>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        {[{
+          title: 'Total Earnings', icon: <DollarSign className="h-4 w-4 text-gray-400" />, value: stats.totalEarnings, subtitle: 'All time', color: 'text-green-600', extraIcon: <TrendingUp className="h-3 w-3" />
+        }, {
+          title: 'Pending Payments', icon: <Clock className="h-4 w-4 text-gray-400" />, value: stats.pendingPayments, subtitle: 'Awaiting approval', color: 'text-yellow-600'
+        }, {
+          title: 'Active Projects', icon: <Folder className="h-4 w-4 text-gray-400" />, value: stats.activeProjects, subtitle: 'In progress', color: 'text-blue-600'
+        }, {
+          title: 'Completed', icon: <CheckCircle2 className="h-4 w-4 text-gray-400" />, value: stats.completedProjects, subtitle: 'Projects done', color: 'text-gray-600'
+        }].map((stat, idx) => (
+          <motion.div
+            key={idx}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 + idx * 0.1 }}
+          >
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">{stat.title}</CardTitle>
+                {stat.icon}
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stat.value}</div>
+                {stat.extraIcon ? (
+                  <p className={`text-xs ${stat.color} mt-1 flex items-center gap-1`}>
+                    {stat.extraIcon} {stat.subtitle}
+                  </p>
+                ) : (
+                  <p className={`text-xs ${stat.color} mt-1`}>{stat.subtitle}</p>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Charts Section - dynamically imported to keep recharts out of the initial route chunk. */}
+      <DashboardCharts trendData={trendData} distributionData={distributionData} />
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Performance Snapshot
+              <TrendingUp className="h-5 w-5 text-green-600" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <SummaryTile label="Completion Rate" value={`${completedRate}%`} />
+              <SummaryTile label="Active Load" value={`${stats.activeProjects} open`} />
+              <SummaryTile label="Payment Queue" value={`${stats.pendingPayments} USD`} />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Portfolio Mix</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ProgressRow label="Completed" percentage={completedRate} color="bg-green-500" />
+            <ProgressRow label="Active" percentage={activeRate} color="bg-blue-500" />
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Activity</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {recentActivity.length === 0 ? (
+            <p className="text-sm text-gray-500">No recent activity found.</p>
+          ) : (
+            <div className="space-y-4">
+              {recentActivity.map((activity, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-4 rounded-lg border border-green-100 bg-green-50 p-3 dark:border-green-900 dark:bg-green-950/50"
+                >
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-900 dark:text-white">{activity.title}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{activity.description}</p>
+                  </div>
+                  <span className="text-sm text-gray-500">{activity.time}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+      <p className="text-sm text-gray-500">{label}</p>
+      <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">{value}</p>
+    </div>
+  );
+}
+
+function ProgressRow({
+  label,
+  percentage,
+  color,
+}: {
+  label: string;
+  percentage: number;
+  color: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-gray-600 dark:text-gray-300">{label}</span>
+        <span className="font-medium text-gray-900 dark:text-white">{percentage}%</span>
+      </div>
+      <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-800">
+        <div className={`h-2 rounded-full ${color}`} style={{ width: `${percentage}%` }} />
+      </div>
+    </div>
+  );
+}

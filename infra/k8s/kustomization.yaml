@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: agenticpay
+
+resources:
+- namespace.yaml
+- serviceaccount.yaml
+- configmap.yaml
+- backend-service.yaml
+- backend-deployment.yaml
+- hpa.yaml
+- ingress.yaml
+
+images:
+- name: agenticpay-backend
+  newName: agenticpay-backend
+  newTag: latest
+
+replicas:
+- name: agenticpay-backend
+  count: 3
+
+commonLabels:
+  app.kubernetes.io/name: agenticpay
+  app.kubernetes.io/component: backend
+  app.kubernetes.io/managed-by: kustomize
+
+commonAnnotations:
+  documentation: "See https://github.com/Smartdevs17/agenticpay"
+  created-by: "Terraform / Kustomize"

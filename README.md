@@ -50,16 +50,51 @@ Express.js API server providing:
 - `PATCH /api/v1/verification/batch`
 - `DELETE /api/v1/verification/batch`
 
+### Subscription Endpoints
+
+- `POST /api/v1/plans` - Create a subscription plan (Daily, Weekly, Monthly, Yearly)
+- `GET /api/v1/plans/:merchantId` - Retrieve plans for a specific merchant
+- `POST /api/v1/subscriptions/enroll` - Enroll a customer in a plan
+- `DELETE /api/v1/subscriptions/:id` - Cancel an active subscription
+
 ## Features
 
 - **Instant Payments** — Funds released immediately upon work approval via Soroban
 - **Blockchain Escrow** — Smart contract holds funds securely until milestones are met
+- **Subscription Engine** — Automated recurring payments for SaaS, payroll, and retainers
 - **Social & Wallet Login** — Connect via Google/Twitter or Freighter wallet
 - **AI Verification** — Automated code review against project specifications
 - **Milestone Tracking** — Track project progress with clear status updates
 - **Invoice Management** — Auto-generated invoices for completed projects
+- **Two-Factor Authentication** — TOTP-based 2FA using authenticator apps with backup codes for account security
 
 ---
+
+## Devcontainer (recommended)
+
+For one-click setup with Node.js, Rust, Soroban CLI, Postgres, and Redis, see [docs/DEVCONTAINER.md](docs/DEVCONTAINER.md).
+
+```bash
+# One-command stack: Postgres, Redis, backend, and frontend
+scripts/devcontainer.sh up
+
+# Or start only the infra (Postgres + Redis) on the host:
+docker compose up -d
+
+# Or the full app (infra + backend API + frontend) from the root compose file:
+make up-app
+make db-migrate   # first run against a new database
+```
+
+### Generated SDKs
+
+Typed clients are generated from the backend OpenAPI spec. CI regenerates them on every push.
+
+```bash
+cd backend && npm run sdk:generate:typescript   # also: sdk:generate:python, sdk:generate:go
+```
+
+This runs the pinned `openapi-generator-cli` Docker image, so Docker is required. Use `node scripts/sdk/generate-sdk.mjs typescript --print` to see the command without running it. Settings come from `backend/openapi-generator.config.json`.
 
 ## Prerequisites
 
@@ -187,7 +222,7 @@ NEXT_PUBLIC_APP_NAME=AgenticPay
 | Variable | Default | Description | Required |
 |---|---|---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:3001/api/v1` | Backend API URL | No |
-| `NEXT_PUBLIC_BACKEND_URL` | `https://agentpay-backend-mu.vercel.app` | Fallback backend URL | No |
+| `NEXT_PUBLIC_BACKEND_URL` | `http://localhost:3001/api/v1` | Fallback backend URL (used if `NEXT_PUBLIC_API_URL` is unset) | No |
 | `NEXT_PUBLIC_WEB3AUTH_CLIENT_ID` | - | Web3Auth client ID | **Yes** |
 | `NEXT_PUBLIC_CONTRACT_ADDRESS` | - | Deployed Soroban contract address | **Yes** |
 
@@ -457,6 +492,28 @@ netlify deploy
 5. Push to branch: `git push origin feature/your-feature`
 6. Create Pull Request with description
 
+### Build caching (Turborepo)
+
+Root `build`, `lint`, `test` and `dev` scripts run through [Turborepo](https://turbo.build/repo) using the task graph in [`turbo.json`](turbo.json). Each task's hash covers the workspace's tracked files, its dependencies' hashes, `NODE_VERSION`, and `NEXT_PUBLIC_*` for builds. When the hash is unchanged, turbo restores the cached outputs (`dist/`, `.next/` without `.next/cache`, `coverage/`) and skips the task.
+
+| Where | Cache |
+| --- | --- |
+| Local | `node_modules/.cache/turbo`. Run `npx turbo run build --force` to bypass it. |
+| CI (`.github/workflows/ci.yml`) | Shared remote cache when it is configured. Otherwise a per-job `actions/cache` fallback. Each backend/frontend job writes a cache hit/miss table to the run summary. |
+
+To enable the shared remote cache, a maintainer sets these in **Settings → Secrets and variables → Actions**:
+
+| Name | Kind | Purpose |
+| --- | --- | --- |
+| `TURBO_TOKEN` | secret | Remote cache access token |
+| `TURBO_TEAM` | variable | Remote cache team slug |
+| `TURBO_REMOTE_CACHE_SIGNATURE_KEY` | secret | HMAC key. Artifacts are signed (`remoteCache.signature`), and unsigned or tampered artifacts are ignored |
+| `TURBO_API` | variable, optional | Self-hosted cache server URL. Defaults to `https://vercel.com/api` |
+
+To use the remote cache locally, run `npx turbo login && npx turbo link`, or export the same variables. If the cache is unreachable or the signing key is missing, turbo prints a warning and rebuilds. The build never fails because of the cache.
+
+CI calls `turbo@${TURBO_VERSION}`, which must match the version in `package-lock.json`. The config uses the turbo 1.x `pipeline` schema. `scripts/turbo-config.test.mjs` checks the version pin and the pipeline contract (`node --test scripts/*.test.mjs`), and the `Repo tooling` CI job runs that test.
+
 ---
 
 ## Contributing
@@ -483,31 +540,27 @@ For issues, questions, or suggestions:
 
 - **Issues**: GitHub Issues
 - **Discussions**: GitHub Discussions
-- **Documentation**: See [docs/](./docs) folder
+- **Documentation**: Start with the [documentation index](docs/README.md)
 
 ---
 
 ## Quick Reference Commands
 
+The root [`Makefile`](Makefile) maps every common dev task to a `make` target. Run `make` on its own to list them all, grouped by area.
+
 ```bash
-# Install all dependencies
-npm install --workspaces
-
-# Start development
-npm run dev --workspace=backend &
-npm run dev --workspace=frontend
-
-# Run all tests
-npm test --workspaces
-
-# Build for production
-npm run build --workspace=backend
-npm run build --workspace=frontend
-
-# Lint code
-npm run lint --workspace=backend
-npm run lint --workspace=frontend
+make doctor              # check Node 20+, npm, cargo, forge, docker
+make setup               # npm workspaces + contract toolchains
+make dev                 # backend + frontend in watch mode (or dev-backend / dev-frontend)
+make test                # every workspace suite; test-backend / test-frontend / test-contracts / test-e2e
+make test-backend FILE=src/services/__tests__/settlementProof.test.ts   # a single file
+make lint build          # turbo-cached lint and build
+make db-migrate db-seed  # database lifecycle (db-reset needs CONFIRM=1)
+make sandbox-up          # local sandbox stack (sandbox-down / sandbox-reset / sandbox-logs)
+make clean               # remove build outputs and turbo caches
 ```
+
+Every target wraps the npm, cargo, forge or docker command it names, and `make -n <target>` prints that command without running it. You can override tool binaries (`NPM=pnpm`, `COMPOSE="podman compose"`). Set `VERBOSE=1` to echo commands and `TIMINGS=1` to print how long each target took. If a required tool is missing, the target fails with an install hint. `scripts/makefile.test.mjs` checks that every target is documented, that every npm script a target calls exists, and that every root npm script has a target. Run it with `make test-tooling`.
 
 ---
 

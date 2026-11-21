@@ -1,0 +1,23 @@
+{
+  "name": "@agenticpay/error-codes",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "echo 'No tests for error-codes'",
+    "lint": "echo 'No lint yet'",
+    "generate:docs": "node scripts/generate-error-docs.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,54 @@
+name: Size Limit
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/app/**'
+      - 'frontend/components/**'
+      - 'frontend/lib/**'
+      - 'frontend/next.config.ts'
+      - 'frontend/bundle-budget.json'
+      - 'frontend/package.json'
+      - '.size-limit.json'
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/app/**'
+      - 'frontend/components/**'
+      - 'frontend/next.config.ts'
+
+jobs:
+  size-limit:
+    name: Bundle size budgets and regression alerts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          SIZE_LIMIT: 'true'
+
+      - name: Enforce bundle budgets
+        run: npm run bundle:check
+
+      - name: Report size regressions on pull requests
+        if: github.event_name == 'pull_request'
+        uses: andresz1/size-limit-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          directory: frontend
+          config_path: .size-limit.json

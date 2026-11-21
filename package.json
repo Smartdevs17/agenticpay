@@ -1,0 +1,69 @@
+{
+  "name": "agenticpay",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend",
+    "packages/*",
+    "workers"
+  ],
+  "scripts": {
+    "prepare": "node .husky/install.mjs",
+    "build": "turbo run build",
+    "test": "npm run test:docs && turbo run test",
+    "test:docs": "node --test scripts/docs-index.test.mjs",
+    "lint": "turbo run lint",
+    "dev": "turbo run dev",
+    "sandbox:up": "docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d && npm run sandbox:seed",
+    "sandbox:down": "docker compose -f docker-compose.yml -f docker-compose.sandbox.yml down",
+    "sandbox:reset": "npm run sandbox:down && npm run sandbox:up",
+    "sandbox:logs": "docker compose -f docker-compose.yml -f docker-compose.sandbox.yml logs -f",
+    "sandbox:seed": "node scripts/sandbox/seed.js",
+    "test:integration": "docker compose -f docker-compose.integration.yml run --rm integration-tests",
+    "test:integration:down": "docker compose -f docker-compose.integration.yml down -v",
+    "test:smoke": "node scripts/smoke/production.mjs",
+    "load:k6": "k6 run tests/load/k6/payment-flow.js",
+    "load:k6:smoke": "k6 run tests/load/k6/smoke.js",
+    "test:mutation": "npm --workspace backend run test:mutation",
+    "sandbox:faucet": "node scripts/sandbox/faucet.js",
+    "dev:contracts": "bash scripts/dev/watch-contracts.sh",
+    "dev:contracts:evm": "bash scripts/dev/watch-contracts.sh --evm-only",
+    "dev:contracts:soroban": "bash scripts/dev/watch-contracts.sh --soroban-only",
+    "generate:api-hooks": "node packages/api-hooks-generator/dist/cli.js",
+    "generate:api-hooks:watch": "node packages/api-hooks-generator/dist/cli.js --watch",
+    "analyze:bundle": "bash scripts/analyze-bundle.sh",
+    "lighthouse:ci": "lhci autorun --config=./lighthouse/lighthouse.config.json",
+    "log-viewer": "node packages/log-viewer/dist/cli.js",
+    "release": "semantic-release"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "~19.8.1",
+    "@commitlint/config-conventional": "~19.8.1",
+    "@semantic-release/changelog": "~6.0.3",
+    "@semantic-release/git": "~10.0.1",
+    "@sentry/cli": "~2.58.6",
+    "conventional-changelog-conventionalcommits": "~8.0.0",
+    "husky": "~9.1.7",
+    "semantic-release": "~24.2.9",
+    "turbo": "^1.10.16"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.60.2",
+    "@rollup/rollup-linux-x64-musl": "4.60.2",
+    "@tailwindcss/oxide-linux-x64-gnu": "4.2.4",
+    "@tailwindcss/oxide-linux-x64-musl": "4.2.4",
+    "lightningcss-linux-x64-gnu": "1.32.0",
+    "lightningcss-linux-x64-musl": "1.32.0"
+  },
+  "overrides": {
+    "rollup": "4.60.2",
+    "@rollup/rollup-linux-x64-gnu": "4.60.2",
+    "@rollup/rollup-linux-x64-musl": "4.60.2",
+    "@tailwindcss/oxide": "4.2.4",
+    "@tailwindcss/oxide-linux-x64-gnu": "4.2.4",
+    "@tailwindcss/oxide-linux-x64-musl": "4.2.4",
+    "lightningcss": "1.32.0",
+    "lightningcss-linux-x64-gnu": "1.32.0",
+    "lightningcss-linux-x64-musl": "1.32.0"
+  }
+}

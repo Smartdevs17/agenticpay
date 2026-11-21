@@ -1,0 +1,70 @@
+# CODEOWNERS — who must review changes to which part of the repo.
+#
+# How it works
+#   - GitHub requests a review from the owners of every file a PR touches.
+#   - With "Require review from Code Owners" enabled on the `main` branch
+#     protection rule, a PR cannot merge until an owner of each touched path
+#     approves. See docs/CODEOWNERS.md for the review rules and how to change
+#     ownership.
+#   - The LAST matching pattern wins. Keep the catch-all first and the most
+#     specific (highest-risk) paths last.
+#   - Owners must be users or teams with write access to this repository.
+#
+# Validated by scripts/codeowners.test.mjs (syntax, no stale patterns, every
+# top-level directory owned, high-risk paths resolve as intended) and by the
+# GitHub CODEOWNERS errors API in the CI tooling job.
+
+# ── Default ────────────────────────────────────────────────────────────────
+*                                   @Smartdevs17
+
+# ── Applications ───────────────────────────────────────────────────────────
+/frontend/                          @Smartdevs17
+/backend/                           @Smartdevs17
+/workers/                           @Smartdevs17
+
+# ── Shared packages & SDKs ─────────────────────────────────────────────────
+/packages/                          @Smartdevs17
+/sdks/                              @Smartdevs17
+
+# ── Docs, tests & dev environment ──────────────────────────────────────────
+/docs/                              @Smartdevs17
+/tests/                             @Smartdevs17
+/lighthouse/                        @Smartdevs17
+/scripts/                           @Smartdevs17
+/.devcontainer/                     @Smartdevs17
+/.kiro/                             @Smartdevs17
+
+# ── Build, release & repo tooling ──────────────────────────────────────────
+/package.json                       @Smartdevs17
+/package-lock.json                  @Smartdevs17
+/turbo.json                         @Smartdevs17
+/Makefile                           @Smartdevs17
+/Dockerfile.*                       @Smartdevs17
+/docker-compose*.yml                @Smartdevs17
+/commitlint.config.js               @Smartdevs17
+/.husky/                            @Smartdevs17
+/.releaserc.json                    @Smartdevs17
+/CHANGELOG.md                       @Smartdevs17
+
+# ── High risk: money movement, auth & data ─────────────────────────────────
+# Changes here can move funds, leak secrets or corrupt data.
+/backend/src/payments/              @Smartdevs17
+/backend/payments/                  @Smartdevs17
+/backend/src/auth/                  @Smartdevs17
+/backend/src/security/              @Smartdevs17
+/backend/src/encryption/            @Smartdevs17
+/backend/src/compliance/            @Smartdevs17
+/backend/prisma/                    @Smartdevs17
+/backend/migrations/                @Smartdevs17
+
+# ── High risk: smart contracts ─────────────────────────────────────────────
+/contracts/                         @Smartdevs17
+/packages/contracts/                @Smartdevs17
+
+# ── High risk: infrastructure & observability ──────────────────────────────
+/infra/                             @Smartdevs17
+
+# ── High risk: CI/CD and repo governance ───────────────────────────────────
+/.github/                           @Smartdevs17
+/.github/workflows/                 @Smartdevs17
+/.github/CODEOWNERS                 @Smartdevs17

@@ -1,0 +1,67 @@
+name: Database Migrations
+
+on:
+  pull_request:
+    paths:
+      - 'backend/prisma/**'
+      - 'backend/migrations/**'
+      - '.github/workflows/migrations.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'backend/prisma/**'
+      - 'backend/migrations/**'
+
+concurrency:
+  group: migrations-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agenticpay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agenticpay"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agenticpay
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Check for migration conflicts / schema drift
+        run: npx tsx migrations/runner.ts check
+
+      - name: Migration status
+        run: npm run db:migrate:status

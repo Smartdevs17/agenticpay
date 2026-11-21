@@ -1,0 +1,54 @@
+name: Blue-Green Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Immutable production image (registry/name@sha256:digest)
+        required: true
+        type: string
+      target:
+        description: Optional target slot
+        required: false
+        type: choice
+        options: ["", blue, green]
+
+concurrency:
+  group: production-blue-green
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate deployment script
+        run: |
+          bash -n scripts/blue-green-deploy.sh
+          scripts/blue-green-deploy.sh --image '${{ inputs.image }}' --target "${{ inputs.target || 'green' }}" --dry-run
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Kubernetes credentials
+        env:
+          KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }}
+        run: |
+          test -n "$KUBE_CONFIG_B64"
+          mkdir -p "$HOME/.kube"
+          echo "$KUBE_CONFIG_B64" | base64 --decode > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+      - name: Deploy inactive slot and switch traffic
+        env:
+          KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE || 'production' }}
+          PUBLIC_HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
+        run: >-
+          scripts/blue-green-deploy.sh
+          --image '${{ inputs.image }}'
+          ${{ inputs.target && format('--target {0}', inputs.target) || '' }}

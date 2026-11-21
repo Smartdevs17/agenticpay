@@ -1,0 +1,501 @@
+openapi: 3.0.3
+info:
+  title: AgenticPay Payout API
+  description: |
+    Payout API for AgenticPay - handles scheduled and on-demand payouts to merchants.
+    
+    ## Issue #1015: Document the payout API with OpenAPI examples
+    
+    This specification provides comprehensive documentation for the payout endpoints,
+    including request/response schemas and examples for both success and error cases.
+  version: 1.0.0
+  contact:
+    name: AgenticPay API Support
+    email: api-support@agenticpay.com
+servers:
+  - url: https://api.agenticpay.com/v1
+    description: Production server
+  - url: https://sandbox.agenticpay.com/v1
+    description: Sandbox server
+tags:
+  - name: Payouts
+    description: Payout management operations
+  - name: Schedules
+    description: Payout schedule configuration
+
+paths:
+  /payouts:
+    post:
+      summary: Create a payout
+      description: Create a new payout for a merchant
+      operationId: createPayout
+      tags:
+        - Payouts
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePayoutRequest'
+            examples:
+              basic:
+                summary: Basic payout
+                value:
+                  merchantId: "merch_abc123"
+                  amount: 1000.50
+                  asset: "USDC"
+                  recipientAddress: "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37"
+              large-payout:
+                summary: Large payout requiring approval
+                value:
+                  merchantId: "merch_xyz789"
+                  amount: 50000.00
+                  asset: "USDC"
+                  recipientAddress: "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37"
+                  metadata:
+                    reason: "Monthly settlement"
+      responses:
+        '201':
+          description: Payout created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutResponse'
+              examples:
+                success:
+                  summary: Successful payout creation
+                  value:
+                    id: "payout_1234567890"
+                    idempotencyKey: "idem_abc123xyz"
+                    merchantId: "merch_abc123"
+                    status: "pending"
+                    amount: 1000.50
+                    asset: "USDC"
+                    requiresApproval: false
+                    createdAt: "2026-10-17T22:30:00Z"
+                    updatedAt: "2026-10-17T22:30:00Z"
+                approval-required:
+                  summary: Payout requiring approval
+                  value:
+                    id: "payout_9876543210"
+                    idempotencyKey: "idem_xyz789abc"
+                    merchantId: "merch_xyz789"
+                    status: "pending"
+                    amount: 50000.00
+                    asset: "USDC"
+                    requiresApproval: true
+                    createdAt: "2026-10-17T22:30:00Z"
+                    updatedAt: "2026-10-17T22:30:00Z"
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid-amount:
+                  summary: Invalid amount
+                  value:
+                    error:
+                      code: "INVALID_AMOUNT"
+                      message: "Amount must be greater than zero"
+                      details:
+                        field: "amount"
+                        value: -100
+                unsupported-asset:
+                  summary: Unsupported asset
+                  value:
+                    error:
+                      code: "UNSUPPORTED_ASSET"
+                      message: "Asset BTC is not supported for payouts"
+                      details:
+                        supportedAssets: ["USDC", "USDT", "XLM", "EURC", "SAR"]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+    
+    get:
+      summary: List payouts
+      description: Retrieve a list of payouts for the authenticated merchant
+      operationId: listPayouts
+      tags:
+        - Payouts
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: merchantId
+          in: query
+          description: Filter by merchant ID
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by payout status
+          schema:
+            type: string
+            enum: [pending, executing, completed, failed]
+        - name: limit
+          in: query
+          description: Number of results to return
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Number of results to skip
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: List of payouts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutListResponse'
+              examples:
+                success:
+                  summary: Successful list response
+                  value:
+                    data:
+                      - id: "payout_1234567890"
+                        merchantId: "merch_abc123"
+                        status: "completed"
+                        amount: 1000.50
+                        asset: "USDC"
+                        createdAt: "2026-10-17T22:30:00Z"
+                        settledAt: "2026-10-17T22:35:00Z"
+                      - id: "payout_0987654321"
+                        merchantId: "merch_abc123"
+                        status: "pending"
+                        amount: 2500.00
+                        asset: "USDC"
+                        createdAt: "2026-10-17T23:00:00Z"
+                    pagination:
+                      limit: 20
+                      offset: 0
+                      total: 2
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /payouts/{payoutId}:
+    get:
+      summary: Get payout details
+      description: Retrieve detailed information about a specific payout
+      operationId: getPayout
+      tags:
+        - Payouts
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: payoutId
+          in: path
+          required: true
+          description: The payout ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payout details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutResponse'
+        '404':
+          description: Payout not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                not-found:
+                  value:
+                    error:
+                      code: "PAYOUT_NOT_FOUND"
+                      message: "Payout with ID payout_invalid123 not found"
+
+  /payouts/{payoutId}/approve:
+    post:
+      summary: Approve a payout
+      description: Approve a payout that requires manual approval
+      operationId: approvePayout
+      tags:
+        - Payouts
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: payoutId
+          in: path
+          required: true
+          description: The payout ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payout approved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutResponse'
+              examples:
+                success:
+                  value:
+                    id: "payout_9876543210"
+                    merchantId: "merch_xyz789"
+                    status: "executing"
+                    amount: 50000.00
+                    asset: "USDC"
+                    requiresApproval: true
+                    approvedBy: "user_approver123"
+                    approvedAt: "2026-10-17T23:00:00Z"
+        '403':
+          description: Insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                forbidden:
+                  value:
+                    error:
+                      code: "INSUFFICIENT_PERMISSIONS"
+                      message: "User does not have approval permissions"
+
+  /payout-schedules:
+    post:
+      summary: Create payout schedule
+      description: Configure a recurring payout schedule for a merchant
+      operationId: createPayoutSchedule
+      tags:
+        - Schedules
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateScheduleRequest'
+            examples:
+              daily:
+                summary: Daily payout schedule
+                value:
+                  merchantId: "merch_abc123"
+                  scheduleType: "daily"
+                  preferredAsset: "USDC"
+                  autoApproveLimit: 5000
+              threshold:
+                summary: Threshold-based schedule
+                value:
+                  merchantId: "merch_xyz789"
+                  scheduleType: "threshold"
+                  thresholdAmount: 10000
+                  preferredAsset: "USDT"
+                  autoApproveLimit: 8000
+      responses:
+        '201':
+          description: Schedule created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    CreatePayoutRequest:
+      type: object
+      required:
+        - merchantId
+        - amount
+        - asset
+      properties:
+        merchantId:
+          type: string
+          description: Merchant identifier
+        amount:
+          type: number
+          format: double
+          minimum: 0.01
+          description: Payout amount
+        asset:
+          type: string
+          enum: [USDC, USDT, XLM, EURC, SAR]
+          description: Asset/currency code
+        recipientAddress:
+          type: string
+          description: Recipient blockchain address or bank account
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Optional metadata
+
+    PayoutResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique payout identifier
+        idempotencyKey:
+          type: string
+          description: Idempotency key for deduplication
+        merchantId:
+          type: string
+          description: Merchant identifier
+        status:
+          type: string
+          enum: [pending, executing, completed, failed]
+          description: Current payout status
+        amount:
+          type: number
+          format: double
+          description: Payout amount
+        asset:
+          type: string
+          description: Asset/currency code
+        requiresApproval:
+          type: boolean
+          description: Whether manual approval is required
+        transactionHash:
+          type: string
+          description: Blockchain transaction hash (when settled)
+        errorMessage:
+          type: string
+          description: Error message if failed
+        approvedBy:
+          type: string
+          description: User ID who approved (if applicable)
+        approvedAt:
+          type: string
+          format: date-time
+          description: Approval timestamp
+        settledAt:
+          type: string
+          format: date-time
+          description: Settlement timestamp
+        createdAt:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    PayoutListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PayoutResponse'
+        pagination:
+          type: object
+          properties:
+            limit:
+              type: integer
+            offset:
+              type: integer
+            total:
+              type: integer
+
+    CreateScheduleRequest:
+      type: object
+      required:
+        - merchantId
+        - scheduleType
+        - preferredAsset
+      properties:
+        merchantId:
+          type: string
+        scheduleType:
+          type: string
+          enum: [daily, weekly, monthly, threshold]
+        thresholdAmount:
+          type: number
+          format: double
+          description: Required for threshold schedules
+        preferredAsset:
+          type: string
+          enum: [USDC, USDT, XLM, EURC, SAR]
+        autoApproveLimit:
+          type: number
+          format: double
+          description: Payouts below this amount are auto-approved
+
+    ScheduleResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        merchantId:
+          type: string
+        scheduleType:
+          type: string
+        thresholdAmount:
+          type: number
+          format: double
+        preferredAsset:
+          type: string
+        autoApproveLimit:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Error code
+            message:
+              type: string
+              description: Human-readable error message
+            details:
+              type: object
+              additionalProperties: true
+              description: Additional error details
+
+  responses:
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unauthorized:
+              value:
+                error:
+                  code: "UNAUTHORIZED"
+                  message: "Authentication required. Please provide a valid Bearer token."
+
+    RateLimitError:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            rate-limit:
+              value:
+                error:
+                  code: "RATE_LIMIT_EXCEEDED"
+                  message: "Too many requests. Please retry after 60 seconds."
+                  details:
+                    retryAfter: 60
