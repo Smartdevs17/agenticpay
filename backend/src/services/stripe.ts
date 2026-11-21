@@ -162,15 +162,37 @@ export async function submitDisputeEvidence(
 
 export function constructWebhookEvent(payload: Buffer, signature: string): Stripe.Event {
   const cfg = config();
-  if (!cfg.STRIPE_WEBHOOK_SECRET) {
+  const secrets = [cfg.STRIPE_WEBHOOK_SECRET, cfg.STRIPE_WEBHOOK_SECRET_PREVIOUS]
+    .map((secret) => secret.trim())
+    .filter((secret, index, all) => secret.length > 0 && all.indexOf(secret) === index);
+  return verifyStripeWebhookEvent(payload, signature, secrets, secrets.length > 0 ? getStripe() : undefined);
+}
+
+/** Verify against active and overlap secrets without exposing the values. */
+export function verifyStripeWebhookEvent(
+  payload: Buffer,
+  signature: string,
+  secrets: string[],
+  stripe: Stripe | undefined,
+): Stripe.Event {
+  if (secrets.length === 0) {
     throw new AppError(500, 'Stripe webhook secret not configured', 'STRIPE_WEBHOOK_NOT_CONFIGURED');
   }
-  const stripe = getStripe();
-  try {
-    return stripe.webhooks.constructEvent(payload, signature, cfg.STRIPE_WEBHOOK_SECRET);
-  } catch {
-    throw new AppError(400, 'Invalid webhook signature', 'INVALID_WEBHOOK_SIGNATURE');
+  const client = stripe ?? getStripe();
+  for (const [index, secret] of secrets.entries()) {
+    try {
+      const event = client.webhooks.constructEvent(payload, signature, secret);
+      if (index > 0) {
+        console.warn(JSON.stringify({ level: 'warn', message: 'Stripe webhook verified with previous signing secret', secretIndex: index }));
+      }
+      return event;
+    } catch {
+      // The signature header can contain one v1 signature per active Stripe
+      // secret. Try every configured key, and keep the failure response generic.
+    }
   }
+  console.warn(JSON.stringify({ level: 'warn', message: 'Stripe webhook signature verification failed', configuredSecretCount: secrets.length }));
+  throw new AppError(400, 'Invalid webhook signature', 'INVALID_WEBHOOK_SIGNATURE');
 }
 
 // ── Fee Tracking ─────────────────────────────────────────────────────────────

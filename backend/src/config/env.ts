@@ -26,6 +26,7 @@ const envSchema = z.object({
   VAPID_PRIVATE_KEY: z.string().default(''),
   STRIPE_SECRET_KEY: z.string().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().default(''),
+  STRIPE_WEBHOOK_SECRET_PREVIOUS: z.string().default(''),
   STRIPE_PUBLISHABLE_KEY: z.string().default(''),
   REDIS_URL: z.string().default(''),
   REDIS_ENABLED: z.coerce.string().transform((val) => val === 'true').default('false'),

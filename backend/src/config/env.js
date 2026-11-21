@@ -24,6 +24,7 @@ var envSchema = zod_1.z.object({
     VAPID_PRIVATE_KEY: zod_1.z.string().default(''),
     STRIPE_SECRET_KEY: zod_1.z.string().default(''),
     STRIPE_WEBHOOK_SECRET: zod_1.z.string().default(''),
+    STRIPE_WEBHOOK_SECRET_PREVIOUS: zod_1.z.string().default(''),
     STRIPE_PUBLISHABLE_KEY: zod_1.z.string().default(''),
 });
 var _config;
