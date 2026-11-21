@@ -48,6 +48,7 @@ exports.getDispute = getDispute;
 exports.listDisputes = listDisputes;
 exports.submitDisputeEvidence = submitDisputeEvidence;
 exports.constructWebhookEvent = constructWebhookEvent;
+exports.verifyStripeWebhookEvent = verifyStripeWebhookEvent;
 exports.recordFee = recordFee;
 exports.getFeeRecord = getFeeRecord;
 exports.listFeeRecords = listFeeRecords;
@@ -175,16 +176,30 @@ function submitDisputeEvidence(disputeId, evidence) {
 // ── Webhooks ─────────────────────────────────────────────────────────────────
 function constructWebhookEvent(payload, signature) {
     var cfg = (0, env_js_1.config)();
-    if (!cfg.STRIPE_WEBHOOK_SECRET) {
+    var secrets = [cfg.STRIPE_WEBHOOK_SECRET, cfg.STRIPE_WEBHOOK_SECRET_PREVIOUS]
+        .map(function (secret) { return secret.trim(); })
+        .filter(function (secret, index, all) { return secret.length > 0 && all.indexOf(secret) === index; });
+    return verifyStripeWebhookEvent(payload, signature, secrets, secrets.length > 0 ? getStripe() : undefined);
+}
+function verifyStripeWebhookEvent(payload, signature, secrets, stripe) {
+    if (secrets.length === 0) {
         throw new errorHandler_js_1.AppError(500, 'Stripe webhook secret not configured', 'STRIPE_WEBHOOK_NOT_CONFIGURED');
     }
-    var stripe = getStripe();
-    try {
-        return stripe.webhooks.constructEvent(payload, signature, cfg.STRIPE_WEBHOOK_SECRET);
+    var client = stripe !== null && stripe !== void 0 ? stripe : getStripe();
+    for (var index = 0; index < secrets.length; index += 1) {
+        try {
+            var event_1 = client.webhooks.constructEvent(payload, signature, secrets[index]);
+            if (index > 0) {
+                console.warn(JSON.stringify({ level: 'warn', message: 'Stripe webhook verified with previous signing secret', secretIndex: index }));
+            }
+            return event_1;
+        }
+        catch (_a) {
+            // Try each configured secret without exposing signature details to callers.
+        }
     }
-    catch (_a) {
-        throw new errorHandler_js_1.AppError(400, 'Invalid webhook signature', 'INVALID_WEBHOOK_SIGNATURE');
-    }
+    console.warn(JSON.stringify({ level: 'warn', message: 'Stripe webhook signature verification failed', configuredSecretCount: secrets.length }));
+    throw new errorHandler_js_1.AppError(400, 'Invalid webhook signature', 'INVALID_WEBHOOK_SIGNATURE');
 }
 // In-memory store; replace with DB in production
 var feeStore = new Map();
