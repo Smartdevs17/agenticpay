@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { logger } from '../utils/logger.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -258,4 +259,132 @@ export function validateTemplate(template: ProjectTemplate): { valid: boolean; e
 export function resetForTests(): void {
   templateStore.clear();
   usageIndex.clear();
+}
+
+export type InstantiatedWorkflowStep = {
+  id: string;
+  name: string;
+  type: TemplateStep['type'];
+  order: number;
+  config: Record<string, unknown>;
+};
+
+export type InstantiatedWorkflow = {
+  workflowId: string;
+  templateId: string;
+  templateVersion: number;
+  workspaceId?: string;
+  resolvedVariables: Record<string, unknown>;
+  steps: InstantiatedWorkflowStep[];
+  createdAt: string;
+};
+
+function matchesVariableType(value: unknown, expected: TemplateVariable['type']): boolean {
+  if (expected === 'string') return typeof value === 'string';
+  if (expected === 'number') return typeof value === 'number' && Number.isFinite(value);
+  if (expected === 'boolean') return typeof value === 'boolean';
+  if (expected === 'json') return value !== undefined && typeof value === 'object';
+  return false;
+}
+
+function interpolateValue(value: unknown, variables: Record<string, unknown>): unknown {
+  if (typeof value === 'string') {
+    const exactMatch = /^\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}$/.exec(value);
+    if (exactMatch && exactMatch[1] in variables) {
+      return variables[exactMatch[1]];
+    }
+    return value.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (match, key: string) =>
+      key in variables ? String(variables[key]) : match,
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => interpolateValue(item, variables));
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = interpolateValue(v, variables);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Instantiate a customizable workflow from a stored project template by
+ * validating template variables, interpolating `{{variable}}` placeholders,
+ * applying optional per-step config overrides, and recording usage.
+ */
+export function instantiateWorkflow(
+  templateId: string,
+  options: {
+    workspaceId?: string;
+    variables?: Record<string, unknown>;
+    stepOverrides?: Record<string, Partial<TemplateStep['config']>>;
+  } = {},
+): InstantiatedWorkflow {
+  const template = getTemplate(templateId);
+  if (!template) {
+    throw new Error(`Template not found: ${templateId}`);
+  }
+
+  const provided = options.variables ?? {};
+  const resolvedVariables: Record<string, unknown> = {};
+
+  for (const variable of template.variables) {
+    const hasProvided = Object.prototype.hasOwnProperty.call(provided, variable.name);
+    const value = hasProvided ? provided[variable.name] : variable.defaultValue;
+
+    if (value === undefined) {
+      if (variable.required) {
+        throw new Error(`Missing required template variable: ${variable.name}`);
+      }
+      continue;
+    }
+
+    if (!matchesVariableType(value, variable.type)) {
+      throw new Error(
+        `Invalid type for template variable "${variable.name}": expected ${variable.type}`,
+      );
+    }
+    resolvedVariables[variable.name] = value;
+  }
+
+  const orderedSteps = [...template.steps].sort((a, b) => a.order - b.order);
+  const steps: InstantiatedWorkflowStep[] = orderedSteps.map((step) => {
+    const mergedConfig = {
+      ...step.config,
+      ...(options.stepOverrides?.[step.id] ?? {}),
+    };
+    return {
+      id: step.id,
+      name: step.name,
+      type: step.type,
+      order: step.order,
+      config: interpolateValue(mergedConfig, resolvedVariables) as Record<string, unknown>,
+    };
+  });
+
+  if (options.workspaceId) {
+    trackUsage(template.id, options.workspaceId);
+  }
+
+  const workflow: InstantiatedWorkflow = {
+    workflowId: `wf_${randomUUID().slice(0, 12)}`,
+    templateId: template.id,
+    templateVersion: template.version,
+    workspaceId: options.workspaceId,
+    resolvedVariables,
+    steps,
+    createdAt: new Date().toISOString(),
+  };
+
+  logger.info('template.workflow_instantiated', {
+    workflowId: workflow.workflowId,
+    templateId: template.id,
+    workspaceId: options.workspaceId,
+    stepCount: steps.length,
+  });
+
+  return workflow;
 }

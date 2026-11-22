@@ -8,7 +8,7 @@ pub mod spend_policy;
 #[cfg(test)]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, xdr::ToXdr, Address, BytesN, Env, String, Vec};
 
 // ---------------------------------------------------------------------------
 // Multi-signature wallet types
@@ -865,6 +865,25 @@ impl AgenticPayContract {
             .instance()
             .get(&DataKey::ReceiptCount)
             .unwrap_or(0)
+    }
+
+    /// Compute the canonical SHA-256 hash of an on-chain receipt by id.
+    pub fn get_receipt_hash(env: Env, receipt_id: u64) -> BytesN<32> {
+        let receipt = Self::get_receipt(env.clone(), receipt_id);
+        env.crypto().sha256(&receipt.to_xdr(&env)).into()
+    }
+
+    /// Cryptographically verify that an on-chain receipt matches `expected_hash`.
+    /// Returns `false` if the receipt does not exist or its digest differs.
+    pub fn verify_receipt(env: Env, receipt_id: u64, expected_hash: BytesN<32>) -> bool {
+        let receipt: Option<Receipt> = env.storage().persistent().get(&DataKey::Receipt(receipt_id));
+        match receipt {
+            Some(r) => {
+                let actual: BytesN<32> = env.crypto().sha256(&r.to_xdr(&env)).into();
+                actual == expected_hash
+            }
+            None => false,
+        }
     }
 
     /// Store metadata key-value pair (admin only).
@@ -2097,6 +2116,47 @@ mod test {
             AgenticPayContract::calculate_batch_split(env.clone(), 1000, shares),
             Err(SplitterError::SharesDoNotSumToTotal)
         );
+    }
+
+    #[test]
+    fn test_onchain_receipt_hash_and_verification() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, AgenticPayContract);
+        let client = AgenticPayContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let client_addr = Address::generate(&env);
+        let freelancer = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract(token_admin.clone());
+        let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
+        token_admin_client.mint(&client_addr, &1_000);
+
+        client.initialize(&admin);
+        let project_id = client.create_project(
+            &client_addr,
+            &freelancer,
+            &token_id,
+            &500,
+            &String::from_str(&env, "USDC"),
+            &String::from_str(&env, "Build receipt QR"),
+            &86_400,
+        );
+        client.deposit(&project_id, &client_addr, &500);
+        client.submit_work(&project_id, &freelancer, &String::from_str(&env, "done"));
+        client.approve_work(&project_id, &client_addr);
+
+        let receipt_id = client.get_receipt_count();
+        assert_eq!(receipt_id, 1);
+
+        let digest = client.get_receipt_hash(&receipt_id);
+        assert!(client.verify_receipt(&receipt_id, &digest));
+
+        let wrong_hash = BytesN::from_array(&env, &[0xAB; 32]);
+        assert!(!client.verify_receipt(&receipt_id, &wrong_hash));
+        assert!(!client.verify_receipt(&999, &digest));
     }
 
 }
