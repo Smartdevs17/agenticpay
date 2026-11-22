@@ -10,6 +10,7 @@
  * - Completion incentive
  * - Analytics tracking
  * - Personalized recommendations on completion
+ * - Role picker that resumes saved progress for a returning user (#1372)
  */
 
 import React, { useEffect } from 'react';
@@ -21,6 +22,7 @@ import {
   selectProgress,
   selectIsLastStep,
   selectIsFirstStep,
+  type UserRole,
 } from '@/store/useOnboardingStore';
 
 // ─── Step content map ────────────────────────────────────────────────────────
@@ -130,6 +132,39 @@ function RecommendationsList() {
   );
 }
 
+// ─── Role picker ──────────────────────────────────────────────────────────────
+
+const ROLE_OPTIONS: { role: NonNullable<UserRole>; title: string; description: string }[] = [
+  { role: 'freelancer', title: 'Freelancer', description: 'Get paid for projects and milestones.' },
+  { role: 'client', title: 'Client', description: 'Hire talent and fund projects through escrow.' },
+  { role: 'merchant', title: 'Merchant', description: 'Accept payments in your product or store.' },
+];
+
+function RolePicker({ onSelect }: { onSelect: (role: NonNullable<UserRole>) => void }) {
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center px-4 py-8">
+      <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-8">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-2 text-center">How will you use AgenticPay?</h1>
+        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6 text-center">
+          We&apos;ll tailor the setup steps to you. Your progress is saved as you go.
+        </p>
+        <div className="space-y-3">
+          {ROLE_OPTIONS.map((option) => (
+            <button
+              key={option.role}
+              onClick={() => onSelect(option.role)}
+              className="w-full text-left p-4 rounded-lg border border-gray-200 dark:border-gray-600 hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">{option.title}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{option.description}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main wizard component ────────────────────────────────────────────────────
 
 export default function OnboardingWizardPage() {
@@ -147,19 +182,14 @@ export default function OnboardingWizardPage() {
     trackStepComplete,
     claimIncentive,
     incentiveClaimed,
+    resumeOrStart,
+    reset,
   } = useOnboardingStore();
 
   const currentStep = useOnboardingStore(selectCurrentStep);
   const progress = useOnboardingStore(selectProgress);
   const isLastStep = useOnboardingStore(selectIsLastStep);
   const isFirstStep = useOnboardingStore(selectIsFirstStep);
-
-  // Redirect to role selection if no role set
-  useEffect(() => {
-    if (!role) {
-      router.replace('/onboarding');
-    }
-  }, [role, router]);
 
   // Track step start on mount/change
   useEffect(() => {
@@ -182,7 +212,7 @@ export default function OnboardingWizardPage() {
     skipStep('user_skipped');
   };
 
-  if (!role) return null;
+  if (!role) return <RolePicker onSelect={resumeOrStart} />;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
@@ -191,8 +221,15 @@ export default function OnboardingWizardPage() {
         <div className="flex-1">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">{role} setup</span>
-            <span className="text-xs text-gray-500 dark:text-gray-400">
+            <span className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
               Step {currentStepIndex + 1} of {steps.length}
+              <button
+                onClick={reset}
+                className="underline hover:no-underline focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                aria-label="Start onboarding over"
+              >
+                Start over
+              </button>
             </span>
           </div>
           <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>

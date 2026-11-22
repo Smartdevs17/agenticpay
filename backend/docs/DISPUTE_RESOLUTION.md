@@ -54,6 +54,42 @@ Only one **active** (non-terminal) dispute is allowed per `paymentId`.
 Binary upload itself uses the existing `POST /api/v1/file-upload` category
 `dispute` (20MB). Callers then pass the returned URL into this evidence API.
 
+## Escrow dispute automation
+
+`src/services/disputeAutomation.ts` scores escrow dispute evidence and routes
+the dispute.
+
+**Evidence rubric** (`DEFAULT_EVIDENCE_RUBRIC`, version `2026-11`):
+
+| Criterion | Weight | How it is scored |
+|---|---|---|
+| relevance | 0.40 | Evidence type: transaction proof 100, document 90, screenshot 70, communication 60, other 40 |
+| credibility | 0.35 | 70 with a description over 20 characters, else 40; minus 10 when one party submits several items of the same type |
+| completeness | 0.25 | 80 with a file or link attached, else 40 |
+
+Each `EvidenceScore` carries a `breakdown` with the score, weight and a plain
+reason per criterion, plus flags (`vague_description`,
+`repeated_submission_type`, `missing_attachment`).
+`scoreEvidenceWithRubric(disputeId, rubric)` scores against a custom rubric
+(weights must sum to 1) without changing stored scores.
+
+**Automation**: `runDisputeAutomation({ disputeId, createdAt, escrowAmount })`
+combines the average evidence score (50%), dispute age (30%) and escrow amount
+(20%) into a priority score and routes to `auto_resolve`, `fast_track`,
+`standard` or `escalate`. Auto resolve also needs at least two evidence items
+and a dispute younger than 48 hours. Each decision is stored with its reasons
+(`getAutomationDecisions(disputeId)`), logged as `[dispute-automation] decision`
+and counted in the `dispute_automation.decision` metric (plus a
+`dispute_automation.priority_score` gauge), tagged by action and evidence
+strength. Metrics are a no-op until a sink is wired with
+`setDisputeAutomationMetrics(sink)`; the `metrics` object from
+`src/observability/datadog.ts` fits that interface once `hot-shots` is
+installed.
+
+Invalid input is rejected with `DisputeAutomationError`: unknown evidence
+types, URLs that are malformed or not `https`, `http` or `ipfs`, an unparseable
+`createdAt`, a negative escrow amount, or thresholds out of order.
+
 ## Resolution tracking
 
 Resolving a dispute writes:

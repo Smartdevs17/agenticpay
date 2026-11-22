@@ -5,7 +5,10 @@
  *
  * Onboarding state with:
  * - Multi-step wizard with role-based paths (freelancer vs client)
- * - Progress persistence across sessions (localStorage via Zustand persist)
+ * - Progress persistence across sessions (localStorage via Zustand persist),
+ *   versioned and sanitised on rehydrate so stale or tampered state can't
+ *   strand the wizard on a step that no longer exists (#1372)
+ * - Resume at the first unfinished step when the same role comes back
  * - Personalized recommendations
  * - Skip functionality for experienced users
  * - Onboarding analytics (completion tracking, drop-off)
@@ -184,6 +187,8 @@ interface OnboardingState {
 interface OnboardingActions {
   // Setup
   initWizard: (role: UserRole) => void;
+  /** Resume saved progress for this role, or start fresh if there is none. */
+  resumeOrStart: (role: NonNullable<UserRole>) => void;
   setRole: (role: UserRole) => void;
 
   // Navigation
@@ -228,6 +233,72 @@ function createInitialAnalytics(): OnboardingAnalytics {
   };
 }
 
+// ─── Persistence helpers ──────────────────────────────────────────────────────
+
+export const ONBOARDING_PERSIST_VERSION = 1;
+
+const ROLES = Object.keys(ROLE_STEP_PATHS) as NonNullable<UserRole>[];
+const STEP_STATUSES: StepProgress['status'][] = ['not_started', 'in_progress', 'completed', 'skipped'];
+
+type PersistedOnboarding = Pick<
+  OnboardingState,
+  'role' | 'currentStepIndex' | 'steps' | 'analytics' | 'incentiveClaimed' | 'onboarding'
+>;
+
+/** Index of the first step that is neither completed nor skipped. */
+export function getResumeStepIndex(steps: string[], progress: StepProgress[]): number {
+  const done = new Set(
+    progress.filter((p) => p.status === 'completed' || p.status === 'skipped').map((p) => p.stepId),
+  );
+  const index = steps.findIndex((step) => !done.has(step));
+  return index === -1 ? Math.max(steps.length - 1, 0) : index;
+}
+
+/**
+ * Rebuild persisted onboarding state against the current step paths. Unknown
+ * roles are dropped, the step list always comes from ROLE_STEP_PATHS, progress
+ * for steps that no longer exist is discarded and the step index is clamped.
+ */
+export function sanitizePersistedOnboarding(persisted: unknown): Partial<PersistedOnboarding> {
+  if (!persisted || typeof persisted !== 'object') return {};
+  const raw = persisted as Partial<PersistedOnboarding>;
+
+  const role = ROLES.includes(raw.role as NonNullable<UserRole>) ? (raw.role as NonNullable<UserRole>) : null;
+  const steps = ROLE_STEP_PATHS[role ?? 'client'];
+
+  const rawIndex = Number(raw.currentStepIndex);
+  const currentStepIndex = Number.isInteger(rawIndex)
+    ? Math.min(Math.max(rawIndex, 0), steps.length - 1)
+    : 0;
+
+  const result: Partial<PersistedOnboarding> = {
+    role,
+    steps,
+    currentStepIndex: role ? currentStepIndex : 0,
+    incentiveClaimed: raw.incentiveClaimed === true,
+    onboarding: raw.onboarding ?? null,
+  };
+
+  const analytics = raw.analytics;
+  if (analytics && typeof analytics === 'object') {
+    const saved = new Map(
+      (Array.isArray(analytics.stepsProgress) ? analytics.stepsProgress : [])
+        .filter((sp) => sp && steps.includes(sp.stepId) && STEP_STATUSES.includes(sp.status))
+        .map((sp) => [sp.stepId, sp] as const),
+    );
+    result.analytics = {
+      ...createInitialAnalytics(),
+      ...analytics,
+      variant: analytics.variant === 'B' ? 'B' : 'A',
+      role,
+      stepsProgress: role ? steps.map((stepId) => saved.get(stepId) ?? { stepId, status: 'not_started' }) : [],
+      dropOffEvents: Array.isArray(analytics.dropOffEvents) ? analytics.dropOffEvents : [],
+    };
+  }
+
+  return result;
+}
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useOnboardingStore = create<OnboardingStore>()(
@@ -261,6 +332,17 @@ export const useOnboardingStore = create<OnboardingStore>()(
             lastActiveAt: new Date().toISOString(),
           },
         }));
+      },
+
+      resumeOrStart: (role) => {
+        const { role: savedRole, analytics } = get();
+        const hasProgress = analytics.stepsProgress.some((sp) => sp.status !== 'not_started');
+        if (savedRole !== role || !hasProgress) {
+          get().initWizard(role);
+          return;
+        }
+        const steps = ROLE_STEP_PATHS[role];
+        set({ steps, currentStepIndex: getResumeStepIndex(steps, analytics.stepsProgress) });
       },
 
       setRole: (role) => {
@@ -454,6 +536,9 @@ export const useOnboardingStore = create<OnboardingStore>()(
     }),
     {
       name: 'agenticpay-onboarding',
+      version: ONBOARDING_PERSIST_VERSION,
+      migrate: (persisted) => sanitizePersistedOnboarding(persisted) as OnboardingStore,
+      merge: (persisted, current) => ({ ...current, ...sanitizePersistedOnboarding(persisted) }),
       storage: createJSONStorage(() => (typeof localStorage !== 'undefined' ? localStorage : sessionStorage)),
       // Only persist the essential state
       partialize: (state) => ({
