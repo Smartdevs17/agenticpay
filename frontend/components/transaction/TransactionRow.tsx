@@ -4,16 +4,28 @@ import { forwardRef, useLayoutEffect, useRef } from 'react';
 import { CheckCircle2, Clock, ExternalLink, XCircle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { CopyButton } from '@/components/ui/copy-button';
+import { assertNever } from '@/components/common/discriminated-union';
 import type { Payment } from '@/lib/types';
 
-export interface TransactionRowProps {
-  payment: Payment;
-  timezone?: string;
-  formatDateTime: (timestamp: string, timezone?: string) => string;
-  onHeightChange?: (id: string, height: number) => void;
-  isSelected?: boolean;
-  isFocused?: boolean;
-}
+export type TransactionRowProps =
+  | {
+      variant?: 'standard';
+      payment: Payment;
+      timezone?: string;
+      formatDateTime: (timestamp: string, timezone?: string) => string;
+      onHeightChange?: (id: string, height: number) => void;
+      isSelected?: boolean;
+      isFocused?: boolean;
+    }
+  | {
+      variant: 'selectable';
+      payment: Payment;
+      timezone?: string;
+      formatDateTime: (timestamp: string, timezone?: string) => string;
+      onHeightChange?: (id: string, height: number) => void;
+      isSelected: boolean;
+      isFocused?: boolean;
+    };
 
 function StatusIcon({ status }: { status: Payment['status'] }) {
   switch (status) {
@@ -23,8 +35,10 @@ function StatusIcon({ status }: { status: Payment['status'] }) {
       return <Clock className="h-5 w-5 text-yellow-600" aria-hidden />;
     case 'failed':
       return <XCircle className="h-5 w-5 text-red-600" aria-hidden />;
-    default:
-      return null;
+    default: {
+      const _exhaustive: never = status;
+      return assertNever(_exhaustive);
+    }
   }
 }
 

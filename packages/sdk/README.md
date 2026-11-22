@@ -54,6 +54,29 @@ npm run example:errors
 - Auth helpers and interceptors
 - Retry/backoff support
 - Verification, split payments, and refunds APIs
+- Fluent, immutable Soroban transaction builder (`createSorobanTransactionBuilder`)
+
+## Soroban Transaction Building
+
+```ts
+import { createSorobanTransactionBuilder } from '@agenticpay/sdk';
+
+const builder = createSorobanTransactionBuilder()
+  .forAccount(sourcePublicKey, sequenceNumber)
+  .withNetwork('testnet')
+  .withFee(100)
+  .withTimeout(30)
+  .withMemo('Invoice settlement')
+  .invokeContract({
+    contractId: 'C...',
+    method: 'transfer',
+    args: [recipientAddress, 1000],
+  });
+
+// Simulate and build
+const simResult = await builder.simulate(rpcServer);
+const tx = builder.assemble(simResult).build();
+```
 
 ## OpenAPI client
 

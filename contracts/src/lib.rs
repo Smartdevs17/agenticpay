@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 15011)
-Total output lines: 1876
-
 #![no_std]
 
 pub mod anchor;
@@ -156,6 +153,41 @@ pub struct ProjectInput {
     pub description: String,
     pub github_repo: String,
 }
+
+
+/// Share configuration for a recipient in a batch payment split.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplitRecipientShare {
+    pub recipient: Address,
+    /// Basis points (1..=10_000, where 10_000 = 100%).
+    pub share_bps: u32,
+}
+
+/// Calculated payout for a single recipient after splitting.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PayoutAllocation {
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+/// Errors returned by the batch payment splitter.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum SplitterError {
+    EmptyRecipients = 1,
+    MaxRecipientsExceeded = 2,
+    InvalidAmount = 3,
+    InvalidShareBps = 4,
+    SharesDoNotSumToTotal = 5,
+    DuplicateRecipient = 6,
+    ArithmeticOverflow = 7,
+}
+
+pub const MAX_SPLIT_RECIPIENTS: u32 = 100;
+pub const BPS_DIVISOR: i128 = 10_000;
 
 #[contract]
 pub struct AgenticPayContract;
@@ -358,8 +390,7 @@ impl AgenticPayContract {
         let timestamp = env.ledger().timestamp();
         let mut ids = Vec::new(&env);
 
-        for i in 0..projects.len() {
-            let input = projects.get(i).expect("Invalid project input");
+        for input in projects.iter() {
             count += 1;
 
             let project = Project {
@@ -395,6 +426,92 @@ impl AgenticPayContract {
         Self::_release_lock(&env);
         ids
     }
+
+    /// Calculate batch payment split across recipients using idiomatic iterators.
+    ///
+    /// Preserves exact money conservation:
+    /// Σ payout.amount == total_amount
+    ///
+    /// Distributes remainder 1 minor unit per recipient in order of original
+    /// declaration until remainder is exhausted, ensuring deterministic allocations.
+    pub fn calculate_batch_split(
+        env: Env,
+        total_amount: i128,
+        shares: Vec<SplitRecipientShare>,
+    ) -> Result<Vec<PayoutAllocation>, SplitterError> {
+        if total_amount <= 0 {
+            return Err(SplitterError::InvalidAmount);
+        }
+        let count = shares.len();
+        if count == 0 {
+            return Err(SplitterError::EmptyRecipients);
+        }
+        if count > MAX_SPLIT_RECIPIENTS {
+            return Err(SplitterError::MaxRecipientsExceeded);
+        }
+
+        // Validate total shares sum to exactly 10_000 bps using checked try_fold
+        let total_bps = shares
+            .iter()
+            .try_fold(0u32, |acc, share| {
+                if share.share_bps == 0 || share.share_bps > 10_000 {
+                    Err(SplitterError::InvalidShareBps)
+                } else {
+                    acc.checked_add(share.share_bps)
+                        .ok_or(SplitterError::ArithmeticOverflow)
+                }
+            })?;
+
+        if total_bps != 10_000 {
+            return Err(SplitterError::SharesDoNotSumToTotal);
+        }
+
+        // Validate no duplicate recipients using iterators
+        let has_duplicates = (0..count).any(|i| {
+            let addr_i = shares.get(i).unwrap().recipient;
+            (i + 1..count).any(|j| shares.get(j).unwrap().recipient == addr_i)
+        });
+        if has_duplicates {
+            return Err(SplitterError::DuplicateRecipient);
+        }
+
+        // Compute base payouts with checked multiplication
+        let mut base_allocations = Vec::new(&env);
+        let mut allocated_sum: i128 = 0;
+
+        for share in shares.iter() {
+            let mul = total_amount
+                .checked_mul(share.share_bps as i128)
+                .ok_or(SplitterError::ArithmeticOverflow)?;
+            let base = mul / BPS_DIVISOR;
+            allocated_sum = allocated_sum
+                .checked_add(base)
+                .ok_or(SplitterError::ArithmeticOverflow)?;
+            base_allocations.push_back((share.recipient.clone(), base));
+        }
+
+        let mut remainder = total_amount
+            .checked_sub(allocated_sum)
+            .ok_or(SplitterError::ArithmeticOverflow)?;
+
+        let mut payouts = Vec::new(&env);
+        for item in base_allocations.iter() {
+            let extra = if remainder > 0 {
+                remainder -= 1;
+                1i128
+            } else {
+                0i128
+            };
+            let amount = item.1.checked_add(extra).ok_or(SplitterError::ArithmeticOverflow)?;
+            payouts.push_back(PayoutAllocation {
+                recipient: item.0,
+                amount,
+            });
+        }
+
+        Ok(payouts)
+    }
+
 
     /// Fund a project escrow with XLM.
     ///
@@ -624,7 +741,631 @@ impl AgenticPayContract {
             .storage()
             .persistent()
             .get(&DataKey::Project(project_id))
-            .expect("P…5011 tokens truncated…stent()
+            .expect("Project not found");
+
+        assert!(
+            project.status == ProjectStatus::Disputed,
+            "Project must be disputed"
+        );
+
+        // --- Effects (zero deposited BEFORE any token transfer interaction) ---
+        let _refund_amount = project.deposited;
+        project.deposited = 0;
+
+        if release_to_freelancer {
+            project.status = ProjectStatus::Completed;
+        } else {
+            project.status = ProjectStatus::Cancelled;
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Project(project_id), &project);
+
+        // --- Interactions ---
+        // TODO: Transfer `_refund_amount` to freelancer or client via
+        //       Stellar token contract. The state is already committed above
+        //       so any re-entrant call will see deposited == 0.
+
+        Self::_release_lock(&env);
+    }
+
+    /// Check if a project's deadline has expired and auto-cancel if so.
+    ///
+    /// If the project has a non-zero deadline that has passed and the project
+    /// is not already completed, cancelled, or disputed, it is automatically
+    /// cancelled and escrow funds are marked for refund to the client.
+    ///
+    /// Anyone can call this function to trigger the check.
+    ///
+    /// Returns `true` if the project was auto-cancelled, `false` otherwise.
+    ///
+    /// CEI: `deposited` is zeroed and status set to `Cancelled` before the
+    /// refund interaction (currently stubbed).
+    pub fn check_deadline(env: Env, project_id: u64) -> bool {
+        // --- Checks ---
+        // Note: check_deadline is intentionally callable while paused so that
+        // expired projects can always be cleaned up. The circuit breaker only
+        // blocks fund-moving operations.
+        Self::_acquire_lock(&env);
+
+        let mut project: Project = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Project(project_id))
+            .expect("Project not found");
+
+        // No deadline set or already in a terminal state
+        if project.deadline == 0 {
+            Self::_release_lock(&env);
+            return false;
+        }
+        if project.status == ProjectStatus::Completed
+            || project.status == ProjectStatus::Cancelled
+            || project.status == ProjectStatus::Disputed
+        {
+            Self::_release_lock(&env);
+            return false;
+        }
+
+        let now = env.ledger().timestamp();
+        if now < project.deadline {
+            Self::_release_lock(&env);
+            return false;
+        }
+
+        // --- Effects (zero deposited BEFORE any refund interaction) ---
+        let refund_amount = project.deposited;
+        project.deposited = 0;
+        project.status = ProjectStatus::Cancelled;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Project(project_id), &project);
+
+        // --- Interactions ---
+        env.events().publish(
+            (symbol_short!("project"), symbol_short!("expired")),
+            (project_id, refund_amount),
+        );
+        // TODO: Transfer `refund_amount` back to project.client via Stellar
+        //       token contract. State is already committed above.
+
+        Self::_release_lock(&env);
+        true
+    }
+
+    /// Get project details
+    pub fn get_project(env: Env, project_id: u64) -> Project {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Project(project_id))
+            .expect("Project not found")
+    }
+
+    /// Get total project count
+    pub fn get_project_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ProjectCount)
+            .unwrap_or(0)
+    }
+
+    /// Get receipt details by on-chain receipt id.
+    pub fn get_receipt(env: Env, receipt_id: u64) -> Receipt {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Receipt(receipt_id))
+            .expect("Receipt not found")
+    }
+
+    /// Get total receipt count.
+    pub fn get_receipt_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ReceiptCount)
+            .unwrap_or(0)
+    }
+
+    /// Store metadata key-value pair (admin only).
+    pub fn set_metadata(env: Env, admin: Address, key: String, value: String) {
+        Self::_require_not_paused(&env);
+        admin.require_auth();
+        Self::_acquire_lock(&env);
+        let stored_admin = Self::get_admin(&env);
+        assert!(admin == stored_admin, "Only admin can set metadata");
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Metadata(key.clone()), &value);
+
+        env.events().publish(
+            (symbol_short!("meta"), symbol_short!("set")),
+            (key, value),
+        );
+
+        Self::_release_lock(&env);
+    }
+
+    /// Read metadata by key
+    pub fn get_metadata(env: Env, key: String) -> Option<String> {
+        env.storage().persistent().get(&DataKey::Metadata(key))
+    }
+
+    /// Remove metadata entry (admin only).
+    pub fn remove_metadata(env: Env, admin: Address, key: String) {
+        Self::_require_not_paused(&env);
+        admin.require_auth();
+        Self::_acquire_lock(&env);
+        let stored_admin = Self::get_admin(&env);
+        assert!(admin == stored_admin, "Only admin can remove metadata");
+
+        env.storage().persistent().remove(&DataKey::Metadata(key.clone()));
+
+        env.events().publish(
+            (symbol_short!("meta"), symbol_short!("del")),
+            key,
+        );
+
+        Self::_release_lock(&env);
+    }
+    /// Upgrade the contract WASM code. Admin-only.
+    ///
+    /// Uses Soroban's built-in upgrade mechanism which replaces the contract
+    /// bytecode while preserving all persistent and instance storage. This
+    /// allows the contract to be upgraded without redeploying or migrating data.
+    ///
+    /// Upgrades are intentionally allowed even when paused so that a security
+    /// patch can be deployed during an active circuit-breaker event.
+    ///
+    /// # Arguments
+    /// * `admin` - Must match the stored admin address
+    /// * `new_wasm_hash` - SHA-256 hash of the new WASM binary (uploaded via `soroban contract install`)
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        assert!(admin == stored_admin, "Only admin can upgrade");
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Return the contract version for tracking upgrades.
+    pub fn version(_env: Env) -> u32 {
+        1
+    }
+
+    // -----------------------------------------------------------------------
+    // Multi-signature wallet management
+    // -----------------------------------------------------------------------
+
+    /// Create a new multisig wallet with the given signers and threshold.
+    ///
+    /// # Arguments
+    /// * `creator`       - Address authorizing the creation
+    /// * `signers`       - Vec of signer addresses (min 2)
+    /// * `threshold`     - Number of approvals required (1..=signers.len())
+    /// * `timeout_ledgers` - Ledgers before proposals auto-expire (0 = never)
+    ///
+    /// # Returns
+    /// The new wallet id.
+    pub fn create_multisig_wallet(
+        env: Env,
+        creator: Address,
+        signers: Vec<Address>,
+        threshold: u32,
+        timeout_ledgers: u64,
+    ) -> u64 {
+        Self::_require_not_paused(&env);
+        creator.require_auth();
+        Self::_acquire_lock(&env);
+
+        assert!(signers.len() >= 2, "At least 2 signers required");
+        assert!(threshold >= 1, "Threshold must be at least 1");
+        assert!(
+            threshold as u32 <= signers.len(),
+            "Threshold cannot exceed number of signers"
+        );
+
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigWalletCount)
+            .unwrap_or(0);
+        count += 1;
+
+        let wallet = MultisigWallet {
+            id: count,
+            signers,
+            threshold,
+            timeout_ledgers,
+            active: true,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigWallet(count), &wallet);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigWalletCount, &count);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("created")),
+            (count, threshold),
+        );
+
+        Self::_release_lock(&env);
+        count
+    }
+
+    /// Retrieve a multisig wallet by id.
+    pub fn get_multisig_wallet(env: Env, wallet_id: u64) -> MultisigWallet {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found")
+    }
+
+    /// Add a new signer to an existing wallet.
+    ///
+    /// Requires the caller to already be a signer (one-of-N consensus is
+    /// enforced off-chain via the proposal flow; this entry-point is for
+    /// direct admin-level additions authorized by the wallet creator).
+    pub fn add_multisig_signer(
+        env: Env,
+        authorizer: Address,
+        wallet_id: u64,
+        new_signer: Address,
+    ) {
+        Self::_require_not_paused(&env);
+        authorizer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found");
+
+        assert!(wallet.active, "Wallet is inactive");
+
+        // Ensure authorizer is an existing signer.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == authorizer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Authorizer is not a signer");
+
+        wallet.signers.push_back(new_signer.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigWallet(wallet_id), &wallet);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("sgn_add")),
+            (wallet_id, new_signer),
+        );
+
+        Self::_release_lock(&env);
+    }
+
+    /// Remove a signer from an existing wallet.
+    ///
+    /// The resulting signer count must remain >= threshold.
+    pub fn remove_multisig_signer(
+        env: Env,
+        authorizer: Address,
+        wallet_id: u64,
+        signer_to_remove: Address,
+    ) {
+        Self::_require_not_paused(&env);
+        authorizer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found");
+
+        assert!(wallet.active, "Wallet is inactive");
+
+        let mut is_authorizer_signer = false;
+        let mut remove_idx: Option<u32> = None;
+        for i in 0..wallet.signers.len() {
+            let s = wallet.signers.get(i).unwrap();
+            if s == authorizer {
+                is_authorizer_signer = true;
+            }
+            if s == signer_to_remove {
+                remove_idx = Some(i);
+            }
+        }
+        assert!(is_authorizer_signer, "Authorizer is not a signer");
+        assert!(remove_idx.is_some(), "Signer to remove not found");
+
+        let new_len = wallet.signers.len() - 1;
+        assert!(new_len >= 2, "Cannot reduce below 2 signers");
+        assert!(
+            wallet.threshold as u32 <= new_len,
+            "Removal would make threshold unreachable"
+        );
+
+        // Rebuild signers vec without the removed address.
+        let mut new_signers = Vec::new(&env);
+        for i in 0..wallet.signers.len() {
+            if Some(i) != remove_idx {
+                new_signers.push_back(wallet.signers.get(i).unwrap());
+            }
+        }
+        wallet.signers = new_signers;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigWallet(wallet_id), &wallet);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("sgn_rem")),
+            (wallet_id, signer_to_remove),
+        );
+
+        Self::_release_lock(&env);
+    }
+
+    /// Create a transaction proposal for a multisig wallet.
+    ///
+    /// # Returns
+    /// The new proposal id.
+    pub fn create_multisig_proposal(
+        env: Env,
+        proposer: Address,
+        wallet_id: u64,
+        amount: i128,
+        recipient: Address,
+        description: String,
+    ) -> u64 {
+        Self::_require_not_paused(&env);
+        proposer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(wallet_id))
+            .expect("Multisig wallet not found");
+        assert!(wallet.active, "Wallet is inactive");
+        assert!(amount > 0, "Amount must be positive");
+
+        // Ensure proposer is a signer.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == proposer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Proposer is not a signer of this wallet");
+
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigProposalCount)
+            .unwrap_or(0);
+        count += 1;
+
+        let now = env.ledger().timestamp();
+        let expires_at = if wallet.timeout_ledgers > 0 {
+            now + wallet.timeout_ledgers
+        } else {
+            0
+        };
+
+        // Proposer's approval is implicit.
+        let mut initial_approvals = Vec::new(&env);
+        initial_approvals.push_back(proposer.clone());
+
+        let proposal = MultisigProposal {
+            id: count,
+            wallet_id,
+            amount,
+            recipient: recipient.clone(),
+            description,
+            status: MultisigProposalStatus::Pending,
+            approvals: initial_approvals,
+            rejections: Vec::new(&env),
+            created_at: now,
+            expires_at,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(count), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigProposalCount, &count);
+
+        env.events().publish(
+            (symbol_short!("msig"), symbol_short!("prop")),
+            (count, wallet_id, amount, recipient),
+        );
+
+        Self::_release_lock(&env);
+        count
+    }
+
+    /// Approve a multisig proposal.
+    ///
+    /// When the approval count reaches the wallet threshold the proposal is
+    /// automatically marked Executed and a payment event is emitted.
+    pub fn approve_multisig_proposal(
+        env: Env,
+        signer: Address,
+        proposal_id: u64,
+    ) {
+        Self::_require_not_paused(&env);
+        signer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        assert!(
+            proposal.status == MultisigProposalStatus::Pending,
+            "Proposal is not pending"
+        );
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(proposal.wallet_id))
+            .expect("Wallet not found");
+
+        // Auto-expire check.
+        if proposal.expires_at > 0 && env.ledger().timestamp() >= proposal.expires_at {
+            proposal.status = MultisigProposalStatus::Expired;
+            env.storage()
+                .persistent()
+                .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+            Self::_release_lock(&env);
+            panic!("Proposal has expired");
+        }
+
+        // Verify signer membership.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == signer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Not a signer of this wallet");
+
+        // Idempotency: skip if already approved.
+        for i in 0..proposal.approvals.len() {
+            if proposal.approvals.get(i).unwrap() == signer {
+                Self::_release_lock(&env);
+                return;
+            }
+        }
+
+        proposal.approvals.push_back(signer.clone());
+
+        if proposal.approvals.len() >= wallet.threshold {
+            proposal.status = MultisigProposalStatus::Executed;
+            env.events().publish(
+                (symbol_short!("msig"), symbol_short!("exec")),
+                (proposal_id, proposal.wallet_id, proposal.amount, proposal.recipient.clone()),
+            );
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+
+        Self::_release_lock(&env);
+    }
+
+    /// Reject a multisig proposal.
+    ///
+    /// If the number of rejections makes the threshold unreachable the
+    /// proposal is marked Rejected immediately.
+    pub fn reject_multisig_proposal(
+        env: Env,
+        signer: Address,
+        proposal_id: u64,
+    ) {
+        Self::_require_not_paused(&env);
+        signer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        assert!(
+            proposal.status == MultisigProposalStatus::Pending,
+            "Proposal is not pending"
+        );
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigWallet(proposal.wallet_id))
+            .expect("Wallet not found");
+
+        // Verify signer membership.
+        let mut is_signer = false;
+        for i in 0..wallet.signers.len() {
+            if wallet.signers.get(i).unwrap() == signer {
+                is_signer = true;
+                break;
+            }
+        }
+        assert!(is_signer, "Not a signer of this wallet");
+
+        // Idempotency.
+        for i in 0..proposal.rejections.len() {
+            if proposal.rejections.get(i).unwrap() == signer {
+                Self::_release_lock(&env);
+                return;
+            }
+        }
+
+        proposal.rejections.push_back(signer);
+
+        // If enough rejections to block the threshold, finalize.
+        let blocking = wallet.signers.len() - wallet.threshold + 1;
+        if proposal.rejections.len() >= blocking {
+            proposal.status = MultisigProposalStatus::Rejected;
+            env.events().publish(
+                (symbol_short!("msig"), symbol_short!("reject")),
+                (proposal_id, proposal.wallet_id),
+            );
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigProposal(proposal_id), &proposal);
+
+        Self::_release_lock(&env);
+    }
+
+    /// Cancel a pending proposal (any signer may cancel).
+    pub fn cancel_multisig_proposal(
+        env: Env,
+        signer: Address,
+        proposal_id: u64,
+    ) {
+        Self::_require_not_paused(&env);
+        signer.require_auth();
+        Self::_acquire_lock(&env);
+
+        let mut proposal: MultisigProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultisigProposal(proposal_id))
+            .expect("Proposal not found");
+
+        assert!(
+            proposal.status == MultisigProposalStatus::Pending,
+            "Only pending proposals can be cancelled"
+        );
+
+        let wallet: MultisigWallet = env
+            .storage()
+            .persistent()
             .get(&DataKey::MultisigWallet(proposal.wallet_id))
             .expect("Wallet not found");
 
@@ -1250,4 +1991,112 @@ mod test {
         assert_eq!(project.deposited, 0);
         assert_eq!(project.status, ProjectStatus::Completed);
     }
+
+    #[test]
+    fn test_batch_split_even() {
+        let env = Env::default();
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+
+        let mut shares = Vec::new(&env);
+        shares.push_back(SplitRecipientShare { recipient: r1.clone(), share_bps: 5_000 });
+        shares.push_back(SplitRecipientShare { recipient: r2.clone(), share_bps: 5_000 });
+
+        let payouts = AgenticPayContract::calculate_batch_split(env.clone(), 1000, shares).unwrap();
+        assert_eq!(payouts.len(), 2);
+        assert_eq!(payouts.get(0).unwrap().amount, 500);
+        assert_eq!(payouts.get(1).unwrap().amount, 500);
+        assert_eq!(payouts.get(0).unwrap().recipient, r1);
+        assert_eq!(payouts.get(1).unwrap().recipient, r2);
+    }
+
+    #[test]
+    fn test_batch_split_uneven_with_remainder() {
+        let env = Env::default();
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let r3 = Address::generate(&env);
+
+        let mut shares = Vec::new(&env);
+        shares.push_back(SplitRecipientShare { recipient: r1.clone(), share_bps: 3_333 });
+        shares.push_back(SplitRecipientShare { recipient: r2.clone(), share_bps: 3_333 });
+        shares.push_back(SplitRecipientShare { recipient: r3.clone(), share_bps: 3_334 });
+
+        // Total 100 stroops: 100 * 3333 / 10000 = 33, 100 * 3334 / 10000 = 33. sum base = 99. Remainder = 1.
+        // Remainder 1 goes to the first recipient in order.
+        let payouts = AgenticPayContract::calculate_batch_split(env.clone(), 100, shares).unwrap();
+        assert_eq!(payouts.len(), 3);
+        assert_eq!(payouts.get(0).unwrap().amount, 34); // 33 + 1 remainder
+        assert_eq!(payouts.get(1).unwrap().amount, 33);
+        assert_eq!(payouts.get(2).unwrap().amount, 33);
+        assert_eq!(payouts.get(0).unwrap().amount + payouts.get(1).unwrap().amount + payouts.get(2).unwrap().amount, 100);
+    }
+
+    #[test]
+    fn test_batch_split_single_recipient() {
+        let env = Env::default();
+        let r1 = Address::generate(&env);
+
+        let mut shares = Vec::new(&env);
+        shares.push_back(SplitRecipientShare { recipient: r1.clone(), share_bps: 10_000 });
+
+        let payouts = AgenticPayContract::calculate_batch_split(env.clone(), 5000, shares).unwrap();
+        assert_eq!(payouts.len(), 1);
+        assert_eq!(payouts.get(0).unwrap().amount, 5000);
+        assert_eq!(payouts.get(0).unwrap().recipient, r1);
+    }
+
+    #[test]
+    fn test_batch_split_empty_and_zero_amount() {
+        let env = Env::default();
+        let empty_shares = Vec::new(&env);
+        assert_eq!(
+            AgenticPayContract::calculate_batch_split(env.clone(), 1000, empty_shares),
+            Err(SplitterError::EmptyRecipients)
+        );
+
+        let r1 = Address::generate(&env);
+        let mut shares = Vec::new(&env);
+        shares.push_back(SplitRecipientShare { recipient: r1, share_bps: 10_000 });
+        assert_eq!(
+            AgenticPayContract::calculate_batch_split(env.clone(), 0, shares.clone()),
+            Err(SplitterError::InvalidAmount)
+        );
+        assert_eq!(
+            AgenticPayContract::calculate_batch_split(env.clone(), -50, shares),
+            Err(SplitterError::InvalidAmount)
+        );
+    }
+
+    #[test]
+    fn test_batch_split_duplicate_recipient() {
+        let env = Env::default();
+        let r1 = Address::generate(&env);
+
+        let mut shares = Vec::new(&env);
+        shares.push_back(SplitRecipientShare { recipient: r1.clone(), share_bps: 5_000 });
+        shares.push_back(SplitRecipientShare { recipient: r1.clone(), share_bps: 5_000 });
+
+        assert_eq!(
+            AgenticPayContract::calculate_batch_split(env.clone(), 1000, shares),
+            Err(SplitterError::DuplicateRecipient)
+        );
+    }
+
+    #[test]
+    fn test_batch_split_shares_not_10000() {
+        let env = Env::default();
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+
+        let mut shares = Vec::new(&env);
+        shares.push_back(SplitRecipientShare { recipient: r1, share_bps: 4_000 });
+        shares.push_back(SplitRecipientShare { recipient: r2, share_bps: 5_000 });
+
+        assert_eq!(
+            AgenticPayContract::calculate_batch_split(env.clone(), 1000, shares),
+            Err(SplitterError::SharesDoNotSumToTotal)
+        );
+    }
+
 }

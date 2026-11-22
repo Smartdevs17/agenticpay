@@ -21,7 +21,15 @@ export type DomainEventType =
   | 'refund.approved'
   | 'refund.rejected'
   | 'split.created'
-  | 'split.executed';
+  | 'split.executed'
+  | 'escrow.created'
+  | 'escrow.funded'
+  | 'escrow.disputed'
+  | 'escrow.resolved'
+  | 'escrow.appealed'
+  | 'escrow.released'
+  | 'escrow.refunded'
+  | 'escrow.expired';
 
 export interface DomainEvent<T = unknown> {
   id: string;
@@ -87,4 +95,22 @@ export interface ReceiptMintedPayload {
   recipient: string;
   amount: number;
   asset: string;
+}
+
+export interface EscrowStateTransitionPayload {
+  escrowId: string;
+  projectId: string;
+  fromStatus: string;
+  toStatus: string;
+  timestamp: number;
+  metadata?: {
+    txHash?: string;
+    amount?: string;
+    asset?: string;
+    raisedBy?: string;
+    releaseType?: string;
+    approvedBy?: string[];
+    appealTarget?: string;
+    reason?: string;
+  };
 }
