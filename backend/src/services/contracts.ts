@@ -1,29 +1,103 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  ContractRecord,
-  ContractVersion,
+import { logger } from '../utils/logger.js';
+import {
+  CONTRACT_TEMPLATES,
+  PROJECT_CONFIG_TEMPLATES,
+  type ContractClause,
+  type ContractTemplate,
+  type ContractType,
+  type ProjectConfig,
+  type ProjectConfigTemplate,
+} from '../templates/contracts.js';
+
+export type {
+  ConditionalClause,
   ContractClause,
-  GenerateContractInput,
-  AmendmentInput,
-  ContractDiff,
+  ContractTemplate,
   ContractType,
-} from './contracts.js';
+  ProjectConfig,
+  ProjectConfigTemplate,
+  ProjectMilestone,
+} from '../templates/contracts.js';
+
+export type ContractStatus = 'draft' | 'pending_signature' | 'active' | 'completed' | 'terminated';
+
+export interface ContractVersion {
+  version: number;
+  content: string;
+  clauses: ContractClause[];
+  createdAt: string;
+  createdBy: string;
+  changeDescription?: string;
+}
+
+export interface ContractRecord {
+  id: string;
+  projectId: string;
+  type: ContractType;
+  title: string;
+  content: string;
+  clauses: ContractClause[];
+  versions: ContractVersion[];
+  currentVersion: number;
+  status: ContractStatus;
+  parties: { clientId: string; freelancerId: string };
+  metadata: {
+    budget?: number;
+    currency?: string;
+    milestoneCount: number;
+    templateId?: string;
+    /** Placeholders the project config did not fill, e.g. `company_name`. */
+    unresolvedPlaceholders: string[];
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenerateContractInput {
+  projectId: string;
+  type: ContractType;
+  clientId: string;
+  freelancerId: string;
+  projectConfig: ProjectConfig;
+  createdBy: string;
+}
+
+export interface AmendmentInput {
+  contractId: string;
+  createdBy: string;
+  changeDescription?: string;
+  newClauses?: Array<Pick<ContractClause, 'title' | 'body'> & { isRequired?: boolean }>;
+  removedClauseIds?: string[];
+}
+
+export interface ContractDiff {
+  added: ContractClause[];
+  removed: ContractClause[];
+  modified: Array<{ clause: ContractClause; previous: ContractClause }>;
+}
+
+export interface GenerateFromTemplateInput {
+  templateId: string;
+  projectId: string;
+  clientId: string;
+  freelancerId: string;
+  createdBy: string;
+  /** Project config values; these override the template defaults. */
+  overrides?: Partial<ProjectConfig>;
+}
+
+export class ContractTemplateError extends Error {
+  constructor(message: string, readonly missingFields: string[] = []) {
+    super(message);
+    this.name = 'ContractTemplateError';
+  }
+}
 
 const contracts = new Map<string, ContractRecord>();
 
-export interface ContractTemplate {
-  title: string;
-  clauses: Omit<ContractClause, 'id'>[];
-  conditionalClauses?: ConditionalClause[];
-}
-
-export interface ConditionalClause {
-  clause: Omit<ContractClause, 'id'>;
-  condition: (context: Record<string, unknown>) => boolean;
-}
-
 export interface BatchGenerateInput {
-  projectConfigs: GenerateContractInput[];
+  projectConfigs: Array<Omit<GenerateContractInput, 'type'> & { type?: ContractType }>;
   defaultType?: ContractType;
 }
 
@@ -33,89 +107,34 @@ export interface ContractValidationResult {
   warnings: string[];
 }
 
-const BASE_TEMPLATES: Record<ContractType, ContractTemplate> = {
-  service: {
-    title: 'Service Agreement',
-    clauses: [
-      { title: 'Parties', body: 'This agreement is between {{client_name}} ("Client") and {{freelancer_name}} ("Freelancer").', order: 1, isRequired: true },
-      { title: 'Scope of Work', body: 'The Freelancer agrees to provide the services described in the project "{{project_name}}": {{scope_description}}.', order: 2, isRequired: true },
-      { title: 'Payment Terms', body: '{{payment_terms}}. Total budget: {{budget}} {{currency}}. Payments are released upon milestone approval.', order: 3, isRequired: true },
-      { title: 'Timeline', body: 'The project start date is {{start_date}}. The end date is {{end_date}} or upon completion of all milestones.', order: 4, isRequired: false },
-      { title: 'Intellectual Property', body: 'All deliverables become the property of the Client upon full payment.', order: 5, isRequired: true },
-      { title: 'Confidentiality', body: 'Both parties agree to keep project details confidential for {{confidentiality_period}} months.', order: 6, isRequired: false },
-      { title: 'Dispute Resolution', body: 'Disputes are resolved through the AgenticPay escrow and dispute process.', order: 7, isRequired: true },
-      { title: 'Termination', body: 'Either party may terminate with {{termination_notice_days}} days written notice. Outstanding milestones are evaluated for partial payment.', order: 8, isRequired: false },
-    ],
-    conditionalClauses: [
-      {
-        clause: { title: 'Non-Compete', body: 'The Freelancer agrees not to provide similar services to direct competitors for {{non_compete_months}} months after project completion.', order: 9, isRequired: false },
-        condition: (ctx) => Boolean(ctx.non_compete),
-      },
-      {
-        clause: { title: 'Source Code Ownership', body: 'All source code, documentation, and related materials become the exclusive property of the Client.', order: 10, isRequired: false },
-        condition: (ctx) => Boolean(ctx.source_code_ip),
-      },
-    ],
-  },
-  milestone: {
-    title: 'Milestone Agreement',
-    clauses: [
-      { title: 'Project Overview', body: 'Project "{{project_name}}": {{scope_description}}.', order: 1, isRequired: true },
-      { title: 'Milestones', body: 'The project is divided into {{milestone_count}} milestones: {{milestone_list}}.', order: 2, isRequired: true },
-      { title: 'Acceptance Criteria', body: 'Each milestone must meet the acceptance criteria described in its deliverable.', order: 3, isRequired: true },
-      { title: 'Payment Schedule', body: 'Payments are released per milestone as defined in the project budget. Total: {{budget}} {{currency}}.', order: 4, isRequired: true },
-      { title: 'Change Requests', body: 'Scope changes require written agreement and may adjust milestone amounts.', order: 5, isRequired: false },
-    ],
-  },
-  nda: {
-    title: 'Non-Disclosure Agreement',
-    clauses: [
-      { title: 'Parties', body: 'This agreement is between {{client_name}} and {{freelancer_name}}.', order: 1, isRequired: true },
-      { title: 'Definition of Confidential Information', body: 'Confidential information includes project details, trade secrets, business plans, and all materials related to "{{project_name}}".', order: 2, isRequired: true },
-      { title: 'Obligations', body: 'The receiving party must protect confidential information and not disclose it to third parties without prior written consent.', order: 3, isRequired: true },
-      { title: 'Term', body: 'This agreement remains in effect for {{nda_term_years}} years from the date of signing.', order: 4, isRequired: true },
-      { title: 'Return of Materials', body: 'Upon termination, all confidential materials must be returned or destroyed within {{return_period_days}} days.', order: 5, isRequired: false },
-    ],
-  },
-  employment: {
-    title: 'Employment Agreement',
-    clauses: [
-      { title: 'Parties', body: 'This agreement is between {{company_name}} ("Employer") and {{employee_name}} ("Employee").', order: 1, isRequired: true },
-      { title: 'Position', body: 'Employee is hired as {{job_title}} starting {{start_date}}.', order: 2, isRequired: true },
-      { title: 'Compensation', body: 'Base salary: {{salary}} {{currency}} per {{salary_period}}. Payment schedule: {{payment_schedule}}.', order: 3, isRequired: true },
-      { title: 'Benefits', body: 'Employee is entitled to: {{benefits_list}}.', order: 4, isRequired: false },
-      { title: 'Termination', body: 'Either party may terminate with {{termination_notice_days}} days written notice.', order: 5, isRequired: true },
-    ],
-  },
-  licensing: {
-    title: 'Software License Agreement',
-    clauses: [
-      { title: 'Parties', body: 'This agreement is between {{licensor_name}} ("Licensor") and {{licensee_name}} ("Licensee").', order: 1, isRequired: true },
-      { title: 'License Grant', body: 'Licensor grants Licensee a {{license_type}} license to use "{{software_name}}" for {{license_duration}}.', order: 2, isRequired: true },
-      { title: 'Restrictions', body: 'Licensee may not: reverse engineer, sublicense, or distribute the software.', order: 3, isRequired: true },
-      { title: 'Fees', body: 'License fee: {{license_fee}} {{currency}}. Payment terms: {{payment_terms}}.', order: 4, isRequired: true },
-      { title: 'Warranty', body: 'The software is provided "as is" without warranty of any kind.', order: 5, isRequired: false },
-    ],
-  },
-  custom: {
-    title: 'Custom Contract',
-    clauses: [
-      { title: 'Agreement Terms', body: 'Custom terms as defined by the parties.', order: 1, isRequired: true },
-    ],
-  },
-};
+const PLACEHOLDER = /\{\{(\w+)\}\}/g;
 
+function snakeToCamel(key: string): string {
+  return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
+/**
+ * Resolve `{{snake_case}}` placeholders. A camelCase key from the project
+ * config wins over the derived snake_case default, so `companyName` fills
+ * `{{company_name}}`. Missing values leave the placeholder in place.
+ */
 function renderTemplate(body: string, context: Record<string, unknown>): string {
-  let rendered = body;
-  for (const [key, value] of Object.entries(context)) {
-    const placeholder = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
-    rendered = rendered.replace(placeholder, String(value));
+  return body.replace(PLACEHOLDER, (match, key: string) => {
+    const value = context[snakeToCamel(key)] ?? context[key];
+    return value === undefined || value === null || value === '' ? match : String(value);
+  });
+}
+
+function findUnresolvedPlaceholders(clauses: ContractClause[]): string[] {
+  const keys = new Set<string>();
+  for (const clause of clauses) {
+    for (const [, key] of clause.body.matchAll(PLACEHOLDER)) keys.add(key);
   }
-  return rendered;
+  return [...keys].sort();
 }
 
 function buildClauses(type: ContractType, context: Record<string, unknown>): ContractClause[] {
-  const template = BASE_TEMPLATES[type];
+  const template = CONTRACT_TEMPLATES[type];
   const clauses: ContractClause[] = [];
 
   // Add base clauses
@@ -148,7 +167,7 @@ function buildClauses(type: ContractType, context: Record<string, unknown>): Con
 }
 
 function buildContextFromProjectConfig(input: GenerateContractInput): Record<string, unknown> {
-  const milestones = input.projectConfig.milestones || [];
+  const milestones = input.projectConfig.milestones ?? [];
   const milestoneList = milestones.map((m: { name?: string; title?: string }, i: number) =>
     `${i + 1}. ${m.name || m.title || `Milestone ${i + 1}`}`
   ).join(', ');
@@ -176,12 +195,13 @@ function buildContextFromProjectConfig(input: GenerateContractInput): Record<str
 }
 
 function buildVersion(
+  version: number,
   clauses: ContractClause[],
   createdBy: string,
   changeDescription?: string,
 ): ContractVersion {
   return {
-    version: 1,
+    version,
     content: clauses.map((c) => `## ${c.title}\n\n${c.body}`).join('\n\n'),
     clauses,
     createdAt: new Date().toISOString(),
@@ -190,17 +210,18 @@ function buildVersion(
   };
 }
 
-export function generateContract(input: GenerateContractInput): ContractRecord {
+export function generateContract(input: GenerateContractInput, templateId?: string): ContractRecord {
   const context = buildContextFromProjectConfig(input);
 
   const clauses = buildClauses(input.type, context);
-  const version = buildVersion(clauses, input.createdBy, 'Initial version');
+  const version = buildVersion(1, clauses, input.createdBy, 'Initial version');
+  const unresolvedPlaceholders = findUnresolvedPlaceholders(clauses);
 
   const record: ContractRecord = {
     id: `contract_${randomUUID().slice(0, 8)}`,
     projectId: input.projectId,
     type: input.type,
-    title: `${BASE_TEMPLATES[input.type].title} — ${input.projectConfig.name}`,
+    title: `${CONTRACT_TEMPLATES[input.type].title} — ${context.project_name}`,
     content: version.content,
     clauses,
     versions: [version],
@@ -213,13 +234,24 @@ export function generateContract(input: GenerateContractInput): ContractRecord {
     metadata: {
       budget: input.projectConfig.budget,
       currency: input.projectConfig.currency,
-      milestoneCount: input.projectConfig.milestones.length,
+      milestoneCount: input.projectConfig.milestones?.length ?? 0,
+      templateId,
+      unresolvedPlaceholders,
     },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
   contracts.set(record.id, record);
+  logger.info('[contracts] generated', {
+    contractId: record.id,
+    projectId: record.projectId,
+    type: record.type,
+    templateId,
+  });
+  if (unresolvedPlaceholders.length > 0) {
+    logger.warn('[contracts] unresolved placeholders', { contractId: record.id, unresolvedPlaceholders });
+  }
   return record;
 }
 
@@ -247,7 +279,7 @@ export function amendContract(input: AmendmentInput): ContractRecord {
   }
 
   const nextVersion = existing.currentVersion + 1;
-  const version = buildVersion(nextClauses, input.createdBy, input.changeDescription);
+  const version = buildVersion(nextVersion, nextClauses, input.createdBy, input.changeDescription);
 
   existing.versions.push(version);
   existing.clauses = nextClauses;
@@ -340,11 +372,11 @@ export function validateContractConfig(input: GenerateContractInput): ContractVa
 }
 
 export function getContractTemplate(type: ContractType): ContractTemplate | undefined {
-  return BASE_TEMPLATES[type];
+  return CONTRACT_TEMPLATES[type];
 }
 
 export function listContractTemplates(): Array<{ type: ContractType; title: string; clauseCount: number }> {
-  return Object.entries(BASE_TEMPLATES).map(([type, template]) => ({
+  return Object.entries(CONTRACT_TEMPLATES).map(([type, template]) => ({
     type: type as ContractType,
     title: template.title,
     clauseCount: template.clauses.length,
@@ -366,4 +398,64 @@ export function getContractStats(): {
   }
 
   return { total: all.length, byType, byStatus };
+}
+
+// ─── Project configuration templates ─────────────────────────────────────────
+
+export function listProjectConfigTemplates(): ProjectConfigTemplate[] {
+  return Object.values(PROJECT_CONFIG_TEMPLATES);
+}
+
+export function getProjectConfigTemplate(id: string): ProjectConfigTemplate | undefined {
+  return Object.prototype.hasOwnProperty.call(PROJECT_CONFIG_TEMPLATES, id) ? PROJECT_CONFIG_TEMPLATES[id] : undefined;
+}
+
+function isMissing(value: unknown): boolean {
+  return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+}
+
+/**
+ * Generate a contract from a project configuration template. Template defaults
+ * are merged under the caller's overrides; generation fails with
+ * ContractTemplateError if a required field is still missing.
+ */
+export function generateContractFromTemplate(input: GenerateFromTemplateInput): ContractRecord {
+  const template = getProjectConfigTemplate(input.templateId);
+  if (!template) throw new ContractTemplateError(`Unknown project config template: ${input.templateId}`);
+
+  const projectConfig: ProjectConfig = {
+    milestones: [],
+    ...template.defaults,
+    ...input.overrides,
+  } as ProjectConfig;
+
+  const missingFields = template.requiredFields.filter((field) => isMissing(projectConfig[field]));
+  if (missingFields.length > 0) {
+    throw new ContractTemplateError(
+      `Template ${template.id} is missing required fields: ${missingFields.join(', ')}`,
+      missingFields,
+    );
+  }
+
+  const validation = validateContractConfig({
+    projectId: input.projectId,
+    type: template.contractType,
+    clientId: input.clientId,
+    freelancerId: input.freelancerId,
+    createdBy: input.createdBy,
+    projectConfig,
+  });
+  if (!validation.valid) throw new ContractTemplateError(validation.errors.join('; '));
+
+  return generateContract(
+    {
+      projectId: input.projectId,
+      type: template.contractType,
+      clientId: input.clientId,
+      freelancerId: input.freelancerId,
+      createdBy: input.createdBy,
+      projectConfig,
+    },
+    template.id,
+  );
 }

@@ -294,6 +294,46 @@ Response includes:
 
 `GET /api/v1/compliance/dashboard` — metrics + jurisdiction + open alerts
 
+The routes the dashboard page calls are mounted in `src/routes/compliance.ts`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/dashboard` | Metrics, jurisdiction status, top open alerts |
+| GET | `/metrics?jurisdiction=` | Per-metric values and threshold status |
+| GET | `/jurisdictions` | Status per jurisdiction |
+| GET | `/thresholds` | Configured thresholds |
+| GET | `/alerts?status=&jurisdiction=` | Alert list |
+| POST | `/alerts/evaluate` | Re-check thresholds, raise new alerts |
+| POST | `/alerts/:id/acknowledge`, `/alerts/:id/resolve` | Alert lifecycle (`{ "userId" }`) |
+| GET, POST | `/reports` | List reports, request one (`{ "period", "jurisdiction" }`) |
+| GET | `/reports/:id`, `/reports/:id/export` | Report detail and JSON download |
+| GET | `/export/csv?jurisdiction=` | Metrics CSV download |
+| GET | `/audit-trail` | Recent audit entries |
+
+### Regulator export
+
+`GET /api/v1/compliance/regulator/export?jurisdiction=UK&format=json`
+
+Builds a snapshot from live state at request time, so the file always matches
+what the dashboard shows at that moment.
+
+- `jurisdiction`: `GLOBAL` (default), `US`, `EU`, `UK`, `SG`, `AU`. Case-insensitive.
+- `format`: `json` (default) or `csv`.
+- `requestedBy`: optional, recorded on the audit entry.
+- JSON contains `exportId`, `generatedAt`, `dashboard`, `metrics`,
+  `jurisdictions`, `openAlerts` and `auditTrail` (last 500), all scoped to the
+  jurisdiction. CSV contains a `# metrics` section and a `# audit_trail` section.
+- Responses are sent as an attachment with `Cache-Control: no-store`.
+- Unknown jurisdiction or format returns `400`.
+
+Every export writes a `regulator_export` audit entry (`entityType:
+compliance_export`, `automated: false`) and emits the
+`compliance.regulator_export` counter and `compliance.regulator_export.duration`
+timing, tagged with `jurisdiction` and `format`. Metrics are a no-op until a
+sink is wired with `setComplianceExportMetrics(sink)` from
+`src/routes/compliance.ts`. The dashboard's **Regulator Export** button
+downloads the JSON snapshot for the selected jurisdiction.
+
 ### Scoring
 
 `GET /api/v1/compliance/score?jurisdiction=US`

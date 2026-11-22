@@ -189,6 +189,10 @@ export default function ComplianceDashboardPage() {
     window.open(`${API_BASE}/compliance/export/csv?jurisdiction=${selectedJurisdiction}`, '_blank');
   };
 
+  const handleRegulatorExport = () => {
+    window.open(`${API_BASE}/compliance/regulator/export?jurisdiction=${selectedJurisdiction}&format=json`, '_blank');
+  };
+
   if (loading && !metrics) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -245,6 +249,14 @@ export default function ComplianceDashboardPage() {
             aria-label="Export CSV"
           >
             Export CSV
+          </button>
+
+          <button
+            onClick={handleRegulatorExport}
+            className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Download regulator export"
+          >
+            Regulator Export
           </button>
         </div>
       </div>
