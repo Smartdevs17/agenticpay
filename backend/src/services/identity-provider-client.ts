@@ -1,4 +1,5 @@
 import type { AgeVerificationInput } from '../types/zk-types';
+import { createHttpClient, type HttpClient } from '../lib/http-client.js';
 
 export interface IdentityProviderConfig {
   id: string;
@@ -21,24 +22,27 @@ const DEFAULT_PROVIDERS: IdentityProviderConfig[] = [
  * Falls back to client-supplied dates when the provider is unreachable.
  */
 export class IdentityProviderClient {
-  constructor(private readonly providers: IdentityProviderConfig[] = DEFAULT_PROVIDERS) {}
+  private readonly client: HttpClient;
+
+  constructor(private readonly providers: IdentityProviderConfig[] = DEFAULT_PROVIDERS) {
+    this.client = createHttpClient({
+      defaultTimeoutMs: 5_000,
+      headers: { Accept: 'application/json' },
+    });
+  }
 
   async fetchAgeAttestation(userId: string): Promise<Partial<AgeVerificationInput>> {
     const provider = this.providers.find((p) => p.trusted) ?? this.providers[0];
     if (!provider) return {};
 
     try {
-      const response = await fetch(`${provider.endpoint}/attestations/${encodeURIComponent(userId)}`, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(5_000),
-      });
-
-      if (!response.ok) return {};
-      const payload = (await response.json()) as {
+      const payload = await this.client.get<{
         birthYear?: number;
         birthMonth?: number;
         birthDay?: number;
-      };
+      }>(`${provider.endpoint}/attestations/${encodeURIComponent(userId)}`, {
+        timeoutMs: 5_000,
+      });
 
       return {
         birthYear: payload.birthYear,

@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
 import type {
   InstamojoConfig,
   InstamojoPaymentRequestInput,
@@ -14,6 +15,7 @@ export class InstamojoClient {
   private authToken: string;
   private privateSalt: string;
   private endpointUrl: string;
+  private client: HttpClient;
 
   constructor(config: InstamojoConfig = {}) {
     this.apiKey = config.apiKey || process.env.INSTAMOJO_API_KEY || '';
@@ -25,6 +27,14 @@ export class InstamojoClient {
     if (!this.endpointUrl.endsWith('/')) {
       this.endpointUrl += '/';
     }
+
+    this.client = createHttpClient({
+      baseUrl: this.endpointUrl,
+      headers: {
+        'X-Api-Key': this.apiKey,
+        'X-Auth-Token': this.authToken,
+      },
+    });
   }
 
   isConfigured(): boolean {
@@ -91,22 +101,18 @@ export class InstamojoClient {
       bodyParams.append('send_sms', input.sendSms ? 'True' : 'False');
     }
 
-    const response = await fetch(`${this.endpointUrl}payment-requests/`, {
-      method: 'POST',
-      headers: {
-        'X-Api-Key': this.apiKey,
-        'X-Auth-Token': this.authToken,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: bodyParams.toString(),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Instamojo create payment request failed [${response.status}]: ${errText}`);
+    let data: any;
+    try {
+      data = await this.client.post<any>('payment-requests/', bodyParams, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errText = typeof err.responseBody === 'string' ? err.responseBody : JSON.stringify(err.responseBody ?? '');
+        throw new Error(`Instamojo create payment request failed [${err.status}]: ${errText}`);
+      }
+      throw err;
     }
-
-    const data = await response.json() as any;
     if (!data.success) {
       throw new Error(`Instamojo error: ${JSON.stringify(data.message || data)}`);
     }
@@ -144,19 +150,15 @@ export class InstamojoClient {
       };
     }
 
-    const response = await fetch(`${this.endpointUrl}payment-requests/${paymentRequestId}/`, {
-      method: 'GET',
-      headers: {
-        'X-Api-Key': this.apiKey,
-        'X-Auth-Token': this.authToken,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Instamojo get payment request failed with status: ${response.status}`);
+    let data: any;
+    try {
+      data = await this.client.get<any>(`payment-requests/${paymentRequestId}/`);
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Instamojo get payment request failed with status: ${err.status}`);
+      }
+      throw err;
     }
-
-    const data = await response.json() as any;
     const pr = data.payment_request;
     return {
       id: pr.id,
@@ -190,19 +192,15 @@ export class InstamojoClient {
       };
     }
 
-    const response = await fetch(`${this.endpointUrl}payments/${paymentId}/`, {
-      method: 'GET',
-      headers: {
-        'X-Api-Key': this.apiKey,
-        'X-Auth-Token': this.authToken,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Instamojo get payment failed with status: ${response.status}`);
+    let data: any;
+    try {
+      data = await this.client.get<any>(`payments/${paymentId}/`);
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Instamojo get payment failed with status: ${err.status}`);
+      }
+      throw err;
     }
-
-    const data = await response.json() as any;
     const p = data.payment;
     return {
       paymentId: p.payment_id,
@@ -245,22 +243,18 @@ export class InstamojoClient {
       bodyParams.append('refund_amount', String(input.refundAmount));
     }
 
-    const response = await fetch(`${this.endpointUrl}refunds/`, {
-      method: 'POST',
-      headers: {
-        'X-Api-Key': this.apiKey,
-        'X-Auth-Token': this.authToken,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: bodyParams.toString(),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Instamojo refund failed [${response.status}]: ${errText}`);
+    let data: any;
+    try {
+      data = await this.client.post<any>('refunds/', bodyParams, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errText = typeof err.responseBody === 'string' ? err.responseBody : JSON.stringify(err.responseBody ?? '');
+        throw new Error(`Instamojo refund failed [${err.status}]: ${errText}`);
+      }
+      throw err;
     }
-
-    const data = await response.json() as any;
     const r = data.refund;
     return {
       id: r.id,

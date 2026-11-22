@@ -1,4 +1,5 @@
 import type { SalesforceConfig, SalesforceRecord } from './types.js';
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
 
 interface SalesforceQueryResponse<T> {
   totalSize: number;
@@ -23,6 +24,7 @@ export class SalesforceClient {
   private readonly accessToken: string;
   private readonly apiVersion: string;
   private readonly timeoutMs: number;
+  private readonly client: HttpClient;
 
   constructor(config: SalesforceConfig) {
     if (!config.instanceUrl || !config.accessToken) {
@@ -33,6 +35,19 @@ export class SalesforceClient {
     this.accessToken = config.accessToken;
     this.apiVersion = config.apiVersion ?? '59.0';
     this.timeoutMs = config.timeoutMs ?? 10_000;
+
+    this.client = createHttpClient({
+      baseUrl: `${this.instanceUrl}/services/data/v${this.apiVersion}`,
+      auth: {
+        type: 'bearer',
+        token: this.accessToken,
+      },
+      defaultTimeoutMs: this.timeoutMs,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
   }
 
   private get baseUrl(): string {
@@ -44,29 +59,22 @@ export class SalesforceClient {
     path: string,
     body?: unknown,
   ): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(
-        `Salesforce API error ${response.status}: ${response.statusText} – ${errorText}`,
-      );
+    try {
+      return await this.client.request<T>(path, {
+        method,
+        body,
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errorText = typeof err.responseBody === 'string'
+          ? err.responseBody
+          : JSON.stringify(err.responseBody ?? '');
+        throw new Error(
+          `Salesforce API error ${err.status}: ${err.statusText} – ${errorText}`,
+        );
+      }
+      throw err;
     }
-
-    if (response.status === 204) {
-      return {} as T;
-    }
-
-    return (await response.json()) as T;
   }
 
   async query<T = SalesforceRecord>(soql: string): Promise<T[]> {

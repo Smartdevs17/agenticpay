@@ -4,6 +4,7 @@ import type {
   XeroInvoice,
   XeroPayment,
 } from './types.js';
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
 
 interface XeroCollection<T> {
   Contacts?: T[];
@@ -22,6 +23,7 @@ export class XeroClient {
   private readonly tenantId: string;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly client: HttpClient;
 
   constructor(config: XeroConfig) {
     if (!config.accessToken || !config.tenantId) {
@@ -34,6 +36,20 @@ export class XeroClient {
       config.baseUrl ?? 'https://api.xero.com/api.xro/2.0'
     ).replace(/\/+$/, '');
     this.timeoutMs = config.timeoutMs ?? 10_000;
+
+    this.client = createHttpClient({
+      baseUrl: this.baseUrl,
+      auth: {
+        type: 'bearer',
+        token: this.accessToken,
+      },
+      defaultTimeoutMs: this.timeoutMs,
+      headers: {
+        'xero-tenant-id': this.tenantId,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
   }
 
   private async request<T>(
@@ -42,31 +58,23 @@ export class XeroClient {
     body?: unknown,
     extraHeaders: Record<string, string> = {},
   ): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-        'xero-tenant-id': this.tenantId,
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        ...extraHeaders,
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(
-        `Xero API error ${response.status}: ${response.statusText} – ${errorText}`,
-      );
+    try {
+      return await this.client.request<T>(path, {
+        method,
+        body,
+        headers: extraHeaders,
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errorText = typeof err.responseBody === 'string'
+          ? err.responseBody
+          : JSON.stringify(err.responseBody ?? '');
+        throw new Error(
+          `Xero API error ${err.status}: ${err.statusText} – ${errorText}`,
+        );
+      }
+      throw err;
     }
-
-    if (response.status === 204) {
-      return {} as T;
-    }
-
-    return (await response.json()) as T;
   }
 
   async getContacts(): Promise<XeroContact[]> {

@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
 import type { ZapierDeliveryResult, ZapierEventPayload } from './types.js';
 
 export interface ZapierClientConfig {
@@ -11,11 +12,22 @@ export class ZapierClient {
   private readonly defaultTimeoutMs: number;
   private readonly maxRetries: number;
   private readonly secret?: string;
+  private readonly httpClient: HttpClient;
 
   constructor(config?: ZapierClientConfig) {
     this.defaultTimeoutMs = config?.defaultTimeoutMs ?? 10_000;
     this.maxRetries = config?.maxRetries ?? 3;
     this.secret = config?.secret;
+    this.httpClient = createHttpClient({
+      defaultTimeoutMs: this.defaultTimeoutMs,
+      retryConfig: {
+        maxRetries: this.maxRetries,
+        baseDelayMs: 500,
+        maxDelayMs: 5_000,
+        retryableStatuses: [429, 500, 502, 503, 504],
+        retryAllMethods: true,
+      },
+    });
   }
 
   /**
@@ -53,68 +65,47 @@ export class ZapierClient {
       headers['X-Zapier-Signature'] = this.generateSignature(rawBody, timestamp, activeSecret);
     }
 
-    let attempt = 0;
-    let lastError: string | undefined;
-    let statusCode = 0;
     const start = Date.now();
+    try {
+      const response = await this.httpClient.request<Response>(hookUrl, {
+        method: 'POST',
+        headers,
+        body: rawBody,
+        responseType: 'raw',
+        timeoutMs: this.defaultTimeoutMs,
+        retry: {
+          maxRetries: this.maxRetries,
+          baseDelayMs: 500,
+          maxDelayMs: 5000,
+          retryableStatuses: [429, 500, 502, 503, 504],
+          retryAllMethods: true,
+        },
+      });
 
-    while (attempt <= this.maxRetries) {
-      attempt++;
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.defaultTimeoutMs);
+      return {
+        subscriptionId,
+        hookUrl,
+        statusCode: response.status,
+        success: true,
+        latencyMs: Date.now() - start,
+      };
+    } catch (err: any) {
+      const statusCode = err instanceof HttpError ? err.status : 500;
+      const lastError = err instanceof HttpError
+        ? (err.status >= 500 || err.status === 429
+            ? `Zapier responded with HTTP ${err.status}: ${err.statusText}`
+            : `Zapier rejected webhook with HTTP ${err.status}: ${err.statusText}`)
+        : (err?.message || 'Network error while delivering to Zapier');
 
-        const response = await fetch(hookUrl, {
-          method: 'POST',
-          headers,
-          body: rawBody,
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-        statusCode = response.status;
-
-        if (response.ok) {
-          return {
-            subscriptionId,
-            hookUrl,
-            statusCode,
-            success: true,
-            latencyMs: Date.now() - start,
-          };
-        }
-
-        // Retry on 5xx or 429
-        if (response.status >= 500 || response.status === 429) {
-          lastError = `Zapier responded with HTTP ${response.status}: ${response.statusText}`;
-          if (attempt <= this.maxRetries) {
-            const delay = Math.min(500 * Math.pow(2, attempt - 1), 5000);
-            await new Promise((resolve) => setTimeout(resolve, delay));
-            continue;
-          }
-        } else {
-          // Client error (4xx) - do not retry
-          lastError = `Zapier rejected webhook with HTTP ${response.status}: ${response.statusText}`;
-          break;
-        }
-      } catch (err: any) {
-        lastError = err?.message || 'Network error while delivering to Zapier';
-        if (attempt <= this.maxRetries) {
-          const delay = Math.min(500 * Math.pow(2, attempt - 1), 5000);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-      }
+      return {
+        subscriptionId,
+        hookUrl,
+        statusCode,
+        success: false,
+        latencyMs: Date.now() - start,
+        error: lastError,
+      };
     }
-
-    return {
-      subscriptionId,
-      hookUrl,
-      statusCode: statusCode || 500,
-      success: false,
-      latencyMs: Date.now() - start,
-      error: lastError,
-    };
   }
 }
 

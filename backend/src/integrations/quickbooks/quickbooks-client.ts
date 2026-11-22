@@ -1,4 +1,5 @@
 import type { QuickBooksConfig } from './types.js';
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
 
 interface QuickBooksQueryResponse<T> {
   QueryResponse: Record<string, T[] | number | undefined>;
@@ -15,6 +16,7 @@ export class QuickBooksClient {
   private readonly baseUrl: string;
   private readonly minorVersion: string;
   private readonly timeoutMs: number;
+  private readonly client: HttpClient;
 
   constructor(config: QuickBooksConfig) {
     if (!config.accessToken || !config.realmId) {
@@ -28,6 +30,19 @@ export class QuickBooksClient {
     ).replace(/\/+$/, '');
     this.minorVersion = config.minorVersion ?? '65';
     this.timeoutMs = config.timeoutMs ?? 10_000;
+
+    this.client = createHttpClient({
+      baseUrl: this.baseUrl,
+      auth: {
+        type: 'bearer',
+        token: this.accessToken,
+      },
+      defaultTimeoutMs: this.timeoutMs,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
   }
 
   private async request<T>(
@@ -36,32 +51,23 @@ export class QuickBooksClient {
     body?: unknown,
   ): Promise<T> {
     const separator = path.includes('?') ? '&' : '?';
-    const response = await fetch(
-      `${this.baseUrl}${path}${separator}minorversion=${this.minorVersion}`,
-      {
+    const pathWithMinor = `${path}${separator}minorversion=${this.minorVersion}`;
+    try {
+      return await this.client.request<T>(pathWithMinor, {
         method,
-        headers: {
-          Authorization: `Bearer ${this.accessToken}`,
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(this.timeoutMs),
-      },
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(
-        `QuickBooks API error ${response.status}: ${response.statusText} – ${errorText}`,
-      );
+        body,
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errorText = typeof err.responseBody === 'string'
+          ? err.responseBody
+          : JSON.stringify(err.responseBody ?? '');
+        throw new Error(
+          `QuickBooks API error ${err.status}: ${err.statusText} – ${errorText}`,
+        );
+      }
+      throw err;
     }
-
-    if (response.status === 204) {
-      return {} as T;
-    }
-
-    return (await response.json()) as T;
   }
 
   async query<T>(query: string): Promise<T[]> {

@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
 import type {
   WooCommerceConfig,
   WooCommerceOrder,
@@ -21,6 +22,7 @@ export class WooCommerceClient {
   private readonly baseUrl: string;
   private readonly authHeader: string;
   private readonly timeoutMs: number;
+  private readonly client: HttpClient;
 
   constructor(config: WooCommerceConfig) {
     if (!config.storeUrl) {
@@ -32,6 +34,20 @@ export class WooCommerceClient {
       `${config.consumerKey}:${config.consumerSecret}`,
     ).toString('base64')}`;
     this.timeoutMs = config.timeoutMs ?? 10_000;
+
+    this.client = createHttpClient({
+      baseUrl: this.baseUrl,
+      auth: {
+        type: 'basic',
+        username: config.consumerKey,
+        password: config.consumerSecret,
+      },
+      defaultTimeoutMs: this.timeoutMs,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
   }
 
   private async request<T>(
@@ -39,25 +55,22 @@ export class WooCommerceClient {
     path: string,
     body?: unknown,
   ): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: this.authHeader,
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(
-        `WooCommerce API error ${response.status}: ${response.statusText} – ${errorText}`,
-      );
+    try {
+      return await this.client.request<T>(path, {
+        method,
+        body,
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errorText = typeof err.responseBody === 'string'
+          ? err.responseBody
+          : JSON.stringify(err.responseBody ?? '');
+        throw new Error(
+          `WooCommerce API error ${err.status}: ${err.statusText} – ${errorText}`,
+        );
+      }
+      throw err;
     }
-
-    return (await response.json()) as T;
   }
 
   async getOrder(orderId: number): Promise<WooCommerceOrder> {

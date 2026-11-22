@@ -1,3 +1,5 @@
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
+
 export interface NotionClientConfig {
   apiKey: string;
   databaseId: string;
@@ -20,12 +22,24 @@ export class NotionClient {
   private readonly databaseId: string;
   private readonly apiVersion: string;
   private readonly baseUrl: string;
+  private readonly client: HttpClient;
 
   constructor(config: NotionClientConfig) {
     this.apiKey = config.apiKey;
     this.databaseId = config.databaseId;
     this.apiVersion = config.apiVersion || "2022-06-28";
     this.baseUrl = config.baseUrl || "https://api.notion.com/v1";
+    this.client = createHttpClient({
+      baseUrl: this.baseUrl,
+      auth: {
+        type: 'bearer',
+        token: this.apiKey,
+      },
+      headers: {
+        "Notion-Version": this.apiVersion,
+        "Content-Type": "application/json",
+      },
+    });
   }
 
   private get headers(): Record<string, string> {
@@ -40,28 +54,21 @@ export class NotionClient {
    * Find an existing page in the configured database by its unique slug.
    */
   async findPageBySlug(slug: string): Promise<NotionPage | null> {
-    const response = await fetch(
-      `${this.baseUrl}/databases/${this.databaseId}/query`,
-      {
-        method: "POST",
-        headers: this.headers,
-        body: JSON.stringify({
-          filter: {
-            property: "Slug",
-            rich_text: { equals: slug },
-          },
-          page_size: 1,
-        }),
-      },
-    );
-
-    if (!response.ok) {
-      throw new Error(`Notion query failed: ${response.statusText}`);
+    let data: { results: Array<{ id: string; url: string; last_edited_time: string }> };
+    try {
+      data = await this.client.post(`/databases/${this.databaseId}/query`, {
+        filter: {
+          property: "Slug",
+          rich_text: { equals: slug },
+        },
+        page_size: 1,
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Notion query failed: ${err.statusText}`);
+      }
+      throw err;
     }
-
-    const data = (await response.json()) as {
-      results: Array<{ id: string; url: string; last_edited_time: string }>;
-    };
 
     if (data.results.length === 0) {
       return null;
@@ -83,28 +90,22 @@ export class NotionClient {
     title: string,
     markdown: string,
   ): Promise<NotionPage> {
-    const response = await fetch(`${this.baseUrl}/pages`, {
-      method: "POST",
-      headers: this.headers,
-      body: JSON.stringify({
+    let page: { id: string; url: string; last_edited_time: string };
+    try {
+      page = await this.client.post('/pages', {
         parent: { database_id: this.databaseId },
         properties: {
           Name: { title: [{ text: { content: title } }] },
           Slug: { rich_text: [{ text: { content: slug } }] },
         },
         children: markdownToBlocks(markdown),
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Notion page creation failed: ${response.statusText}`);
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Notion page creation failed: ${err.statusText}`);
+      }
+      throw err;
     }
-
-    const page = (await response.json()) as {
-      id: string;
-      url: string;
-      last_edited_time: string;
-    };
 
     return {
       id: page.id,
@@ -121,59 +122,52 @@ export class NotionClient {
     title: string,
     markdown: string,
   ): Promise<void> {
-    const propsResponse = await fetch(`${this.baseUrl}/pages/${pageId}`, {
-      method: "PATCH",
-      headers: this.headers,
-      body: JSON.stringify({
+    try {
+      await this.client.patch(`/pages/${pageId}`, {
         properties: {
           Name: { title: [{ text: { content: title } }] },
         },
-      }),
-    });
-
-    if (!propsResponse.ok) {
-      throw new Error(`Notion page update failed: ${propsResponse.statusText}`);
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Notion page update failed: ${err.statusText}`);
+      }
+      throw err;
     }
 
     const existingBlocks = await this.listBlockChildren(pageId);
     for (const block of existingBlocks) {
-      await fetch(`${this.baseUrl}/blocks/${block.id}`, {
-        method: "DELETE",
-        headers: this.headers,
-      });
+      try {
+        await this.client.delete(`/blocks/${block.id}`);
+      } catch {
+        // ignore
+      }
     }
 
-    const appendResponse = await fetch(
-      `${this.baseUrl}/blocks/${pageId}/children`,
-      {
-        method: "PATCH",
-        headers: this.headers,
-        body: JSON.stringify({ children: markdownToBlocks(markdown) }),
-      },
-    );
-
-    if (!appendResponse.ok) {
-      throw new Error(
-        `Notion block append failed: ${appendResponse.statusText}`,
-      );
+    try {
+      await this.client.patch(`/blocks/${pageId}/children`, {
+        children: markdownToBlocks(markdown),
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Notion block append failed: ${err.statusText}`);
+      }
+      throw err;
     }
   }
 
   private async listBlockChildren(
     pageId: string,
   ): Promise<Array<{ id: string }>> {
-    const response = await fetch(
-      `${this.baseUrl}/blocks/${pageId}/children?page_size=100`,
-      { headers: this.headers },
-    );
-
-    if (!response.ok) {
-      throw new Error(`Notion block list failed: ${response.statusText}`);
+    let data: { results: Array<{ id: string }> };
+    try {
+      data = await this.client.get(`/blocks/${pageId}/children?page_size=100`);
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Notion block list failed: ${err.statusText}`);
+      }
+      throw err;
     }
-
-    const data = (await response.json()) as {
-      results: Array<{ id: string }>;
-    };
     return data.results;
   }
 }
