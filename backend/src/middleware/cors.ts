@@ -9,16 +9,15 @@
  * ## Behaviour
  *
  *   - No `Origin` header → passes through, sets `Vary: Origin`.
- *   - Allowed origin   → reflects the concrete origin (or `*` when the
- *     allowlist is open and credentials are disabled), sets `Vary: Origin`.
+ *   - Allowed origin   → reflects the concrete, explicitly configured
+ *     origin and sets `Vary: Origin`.
  *   - Denied origin    → passes through WITHOUT any `Access-Control-*`
  *     header, so the browser blocks the response.
  *   - Preflight        → `OPTIONS` + `Access-Control-Request-Method` is
  *     answered with `204` and the negotiated headers, or handed to the app
  *     when `preflightContinue` is set.
- *   - Credentials      → never combined with a bare `Access-Control-Allow-
- *     Origin: *`; in open mode the concrete origin is always reflected so
- *     credentialed requests keep working.
+ *   - Credentials      → emitted only for an explicitly configured origin;
+ *     wildcard entries never grant browser access.
  *   - Error statuses   → the headers are attached regardless of downstream
  *     status (CORS is transport, not content, policy).
  *
@@ -28,7 +27,7 @@
  * import { createCorsMiddleware } from '../middleware/cors.js';
  * import { getCorsPolicy } from '../services/cors.js';
  *
- * getCorsPolicy().set(['https://app.example.com', 'https://*.internal.example.com']);
+ * getCorsPolicy().set(['https://app.example.com', 'https://admin.example.com']);
  *
  * app.use(createCorsMiddleware({
  *   credentials: true,
@@ -47,7 +46,7 @@ import {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export interface CorsMiddlewareOptions {
-  /** Seed the shared policy with these origins/patterns (at mount time). */
+  /** Seed the shared policy with explicit origins (at mount time). */
   allowedOrigins?: string[];
   /** Reflect `Access-Control-Allow-Credentials`. Overrides policy default. */
   credentials?: boolean;
@@ -116,10 +115,9 @@ function firstHeader(value: unknown): string | undefined {
 
 /** The request's first `Origin` value, trimmed of surrounding whitespace. */
 function parseRequestOrigin(req: Request): string | undefined {
-  const raw = firstHeader(req.headers[IN.origin]);
-  if (!raw) return undefined;
-  const [origin] = raw.split(/\s+/);
-  return origin?.trim() || undefined;
+  const raw = req.headers[IN.origin];
+  if (Array.isArray(raw)) return raw.join(',');
+  return typeof raw === 'string' ? raw : undefined;
 }
 
 function parseRequestHeaders(value: unknown): string[] {
@@ -158,10 +156,7 @@ export function createCorsMiddleware(options: CorsMiddlewareOptions = {}): Reque
     getCorsPolicy().set(options.allowedOrigins);
   }
 
-  function allowOriginFor(origin: string, policyOpen: boolean): string {
-    // Open mode + credentials must reflect the concrete origin — a bare `*`
-    // with `Access-Control-Allow-Credentials` is rejected by browsers.
-    if (policyOpen && !credentials) return '*';
+  function allowOriginFor(origin: string): string {
     return origin;
   }
 
@@ -169,13 +164,13 @@ export function createCorsMiddleware(options: CorsMiddlewareOptions = {}): Reque
     const policy = getCorsPolicy();
     const requestOrigin = parseRequestOrigin(req);
 
-    if (!requestOrigin) {
+    if (requestOrigin === undefined) {
       appendVary(res, 'Origin');
       next();
       return;
     }
 
-    const allowed = policy.isAllowed(requestOrigin);
+    const allowed = policy.isExplicitlyAllowed(requestOrigin);
 
     if (isPreflight(req)) {
       recordPreflight(allowed);
@@ -184,7 +179,7 @@ export function createCorsMiddleware(options: CorsMiddlewareOptions = {}): Reque
       appendVary(res, 'Access-Control-Request-Headers');
 
       if (allowed) {
-        setHeader(res, A.allowOrigin, allowOriginFor(requestOrigin, policy.wildcard));
+        setHeader(res, A.allowOrigin, allowOriginFor(requestOrigin));
 
         if (credentials) {
           setHeader(res, A.allowCredentials, 'true');
@@ -223,7 +218,7 @@ export function createCorsMiddleware(options: CorsMiddlewareOptions = {}): Reque
     appendVary(res, 'Origin');
 
     if (allowed) {
-      setHeader(res, A.allowOrigin, allowOriginFor(requestOrigin, policy.wildcard));
+      setHeader(res, A.allowOrigin, allowOriginFor(requestOrigin));
       if (credentials) {
         setHeader(res, A.allowCredentials, 'true');
       }
