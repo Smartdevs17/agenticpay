@@ -663,3 +663,10 @@ We welcome contributions! This project participates in the **Stellar Wave Progra
 ## License
 
 MIT
+
+## Recent Platform Capabilities
+
+- **Branded Payment Links & Checkout Analytics** (`backend/src/services/paymentLinks.ts`, `frontend/app/pay/`): Track checkout funnel events (`view`, `checkout_started`, `completed`, `abandoned`), conversion/abandonment rates, revenue, and merchant-level summaries.
+- **Customizable Project Workflow Templates** (`backend/src/services/templates.ts`): Instantiate parameterized workflows from templates via `instantiateWorkflow` with typed variable validation, `{{variable}}` interpolation, and per-step configuration overrides.
+- **User Reputation & Challenge-Response Resets** (`backend/src/services/reputation.ts`): Score tracking, trust tiers, velocity gaming detection, and HMAC-SHA256 challenge-response resets (`initiateReputationReset` / `completeReputationReset`) with single-use TTL enforcement.
+- **On-Chain Receipt Verification & QR Codes** (`contracts/src/lib.rs`, `backend/src/services/receipts.ts`): Canonical SHA-256 on-chain receipt hashes (`get_receipt_hash` / `verify_receipt`) paired with HMAC-signed verification QR codes (`generateReceiptQrCode` / `verifyReceiptQrPayload`).

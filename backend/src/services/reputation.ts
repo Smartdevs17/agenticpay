@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { logger } from '../utils/logger.js';
 
 export type TrustTier = 'bronze' | 'silver' | 'gold' | 'platinum';
 
@@ -110,6 +111,10 @@ export function recordTransaction(userId: string, event: 'completed' | 'late' | 
   record.lastActivityAt = new Date().toISOString();
   record.updatedAt = new Date().toISOString();
 
+  const timestamps = activityIndex.get(userId) ?? new Set<string>();
+  timestamps.add(String(Date.now()));
+  activityIndex.set(userId, timestamps);
+
   record = applyDecay(record);
   reputationStore.set(userId, record);
   return record;
@@ -179,4 +184,179 @@ export function recalculateAll(): void {
     refreshed.updatedAt = new Date().toISOString();
     reputationStore.set(userId, refreshed);
   }
+}
+
+export type ReputationResetChallenge = {
+  challengeId: string;
+  userId: string;
+  nonce: string;
+  reason: string;
+  issuedAt: string;
+  expiresAt: string;
+  used: boolean;
+};
+
+export type ReputationResetResult = {
+  userId: string;
+  challengeId: string;
+  previousScore: number;
+  newScore: number;
+  tier: TrustTier;
+  resetAt: string;
+};
+
+const DEFAULT_RESET_CHALLENGE_TTL_MS = 10 * 60 * 1000;
+const MAX_RESET_CHALLENGE_TTL_MS = 60 * 60 * 1000;
+const resetChallengeStore = new Map<string, ReputationResetChallenge>();
+
+function getResetSecret(override?: string): string {
+  return override || process.env.REPUTATION_RESET_SECRET || 'agenticpay-reputation-reset-secret';
+}
+
+/**
+ * Compute the expected HMAC-SHA256 challenge-response signature for a
+ * reputation reset challenge.
+ */
+export function computeResetChallengeResponse(
+  userId: string,
+  challengeId: string,
+  nonce: string,
+  secret?: string,
+): string {
+  return createHmac('sha256', getResetSecret(secret))
+    .update(`${userId}:${challengeId}:${nonce}`)
+    .digest('hex');
+}
+
+/**
+ * Start a challenge-response reputation reset for a user.
+ */
+export function initiateReputationReset(
+  userId: string,
+  options: { reason?: string; ttlMs?: number } = {},
+): ReputationResetChallenge {
+  const record = reputationStore.get(userId);
+  if (!record) {
+    throw new Error(`Reputation record not found for user: ${userId}`);
+  }
+
+  const ttlMs = options.ttlMs ?? DEFAULT_RESET_CHALLENGE_TTL_MS;
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0 || ttlMs > MAX_RESET_CHALLENGE_TTL_MS) {
+    throw new Error(`Reset challenge TTL must be between 1ms and ${MAX_RESET_CHALLENGE_TTL_MS}ms`);
+  }
+
+  const now = Date.now();
+  const challenge: ReputationResetChallenge = {
+    challengeId: `rst_${randomUUID().slice(0, 12)}`,
+    userId,
+    nonce: randomBytes(16).toString('hex'),
+    reason: options.reason?.trim() || 'user_requested_reset',
+    issuedAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + ttlMs).toISOString(),
+    used: false,
+  };
+
+  resetChallengeStore.set(challenge.challengeId, challenge);
+  logger.info('reputation.reset_challenge_issued', {
+    userId,
+    challengeId: challenge.challengeId,
+    expiresAt: challenge.expiresAt,
+  });
+  return { ...challenge };
+}
+
+/**
+ * Complete a challenge-response reputation reset after verifying the HMAC
+ * response signature with constant-time comparison.
+ */
+export function completeReputationReset(
+  userId: string,
+  challengeId: string,
+  responseSignature: string,
+  secret?: string,
+): ReputationResetResult {
+  const challenge = resetChallengeStore.get(challengeId);
+  if (!challenge || challenge.userId !== userId) {
+    logger.warn('reputation.reset_rejected', { userId, challengeId, reason: 'not_found' });
+    throw new Error('Invalid reputation reset challenge');
+  }
+  if (challenge.used) {
+    logger.warn('reputation.reset_rejected', { userId, challengeId, reason: 'already_used' });
+    throw new Error('Reputation reset challenge has already been used');
+  }
+  if (Date.now() > Date.parse(challenge.expiresAt)) {
+    logger.warn('reputation.reset_rejected', { userId, challengeId, reason: 'expired' });
+    throw new Error('Reputation reset challenge has expired');
+  }
+
+  const expected = computeResetChallengeResponse(
+    userId,
+    challenge.challengeId,
+    challenge.nonce,
+    secret,
+  );
+  const providedBuf = Buffer.from(responseSignature, 'utf8');
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  if (
+    providedBuf.length !== expectedBuf.length ||
+    !timingSafeEqual(providedBuf, expectedBuf)
+  ) {
+    logger.warn('reputation.reset_rejected', { userId, challengeId, reason: 'bad_signature' });
+    throw new Error('Invalid challenge-response signature');
+  }
+
+  const record = reputationStore.get(userId);
+  if (!record) {
+    throw new Error(`Reputation record not found for user: ${userId}`);
+  }
+
+  const previousScore = record.score;
+  const resetAt = new Date().toISOString();
+  const updated: ReputationRecord = {
+    ...record,
+    score: 500,
+    tier: computeTier(500),
+    factors: {
+      completionRate: 0,
+      timelinessScore: 0,
+      qualityScore: 0,
+      disputeRate: 0,
+    },
+    transactionCount: 0,
+    decayApplied: false,
+    lastActivityAt: resetAt,
+    updatedAt: resetAt,
+  };
+
+  challenge.used = true;
+  resetChallengeStore.set(challengeId, challenge);
+  reputationStore.set(userId, updated);
+  activityIndex.delete(userId);
+
+  logger.info('reputation.reset_completed', {
+    userId,
+    challengeId,
+    previousScore,
+    newScore: updated.score,
+  });
+
+  return {
+    userId,
+    challengeId,
+    previousScore,
+    newScore: updated.score,
+    tier: updated.tier,
+    resetAt,
+  };
+}
+
+export function getResetChallenge(challengeId: string): ReputationResetChallenge | undefined {
+  const challenge = resetChallengeStore.get(challengeId);
+  return challenge ? { ...challenge } : undefined;
+}
+
+export function resetReputationStoreForTests(): void {
+  reputationStore.clear();
+  activityIndex.clear();
+  resetChallengeStore.clear();
 }

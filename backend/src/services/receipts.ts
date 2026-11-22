@@ -472,3 +472,198 @@ export function verifyReceiptDownloadGrant(input: {
   if (!receipt) throw new ReceiptDownloadError('NOT_FOUND', 'Receipt not found');
   return receipt;
 }
+
+export interface ReceiptQrVerificationPayload {
+  v: 1;
+  tokenId: string;
+  paymentId: string;
+  txHash: string;
+  merkleRoot: string;
+  issuedAt: string;
+  signature: string;
+}
+
+export interface ReceiptQrCodeResult {
+  tokenId: string;
+  verificationUrl: string;
+  payload: ReceiptQrVerificationPayload;
+  encodedPayload: string;
+  qrDataUrl: string;
+  qrSvg: string;
+}
+
+export interface ReceiptQrVerificationResult {
+  valid: boolean;
+  reason?: string;
+  receipt?: ReceiptNFT;
+  payload?: ReceiptQrVerificationPayload;
+}
+
+function getReceiptQrSecret(override?: string): string {
+  return override || process.env.RECEIPT_QR_SECRET || 'agenticpay-receipt-qr-secret';
+}
+
+function signReceiptQrFields(
+  fields: Omit<ReceiptQrVerificationPayload, 'signature'>,
+  secret?: string,
+): string {
+  const canonical = [
+    fields.v,
+    fields.tokenId,
+    fields.paymentId,
+    fields.txHash,
+    fields.merkleRoot,
+    fields.issuedAt,
+  ].join('|');
+  return createHmac('sha256', getReceiptQrSecret(secret))
+    .update(canonical)
+    .digest('hex');
+}
+
+/**
+ * Create a cryptographically signed verification payload for an on-chain receipt.
+ */
+export function createReceiptVerificationPayload(
+  receipt: ReceiptNFT,
+  secret?: string,
+): ReceiptQrVerificationPayload {
+  if (receipt.burned) {
+    throw new Error(`Cannot create verification QR for burned receipt: ${receipt.tokenId}`);
+  }
+  const base: Omit<ReceiptQrVerificationPayload, 'signature'> = {
+    v: 1,
+    tokenId: receipt.tokenId,
+    paymentId: receipt.paymentId,
+    txHash: receipt.transactionHash,
+    merkleRoot: receipt.merkleRoot,
+    issuedAt: receipt.mintedAt,
+  };
+  return {
+    ...base,
+    signature: signReceiptQrFields(base, secret),
+  };
+}
+
+export function encodeReceiptVerificationPayload(
+  payload: ReceiptQrVerificationPayload,
+): string {
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+/**
+ * Generate a scannable verification QR code (PNG data URL + SVG) embedding the
+ * signed receipt verification payload.
+ */
+export async function generateReceiptQrCode(
+  receipt: ReceiptNFT,
+  options: { baseUrl?: string; secret?: string } = {},
+): Promise<ReceiptQrCodeResult> {
+  const payload = createReceiptVerificationPayload(receipt, options.secret);
+  const encodedPayload = encodeReceiptVerificationPayload(payload);
+  const baseUrl = (options.baseUrl || process.env.PUBLIC_APP_URL || 'https://app.agenticpay.io').replace(/\/+$/, '');
+  const verificationUrl = `${baseUrl}/receipts/verify?p=${encodedPayload}`;
+
+  const qrcode = await import('qrcode');
+  const qrDataUrl = await qrcode.toDataURL(verificationUrl, {
+    errorCorrectionLevel: 'M',
+    margin: 2,
+    width: 256,
+  });
+  const qrSvg = await qrcode.toString(verificationUrl, {
+    type: 'svg',
+    errorCorrectionLevel: 'M',
+    margin: 2,
+  });
+
+  logger.info('receipt.qr_generated', {
+    tokenId: receipt.tokenId,
+    paymentId: receipt.paymentId,
+    txHash: receipt.transactionHash,
+  });
+
+  return {
+    tokenId: receipt.tokenId,
+    verificationUrl,
+    payload,
+    encodedPayload,
+    qrDataUrl,
+    qrSvg,
+  };
+}
+
+/**
+ * Verify a scanned/decoded receipt verification QR payload against its HMAC
+ * signature, on-chain Merkle proof, and active (non-burned) receipt state.
+ */
+export function verifyReceiptQrPayload(
+  encodedPayload: string,
+  secret?: string,
+): ReceiptQrVerificationResult {
+  let payload: ReceiptQrVerificationPayload;
+  try {
+    const raw = Buffer.from(encodedPayload, 'base64url').toString('utf8');
+    payload = JSON.parse(raw) as ReceiptQrVerificationPayload;
+  } catch {
+    return { valid: false, reason: 'malformed_payload' };
+  }
+
+  if (
+    !payload ||
+    payload.v !== 1 ||
+    typeof payload.tokenId !== 'string' ||
+    typeof payload.paymentId !== 'string' ||
+    typeof payload.txHash !== 'string' ||
+    typeof payload.merkleRoot !== 'string' ||
+    typeof payload.issuedAt !== 'string' ||
+    typeof payload.signature !== 'string'
+  ) {
+    return { valid: false, reason: 'invalid_schema' };
+  }
+
+  const expectedSig = signReceiptQrFields(
+    {
+      v: payload.v,
+      tokenId: payload.tokenId,
+      paymentId: payload.paymentId,
+      txHash: payload.txHash,
+      merkleRoot: payload.merkleRoot,
+      issuedAt: payload.issuedAt,
+    },
+    secret,
+  );
+  const providedBuf = Buffer.from(payload.signature, 'utf8');
+  const expectedBuf = Buffer.from(expectedSig, 'utf8');
+  if (
+    providedBuf.length !== expectedBuf.length ||
+    !timingSafeEqual(providedBuf, expectedBuf)
+  ) {
+    logger.warn('receipt.qr_verification_failed', {
+      tokenId: payload.tokenId,
+      reason: 'invalid_signature',
+    });
+    return { valid: false, reason: 'invalid_signature', payload };
+  }
+
+  const receipt = getReceiptByTokenId(payload.tokenId);
+  if (!receipt) {
+    return { valid: false, reason: 'receipt_not_found', payload };
+  }
+  if (receipt.burned) {
+    return { valid: false, reason: 'receipt_burned', receipt, payload };
+  }
+  if (
+    receipt.paymentId !== payload.paymentId ||
+    receipt.transactionHash !== payload.txHash ||
+    receipt.merkleRoot !== payload.merkleRoot ||
+    !verifyReceiptProof(receipt)
+  ) {
+    return { valid: false, reason: 'proof_mismatch', receipt, payload };
+  }
+
+  logger.info('receipt.qr_verified', {
+    tokenId: receipt.tokenId,
+    paymentId: receipt.paymentId,
+  });
+
+  return { valid: true, receipt, payload };
+}

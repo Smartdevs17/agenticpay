@@ -18,6 +18,9 @@ import {
   getReceiptByTxHash,
   getReceiptsByWallet,
   getAllReceipts,
+  createReceiptVerificationPayload,
+  encodeReceiptVerificationPayload,
+  verifyReceiptQrPayload,
   searchReceipts,
   getReceiptByMerkleRoot,
   verifyReceiptProof,
@@ -227,6 +230,43 @@ describe('Receipts Service', () => {
       burnReceipt(r1.tokenId);
       const all = getAllReceipts(true);
       expect(all.some((r) => r.burned)).toBe(true);
+    });
+  });
+
+  describe('cryptographic verification QR payloads (#1362)', () => {
+    it('signs and verifies a valid receipt QR payload', () => {
+      const receipt = mintReceipt(baseReceipt());
+      const payload = createReceiptVerificationPayload(receipt, 'qr-test-secret');
+      const encoded = encodeReceiptVerificationPayload(payload);
+
+      const verified = verifyReceiptQrPayload(encoded, 'qr-test-secret');
+      expect(verified.valid).toBe(true);
+      expect(verified.receipt?.tokenId).toBe(receipt.tokenId);
+    });
+
+    it('rejects tampered signatures, burned receipts, and malformed payloads', () => {
+      const receipt = mintReceipt(baseReceipt());
+      const payload = createReceiptVerificationPayload(receipt, 'qr-test-secret');
+      const tampered = encodeReceiptVerificationPayload({
+        ...payload,
+        signature: '0'.repeat(64),
+      });
+
+      expect(verifyReceiptQrPayload(tampered, 'qr-test-secret')).toMatchObject({
+        valid: false,
+        reason: 'invalid_signature',
+      });
+      expect(verifyReceiptQrPayload('not-valid-base64!!!', 'qr-test-secret')).toMatchObject({
+        valid: false,
+        reason: 'malformed_payload',
+      });
+
+      const validEncoded = encodeReceiptVerificationPayload(payload);
+      burnReceipt(receipt.tokenId);
+      expect(verifyReceiptQrPayload(validEncoded, 'qr-test-secret')).toMatchObject({
+        valid: false,
+        reason: 'receipt_burned',
+      });
     });
   });
 });
