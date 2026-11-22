@@ -1,7 +1,7 @@
 import http from 'node:http';
 import express, { Request, Response, NextFunction } from 'express';
 import * as Sentry from '@sentry/node';
-import cors from 'cors';
+import { cors as corsMiddleware } from './middleware/cors.js';
 import { tokenBucketRateLimit } from './middleware/rate-limit.js';
 import { registerDefaultPaymentProviders } from './services/payments/bootstrap.js';
 import { apiExpressRateLimit } from './middleware/express-api-rate-limit.js';
@@ -224,8 +224,8 @@ const invoiceLimiter = tokenBucketRateLimit({
 });
 
 app.use(
-  cors({
-    origin: config.cors.allowedOrigins,
+  corsMiddleware({
+    allowedOrigins: config.cors.allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: [

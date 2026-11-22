@@ -78,6 +78,17 @@ export function isValidOrigin(origin: string): boolean {
   return hostOf(origin).length > 0;
 }
 
+function canonicalOrigin(origin: string): string | undefined {
+  if (!isValidOrigin(origin)) return undefined;
+  try {
+    const parsed = new URL(origin);
+    if (parsed.username || parsed.password || parsed.origin === 'null') return undefined;
+    return parsed.origin;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * `true` when `pattern` is a usable allowlist entry: a valid origin or a
  * scheme-relative host (optionally with a `*.` subdomain prefix). The bare
@@ -258,6 +269,36 @@ export class CORSOriginPolicy {
         return true;
       }
     }
+    metrics.deniedRequests++;
+    return false;
+  }
+
+  /**
+   * Middleware check for explicit origins only. Unlike `isAllowed`, this
+   * deliberately ignores wildcard, scheme-relative, and host-only patterns.
+   */
+  isExplicitlyAllowed(origin: string | null | undefined): boolean {
+    if (origin == null) {
+      metrics.deniedRequests++;
+      return false;
+    }
+
+    const candidate = canonicalOrigin(origin);
+    if (!candidate) {
+      metrics.deniedRequests++;
+      return false;
+    }
+
+    for (const entry of this.origins) {
+      if (entry === '*' || entry.startsWith('*.') || !entry.includes('://') || entry.includes('*')) {
+        continue;
+      }
+      if (canonicalOrigin(entry) === candidate) {
+        metrics.allowedRequests++;
+        return true;
+      }
+    }
+
     metrics.deniedRequests++;
     return false;
   }

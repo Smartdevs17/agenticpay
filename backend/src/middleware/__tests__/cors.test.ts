@@ -140,7 +140,7 @@ describe('cors middleware', () => {
       expect(header(probe, 'Access-Control-Expose-Headers')).toBe('X-Rate-Limit, X-Request-Id');
     });
 
-    it('supports the wildcard tenant pattern', () => {
+    it('does not grant access through a wildcard tenant pattern', () => {
       const probe = makeRes();
       const mw = createCorsMiddleware();
       run(
@@ -148,7 +148,7 @@ describe('cors middleware', () => {
         makeReq({ headers: { origin: 'https://team.tenant.example.com' } }),
         probe.res,
       );
-      expect(header(probe, ACAO)).toBe('https://team.tenant.example.com');
+      expect(header(probe, ACAO)).toBeUndefined();
     });
 
     it('does not set CORS headers for non-Origin-less POST mutations', () => {
@@ -164,28 +164,58 @@ describe('cors middleware', () => {
     });
   });
 
-  describe('open mode and wildcard', () => {
-    it('open mode without credentials emits a bare "*"', () => {
+  describe('explicit origin allow-list', () => {
+    it('does not grant access for an open wildcard policy', () => {
       resetCorsMetrics();
       initCorsPolicy({ allowedOrigins: ['*'], allowCredentials: false });
       const probe = makeRes();
       const mw = createCorsMiddleware();
       run(mw, makeReq({ headers: { origin: 'https://anything.example.com' } }), probe.res);
 
-      expect(header(probe, ACAO)).toBe('*');
+      expect(header(probe, ACAO)).toBeUndefined();
       expect(header(probe, 'Access-Control-Allow-Credentials')).toBeUndefined();
       expect(header(probe, 'Access-Control-Expose-Headers')).toBeUndefined();
     });
 
-    it('open mode WITH credentials reflects the concrete origin', () => {
-      resetCorsMetrics();
-      initCorsPolicy({ allowedOrigins: ['*'], allowCredentials: true });
+    it('reflects only the exact origin when a wildcard is also configured', () => {
+      initCorsPolicy({
+        allowedOrigins: ['*', 'https://app.example.com'],
+        allowCredentials: false,
+      });
       const probe = makeRes();
       const mw = createCorsMiddleware();
       run(mw, makeReq({ headers: { origin: 'https://app.example.com' } }), probe.res);
 
       expect(header(probe, ACAO)).toBe('https://app.example.com');
-      expect(header(probe, 'Access-Control-Allow-Credentials')).toBe('true');
+    });
+
+    it('requires an exact origin including a non-default port', () => {
+      initCorsPolicy({ allowedOrigins: ['https://app.example.com'], allowCredentials: true });
+      const probe = makeRes();
+      const mw = createCorsMiddleware();
+      run(mw, makeReq({ headers: { origin: 'https://app.example.com:8443' } }), probe.res);
+
+      expect(header(probe, ACAO)).toBeUndefined();
+      expect(header(probe, 'Access-Control-Allow-Credentials')).toBeUndefined();
+    });
+
+    it('denies malformed and duplicate Origin values instead of using the first token', () => {
+      const mw = createCorsMiddleware();
+      const malformed = makeRes();
+      run(
+        mw,
+        makeReq({ headers: { origin: 'https://app.example.com https://evil.example.org' } }),
+        malformed.res,
+      );
+      const duplicate = makeRes();
+      run(
+        mw,
+        makeReq({ headers: { origin: ['https://app.example.com', 'https://evil.example.org'] } }),
+        duplicate.res,
+      );
+
+      expect(header(malformed, ACAO)).toBeUndefined();
+      expect(header(duplicate, ACAO)).toBeUndefined();
     });
   });
 
@@ -322,7 +352,7 @@ describe('cors middleware', () => {
       expect(m.preflights).toBe(0);
     });
 
-    it('uses the first origin from a space-separated Origin list', () => {
+    it('denies a space-separated Origin list instead of using its first token', () => {
       const probe = makeRes();
       const mw = createCorsMiddleware();
       const multiple = makeReq({
@@ -331,7 +361,7 @@ describe('cors middleware', () => {
       const next = run(mw, multiple, probe.res);
 
       expect(next).toBe(true);
-      expect(header(probe, ACAO)).toBe('https://app.example.com');
+      expect(header(probe, ACAO)).toBeUndefined();
     });
 
     it('denies the null origin without CORS headers', () => {

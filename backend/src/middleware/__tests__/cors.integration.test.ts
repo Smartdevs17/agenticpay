@@ -97,9 +97,9 @@ describe('CORS over HTTP', () => {
     expect(res.headers.get('vary')).toContain('Origin');
   });
 
-  it('matches a wildcard tenant pattern from the browser origin', async () => {
+  it('does not grant access through a wildcard tenant pattern', async () => {
     const res = await request('/data', { origin: TENANT_ORIGIN });
-    expect(res.headers.get('access-control-allow-origin')).toBe(TENANT_ORIGIN);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 
   it('omits CORS header for a denied origin (browser blocks)', async () => {

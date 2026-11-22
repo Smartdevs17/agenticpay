@@ -10,20 +10,20 @@ Files:
 - `backend/src/services/cors.ts` — `CORSOriginPolicy` + shared singleton
 - `backend/src/routes/cors.ts` — `corsRouter` management endpoints
 
-## Supported allowlist patterns
+## Explicit origin allow-list
 
-| Pattern                      | Matches                                                        |
-| ---------------------------- | -------------------------------------------------------------- |
-| `https://app.example.com`    | Exactly that origin (scheme + host, port ignored)              |
-| `https://*.example.com`      | `example.com` and every subdomain, HTTPS only                  |
-| `*.example.com`              | `example.com` and every subdomain, any scheme                  |
-| `example.com`                | `example.com` only, any scheme                                 |
-| `*`                          | Any origin (open mode)                                         |
+The middleware grants browser access only when the request's serialized origin
+matches a configured scheme, host, and effective port. Host casing and default
+ports are normalized by the URL parser; non-default ports remain distinct.
+Wildcard (`*` or `*.`), scheme-relative, and host-only entries do not grant
+access through the middleware. `null`, empty, malformed, whitespace-containing,
+and duplicate `Origin` values are denied. Policy writes continue to validate
+syntax and reject paths, queries, fragments, whitespace, or control characters
+with `INVALID_CORS_ORIGIN`.
 
-Matching is case-insensitive and ignores the port. `null` and empty origins
-(sandboxed/`file://` browsers) are always denied. Syntax is validated on
-write: origins with paths, queries, fragments, whitespace, or control
-characters are rejected with `INVALID_CORS_ORIGIN`.
+Configure explicit origins as a comma-separated `CORS_ALLOWED_ORIGINS` value,
+for example `https://app.example.com,https://admin.example.com`. Do not use `*`
+for browser access.
 
 ## Bootstrapping
 
@@ -84,13 +84,12 @@ await refreshAllowedOrigins(); // re-pull; fails safe — the old list is kept
 | Request                                            | Response                                              |
 | -------------------------------------------------- | ----------------------------------------------------- |
 | No `Origin` header                                 | Passthrough; `Vary: Origin`                           |
-| Allowed origin (simple GET/POST/…)                 | Reflects the origin (`Access-Control-Allow-Origin`), `Vary: Origin` |
+| Exact configured origin (simple GET/POST/…)        | Reflects the origin (`Access-Control-Allow-Origin`), `Vary: Origin` |
 | Denied origin                                      | Passthrough with **no** CORS headers (browser blocks) |
 | Preflight (`OPTIONS` + `Access-Control-Request-Method`) | Answered with `204` + negotiated headers (or handed to the app with `preflightContinue`) |
 
-Open mode (`*`) plus credentials never emits a bare
-`Access-Control-Allow-Origin: *` with `Access-Control-Allow-Credentials` —
-browsers reject that combination — the concrete origin is reflected instead.
+Wildcard entries do not grant browser access, whether or not credentials are
+enabled. Credentials are reflected only for an exact configured origin.
 
 ## Management endpoints (`/api/v1/cors`)
 
@@ -125,7 +124,7 @@ mutated.
   production mount it behind the API-key / ACL middleware (it follows the
   same convention as `ip-allowlistRouter` in this codebase).
 - Keep `allowCredentials` disabled unless you use cookie/session auth, and
-  prefer explicit origins over `*` in production.
+  configure only the exact origins that need browser access.
 
 ## Performance benchmarks
 
