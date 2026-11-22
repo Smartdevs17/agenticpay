@@ -18,6 +18,7 @@ concurrency:
 env:
   SERVICE: agenticpay-security
   SECURITY_REPORT_DIR: security-reports
+  REMEDIATION_SLA_DAYS: 14
 
 jobs:
   # ── Detect contract changes ────────────────────────────────────────────────
@@ -206,7 +207,6 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
-          toolchain: stable
           components: rustfmt, clippy
 
       - name: Install Soroban system dependencies
@@ -297,6 +297,7 @@ jobs:
           
           **Generated**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
           **Commit**: ${{ github.sha }}
+          **Remediation SLA**: High/critical findings require an owner and remediation within ${{ env.REMEDIATION_SLA_DAYS }} days.
           
           ## Findings Summary
           
@@ -335,6 +336,11 @@ jobs:
           
           cat ${{ env.SECURITY_REPORT_DIR }}/SECURITY_SUMMARY.md >> $GITHUB_STEP_SUMMARY
 
+      - name: Publish remediation SLA
+        run: |
+          echo "## Remediation SLA" >> $GITHUB_STEP_SUMMARY
+          echo "High and critical findings must be assigned and remediated within ${{ env.REMEDIATION_SLA_DAYS }} days." >> $GITHUB_STEP_SUMMARY
+
       - name: Upload Security Report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -366,3 +372,21 @@ jobs:
               Please review the security audit reports in the workflow artifacts.`,
               labels: ['security', 'contracts', 'bugfix']
             })
+
+  security-gate:
+    needs: [slither, mythril, property-tests, security-report]
+    if: always()
+    name: Security quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when a required audit job failed
+        env:
+          SLITHER: ${{ needs.slither.result }}
+          MYTHRIL: ${{ needs.mythril.result }}
+          PROPERTY: ${{ needs.property-tests.result }}
+        run: |
+          if [ "$SLITHER" = failure ] || [ "$MYTHRIL" = failure ] || [ "$PROPERTY" = failure ]; then
+            echo "A required security audit failed. Findings must be triaged within ${{ env.REMEDIATION_SLA_DAYS }} days."
+            exit 1
+          fi
+          echo "Security audit jobs completed successfully."

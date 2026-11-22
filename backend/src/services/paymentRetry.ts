@@ -92,8 +92,9 @@ export interface RetryStats {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const MAX_ATTEMPTS_DEFAULT = 7;
+export const MAX_ATTEMPTS_DEFAULT = 7;
 const SUSPENSION_THRESHOLD_DAYS = 30;
+const MAX_RETRY_DELAY_MS = 30 * 24 * 60 * 60 * 1_000;
 
 const CATEGORY_MAP: Record<string, FailureInfo> = {
   insufficient_funds: {
@@ -174,6 +175,20 @@ const RETRY_DELAYS: Record<RetrySeverity, number> = {
   abandon: 0,
 };
 
+/** Return an exponential delay with bounded jitter for a retry attempt. */
+export function calculateRetryDelayMs(
+  severity: RetrySeverity,
+  attemptNumber: number,
+  random = Math.random,
+): number {
+  const base = RETRY_DELAYS[severity];
+  if (base === 0) return 0;
+  const exponent = Math.max(0, Math.min(attemptNumber - 1, 5));
+  const exponential = Math.min(base * 2 ** exponent, MAX_RETRY_DELAY_MS);
+  const jitter = 0.8 + Math.min(1, Math.max(0, random())) * 0.4;
+  return Math.min(Math.round(exponential * jitter), MAX_RETRY_DELAY_MS);
+}
+
 // ── In-memory store ──────────────────────────────────────────────────────────
 
 const retryRecords = new Map<string, RetryRecord>();        // id → record
@@ -228,7 +243,7 @@ export class PaymentRetryService extends BaseService {
     if (!failureInfo.retryable) {
       status = 'abandoned';
     } else {
-      const delay = RETRY_DELAYS[failureInfo.severity];
+      const delay = calculateRetryDelayMs(failureInfo.severity, 1);
       nextRetryAt = new Date(now.getTime() + delay).toISOString();
     }
 
@@ -337,11 +352,14 @@ export class PaymentRetryService extends BaseService {
         const nextMethodIndex = record.currentPaymentMethodIndex + 1;
         const hasNextMethod = nextMethodIndex < record.paymentMethodFallbackChain.length;
 
-        if (hasNextMethod && !failureInfo.retryable) {
+        if (hasNextMethod) {
           record.currentPaymentMethodIndex = nextMethodIndex;
         }
 
-        const delay = RETRY_DELAYS[failureInfo.severity];
+        const delay = calculateRetryDelayMs(
+          failureInfo.severity,
+          record.currentAttemptNumber + 1,
+        );
         record.nextRetryAt = new Date(Date.now() + delay).toISOString();
         record.status = 'scheduled';
       }

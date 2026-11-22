@@ -117,7 +117,7 @@ export type Web3Store = Web3State & Web3Actions;
 // Persisted slice — only serialisable fields
 type PersistedWeb3 = Pick<
   Web3State,
-  'account' | 'chainId' | 'providerType' | 'isConnected' | 'transactions'
+  'account' | 'chainId' | 'providerType' | 'isConnected' | 'transactions' | 'aggregatedBalance'
 >;
 
 // ─── Lightweight XOR-based storage encryption ─────────────────────────────────
@@ -338,6 +338,7 @@ export const useWeb3Store = create<Web3Store>()(
             providerType: state.providerType,
             isConnected: state.isConnected,
             transactions: state.transactions,
+            aggregatedBalance: state.aggregatedBalance,
           }),
         }
       )
@@ -402,6 +403,7 @@ export const selectIsReconnecting = (s: Web3Store) => s.isReconnecting;
 export const selectProviderType = (s: Web3Store) => s.providerType;
 export const selectConnectionError = (s: Web3Store) => s.connectionError;
 export const selectTransactions = (s: Web3Store) => s.transactions;
+export const selectAggregatedBalance = (s: Web3Store) => s.aggregatedBalance;
 export const selectPendingTxs = (s: Web3Store) =>
   s.transactions.filter((tx) => tx.status === 'pending');
 export const selectConfirmedTxs = (s: Web3Store) =>
