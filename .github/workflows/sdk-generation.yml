@@ -58,7 +58,7 @@ jobs:
         run: npm run openapi:validate
 
       - name: Upload OpenAPI spec
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: openapi-spec
           path: backend/docs/api/openapi/openapi.json
@@ -160,7 +160,7 @@ jobs:
         run: npm run sdk:generate:${{ matrix.language }}
 
       - name: Upload ${{ matrix.language }} SDK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sdk-${{ matrix.language }}
           path: packages/sdk/generated/${{ matrix.language }}
@@ -228,7 +228,7 @@ jobs:
           echo "API Changelog generated"
 
       - name: Upload changelog
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: changelog
           path: CHANGELOG.md

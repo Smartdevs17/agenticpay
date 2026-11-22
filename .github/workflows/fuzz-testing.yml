@@ -67,7 +67,7 @@ jobs:
           --shrinkLimit 1000
     
     - name: Upload Echidna Results
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       if: always()
       with:
         name: echidna-results
@@ -120,7 +120,7 @@ jobs:
         timeout 300 cargo +nightly fuzz run authorization_consistency || true
     
     - name: Upload Fuzz Artifacts
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       if: always()
       with:
         name: haloria-fuzz-artifacts
@@ -193,7 +193,7 @@ jobs:
         slither . --json slither-results.json --filter medium,high || true
     
     - name: Upload Slither Results
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       if: always()
       with:
         name: slither-results
@@ -273,7 +273,7 @@ jobs:
         echo "- Security scan: Available in artifacts/slither-results/" >> fuzz-test-report.md
     
     - name: Upload Report
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: fuzz-test-report
         path: fuzz-test-report.md
