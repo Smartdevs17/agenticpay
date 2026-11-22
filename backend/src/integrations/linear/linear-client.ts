@@ -1,3 +1,5 @@
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
+
 export interface LinearClientConfig {
   apiKey: string;
   teamId: string;
@@ -24,31 +26,35 @@ export class LinearClient {
   private readonly apiKey: string;
   private readonly teamId: string;
   private readonly apiUrl: string;
+  private readonly client: HttpClient;
 
   constructor(config: LinearClientConfig) {
     this.apiKey = config.apiKey;
     this.teamId = config.teamId;
     this.apiUrl = config.apiUrl || "https://api.linear.app/graphql";
+    this.client = createHttpClient({
+      baseUrl: this.apiUrl,
+      headers: {
+        Authorization: this.apiKey,
+        "Content-Type": "application/json",
+      },
+    });
   }
 
   private async request<T>(
     query: string,
     variables: Record<string, unknown>,
   ): Promise<T> {
-    const response = await fetch(this.apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: this.apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query, variables }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Linear API error: ${response.statusText}`);
+    let result: GraphQLResponse<T>;
+    try {
+      result = await this.client.post<GraphQLResponse<T>>('', { query, variables });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Linear API error: ${err.statusText}`);
+      }
+      throw err;
     }
 
-    const result = (await response.json()) as GraphQLResponse<T>;
     if (result.errors?.length) {
       throw new Error(
         `Linear API error: ${result.errors.map((e) => e.message).join(", ")}`,

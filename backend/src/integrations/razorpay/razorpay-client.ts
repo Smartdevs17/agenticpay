@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
 import type {
   RazorpayConfig,
   RazorpayOrderInput,
@@ -14,6 +15,7 @@ export class RazorpayClient {
   private keySecret: string;
   private webhookSecret: string;
   private baseUrl: string;
+  private client: HttpClient;
 
   constructor(config: RazorpayConfig = {}) {
     this.keyId = config.keyId || process.env.RAZORPAY_KEY_ID || '';
@@ -23,6 +25,14 @@ export class RazorpayClient {
     if (!this.baseUrl.endsWith('/')) {
       this.baseUrl += '/';
     }
+    this.client = createHttpClient({
+      baseUrl: this.baseUrl,
+      auth: {
+        type: 'basic',
+        username: this.keyId,
+        password: this.keySecret,
+      },
+    });
   }
 
   isConfigured(): boolean {
@@ -110,21 +120,16 @@ export class RazorpayClient {
       payment_capture: input.paymentCapture !== undefined ? input.paymentCapture : 1,
     };
 
-    const response = await fetch(`${this.baseUrl}orders`, {
-      method: 'POST',
-      headers: {
-        Authorization: this.getAuthHeader(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Razorpay order creation failed (${response.status}): ${errorText}`);
+    let data: any;
+    try {
+      data = await this.client.post<any>('orders', payload);
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errorText = typeof err.responseBody === 'string' ? err.responseBody : JSON.stringify(err.responseBody ?? '');
+        throw new Error(`Razorpay order creation failed (${err.status}): ${errorText}`);
+      }
+      throw err;
     }
-
-    const data = await response.json() as any;
     return {
       id: data.id,
       entity: 'order',
@@ -159,18 +164,15 @@ export class RazorpayClient {
       };
     }
 
-    const response = await fetch(`${this.baseUrl}orders/${orderId}`, {
-      method: 'GET',
-      headers: {
-        Authorization: this.getAuthHeader(),
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Razorpay get order failed with status ${response.status}`);
+    let data: any;
+    try {
+      data = await this.client.get<any>(`orders/${orderId}`);
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Razorpay get order failed with status ${err.status}`);
+      }
+      throw err;
     }
-
-    const data = await response.json() as any;
     return {
       id: data.id,
       entity: 'order',
@@ -202,18 +204,15 @@ export class RazorpayClient {
       };
     }
 
-    const response = await fetch(`${this.baseUrl}payments/${paymentId}`, {
-      method: 'GET',
-      headers: {
-        Authorization: this.getAuthHeader(),
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Razorpay get payment failed with status ${response.status}`);
+    let data: any;
+    try {
+      data = await this.client.get<any>(`payments/${paymentId}`);
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw new Error(`Razorpay get payment failed with status ${err.status}`);
+      }
+      throw err;
     }
-
-    const data = await response.json() as any;
     return {
       id: data.id,
       entity: 'payment',
@@ -248,21 +247,16 @@ export class RazorpayClient {
       };
     }
 
-    const response = await fetch(`${this.baseUrl}payments/${paymentId}/capture`, {
-      method: 'POST',
-      headers: {
-        Authorization: this.getAuthHeader(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ amount, currency: currency.toUpperCase() }),
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`Razorpay capture payment failed [${response.status}]: ${err}`);
+    let data: any;
+    try {
+      data = await this.client.post<any>(`payments/${paymentId}/capture`, { amount, currency: currency.toUpperCase() });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errorText = typeof err.responseBody === 'string' ? err.responseBody : JSON.stringify(err.responseBody ?? '');
+        throw new Error(`Razorpay capture payment failed [${err.status}]: ${errorText}`);
+      }
+      throw err;
     }
-
-    const data = await response.json() as any;
     return {
       id: data.id,
       entity: 'payment',
@@ -300,21 +294,16 @@ export class RazorpayClient {
       payload.amount = input.amount;
     }
 
-    const response = await fetch(`${this.baseUrl}payments/${input.paymentId}/refund`, {
-      method: 'POST',
-      headers: {
-        Authorization: this.getAuthHeader(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Razorpay refund failed [${response.status}]: ${errorText}`);
+    let data: any;
+    try {
+      data = await this.client.post<any>(`payments/${input.paymentId}/refund`, payload);
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errorText = typeof err.responseBody === 'string' ? err.responseBody : JSON.stringify(err.responseBody ?? '');
+        throw new Error(`Razorpay refund failed [${err.status}]: ${errorText}`);
+      }
+      throw err;
     }
-
-    const data = await response.json() as any;
     return {
       id: data.id,
       entity: 'refund',

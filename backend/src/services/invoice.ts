@@ -2,6 +2,23 @@ import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config/env.js';
 import { withQueryProfiling } from '../config/database.js';
+import {
+  renderInvoicePdf,
+  defaultInvoiceTemplateRegistry,
+  InvoiceTemplateRegistry,
+  UnknownInvoiceTemplateError,
+  type InvoiceRenderer,
+  type InvoiceViewModel,
+} from './invoice/index.js';
+
+export {
+  renderInvoicePdf,
+  defaultInvoiceTemplateRegistry,
+  InvoiceTemplateRegistry,
+  UnknownInvoiceTemplateError,
+  type InvoiceRenderer,
+  type InvoiceViewModel,
+};
 
 let openaiClient: OpenAI | null = null;
 
@@ -291,6 +308,6 @@ export function generateTaxReport(input: { merchantId: string; from?: string; to
   };
 }
 
-export function buildInvoicePdf(invoice: InvoiceRecord): Buffer {
-  return buildSimplePdf(invoice);
+export function buildInvoicePdf(invoice: InvoiceRecord, templateId?: string): Buffer {
+  return renderInvoicePdf(invoice, templateId);
 }

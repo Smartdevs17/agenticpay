@@ -9,6 +9,7 @@ import {
   getTaxRates,
   generateTaxReport,
   buildInvoicePdf,
+  UnknownInvoiceTemplateError,
 } from '../services/invoice.js';
 import { invoiceSchema, invoiceTaxReportSchema } from '../schemas/index.js';
 
@@ -82,7 +83,17 @@ invoiceRouter.get(
       throw new AppError(404, 'Invoice not found', 'NOT_FOUND');
     }
 
-    const pdf = buildInvoicePdf(invoice);
+    const template = typeof req.query.template === 'string' ? req.query.template : undefined;
+    let pdf: Buffer;
+    try {
+      pdf = buildInvoicePdf(invoice, template);
+    } catch (err: unknown) {
+      if (err instanceof UnknownInvoiceTemplateError) {
+        throw new AppError(400, err.message, 'INVALID_TEMPLATE');
+      }
+      throw err;
+    }
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
     res.send(pdf);

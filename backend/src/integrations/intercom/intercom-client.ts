@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHttpClient, type HttpClient, HttpError } from '../../lib/http-client.js';
 import type {
   IntercomClientConfig,
   IntercomContact,
@@ -29,6 +30,7 @@ export class IntercomClient {
   public readonly appId?: string;
   public readonly adminId?: string;
   private readonly timeoutMs: number;
+  private readonly client: HttpClient;
 
   constructor(config: IntercomClientConfig) {
     this.accessToken = config.accessToken;
@@ -36,6 +38,20 @@ export class IntercomClient {
     this.appId = config.appId;
     this.adminId = config.adminId;
     this.timeoutMs = config.timeoutMs ?? 10_000;
+
+    this.client = createHttpClient({
+      baseUrl: this.apiUrl,
+      auth: {
+        type: 'bearer',
+        token: this.accessToken,
+      },
+      defaultTimeoutMs: this.timeoutMs,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'Intercom-Version': '2.10',
+      },
+    });
   }
 
   // ── HTTP helpers ──────────────────────────────────────────────────────────
@@ -45,34 +61,22 @@ export class IntercomClient {
     path: string,
     body?: unknown,
   ): Promise<T> {
-    const url = `${this.apiUrl}${path}`;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.accessToken}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'Intercom-Version': '2.10',
-    };
-
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(
-        `Intercom API error ${response.status}: ${response.statusText} – ${errorText}`,
-      );
+    try {
+      return await this.client.request<T>(path, {
+        method,
+        body,
+      });
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        const errorText = typeof err.responseBody === 'string'
+          ? err.responseBody
+          : JSON.stringify(err.responseBody ?? '');
+        throw new Error(
+          `Intercom API error ${err.status}: ${err.statusText} – ${errorText}`,
+        );
+      }
+      throw err;
     }
-
-    // Some endpoints return 204 with no body
-    if (response.status === 204) {
-      return {} as T;
-    }
-
-    return (await response.json()) as T;
   }
 
   // ── Connection Verification ───────────────────────────────────────────────
