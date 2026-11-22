@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import { logger } from '../utils/logger.js';
+import { logger as defaultLoggerInstance } from '../utils/logger.js';
 import {
   prepareWebhookPayload,
   webhookMetrics,
@@ -14,6 +14,7 @@ import {
   UNPARSEABLE_URL_SHARD,
   type DispatchPassResult,
   type DispatchStatsSnapshot,
+  type ShardDispatcherOptions,
 } from './webhooks/shard-dispatcher.js';
 
 export { webhookMetrics, prepareWebhookPayload };
@@ -69,36 +70,544 @@ export interface WebhookDeliveryLog {
   updatedAt: string;
 }
 
-type WorkerState = {
-  timer?: NodeJS.Timeout;
-  running: boolean;
-};
+export const MAX_ATTEMPTS = 5;
+export const BASE_DELAY_MS = 1_000;
+export const MAX_DELAY_MS = 60_000;
+export const ATTEMPT_TIMEOUT_MS = 8_000;
 
-const MAX_ATTEMPTS = 5;
-const BASE_DELAY_MS = 1_000;
-const MAX_DELAY_MS = 60_000;
-const ATTEMPT_TIMEOUT_MS = 8_000;
+/* =====================================================
+   Dependency Injection Interfaces (Issue #1410)
+===================================================== */
 
-const webhookConfigs = new Map<string, MerchantWebhookConfig>();
-const deliveries = new Map<string, WebhookDeliveryLog>();
-const idempotencyIndex = new Map<string, string>();
-const deadLetterQueue: WebhookDeliveryLog[] = [];
+export interface IWebhookStore {
+  getConfig(id: string): MerchantWebhookConfig | undefined;
+  findConfigByMerchantId(merchantId: string): MerchantWebhookConfig | undefined;
+  saveConfig(config: MerchantWebhookConfig): void;
+  listConfigs(): MerchantWebhookConfig[];
 
-const worker: WorkerState = { running: false };
+  getDelivery(id: string): WebhookDeliveryLog | undefined;
+  saveDelivery(delivery: WebhookDeliveryLog): void;
+  listDeliveries(): WebhookDeliveryLog[];
+  findDueDeliveries(now?: number): WebhookDeliveryLog[];
 
-function nowIso(): string {
-  return new Date().toISOString();
+  getIdempotencyDeliveryId(key: string): string | undefined;
+  setIdempotency(key: string, deliveryId: string): void;
+
+  addToDeadLetter(delivery: WebhookDeliveryLog): void;
+  listDeadLetter(): WebhookDeliveryLog[];
+
+  clear?(): void;
 }
 
-function computeBackoffDelay(attempt: number): number {
-  const exponential = Math.min(BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1), MAX_DELAY_MS);
-  const jitter = Math.floor(Math.random() * 250);
-  return exponential + jitter;
+export interface IWebhookTransportResponse {
+  ok: boolean;
+  status: number;
+  statusText?: string;
+  text(): Promise<string>;
 }
 
-function buildSignature(secret: string, body: string): string {
-  return createHmac('sha256', secret).update(body).digest('hex');
+export interface IWebhookTransport {
+  send(
+    url: string,
+    options: {
+      method: string;
+      headers: Record<string, string>;
+      body: string | Buffer;
+      timeoutMs: number;
+      signal?: AbortSignal;
+    }
+  ): Promise<IWebhookTransportResponse>;
 }
+
+export interface IClock {
+  now(): number;
+  nowIso(): string;
+  setTimeout(callback: () => void, ms: number): NodeJS.Timeout;
+  clearTimeout(timeoutId: NodeJS.Timeout): void;
+  setInterval(callback: () => void, ms: number): NodeJS.Timeout;
+  clearInterval(intervalId: NodeJS.Timeout): void;
+}
+
+export interface IWebhookLogger {
+  info(message: string, meta?: Record<string, unknown>): void;
+  warn(message: string, meta?: Record<string, unknown>): void;
+  error(message: string, meta?: Record<string, unknown>): void;
+}
+
+/* =====================================================
+   Default Implementations
+===================================================== */
+
+export class InMemoryWebhookStore implements IWebhookStore {
+  private readonly webhookConfigs = new Map<string, MerchantWebhookConfig>();
+  private readonly deliveries = new Map<string, WebhookDeliveryLog>();
+  private readonly idempotencyIndex = new Map<string, string>();
+  private readonly deadLetterQueue: WebhookDeliveryLog[] = [];
+
+  getConfig(id: string): MerchantWebhookConfig | undefined {
+    return this.webhookConfigs.get(id);
+  }
+
+  findConfigByMerchantId(merchantId: string): MerchantWebhookConfig | undefined {
+    return Array.from(this.webhookConfigs.values()).find((x) => x.merchantId === merchantId);
+  }
+
+  saveConfig(config: MerchantWebhookConfig): void {
+    this.webhookConfigs.set(config.id, config);
+  }
+
+  listConfigs(): MerchantWebhookConfig[] {
+    return Array.from(this.webhookConfigs.values());
+  }
+
+  getDelivery(id: string): WebhookDeliveryLog | undefined {
+    return this.deliveries.get(id);
+  }
+
+  saveDelivery(delivery: WebhookDeliveryLog): void {
+    this.deliveries.set(delivery.id, delivery);
+  }
+
+  listDeliveries(): WebhookDeliveryLog[] {
+    return Array.from(this.deliveries.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  findDueDeliveries(now = Date.now()): WebhookDeliveryLog[] {
+    return Array.from(this.deliveries.values()).filter((d) => {
+      if (d.status !== 'pending' && d.status !== 'retrying') return false;
+      if (!d.nextAttemptAt) return false;
+      return new Date(d.nextAttemptAt).getTime() <= now;
+    });
+  }
+
+  getIdempotencyDeliveryId(key: string): string | undefined {
+    return this.idempotencyIndex.get(key);
+  }
+
+  setIdempotency(key: string, deliveryId: string): void {
+    this.idempotencyIndex.set(key, deliveryId);
+  }
+
+  addToDeadLetter(delivery: WebhookDeliveryLog): void {
+    this.deadLetterQueue.push({ ...delivery });
+  }
+
+  listDeadLetter(): WebhookDeliveryLog[] {
+    return [...this.deadLetterQueue];
+  }
+
+  clear(): void {
+    this.webhookConfigs.clear();
+    this.deliveries.clear();
+    this.idempotencyIndex.clear();
+    this.deadLetterQueue.length = 0;
+  }
+}
+
+export class FetchWebhookTransport implements IWebhookTransport {
+  async send(
+    url: string,
+    options: {
+      method: string;
+      headers: Record<string, string>;
+      body: string | Buffer;
+      timeoutMs: number;
+      signal?: AbortSignal;
+    }
+  ): Promise<IWebhookTransportResponse> {
+    const controller = new AbortController();
+    let timeoutId: NodeJS.Timeout | undefined;
+
+    if (options.timeoutMs > 0) {
+      timeoutId = setTimeout(() => controller.abort(), options.timeoutMs);
+    }
+
+    const onExternalAbort = () => controller.abort(options.signal?.reason);
+    if (options.signal) {
+      if (options.signal.aborted) {
+        controller.abort(options.signal.reason);
+      } else {
+        options.signal.addEventListener('abort', onExternalAbort, { once: true });
+      }
+    }
+
+    try {
+      const response = await fetch(url, {
+        method: options.method,
+        headers: options.headers,
+        body: options.body,
+        signal: controller.signal,
+      });
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        text: () => response.text(),
+      };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (options.signal) options.signal.removeEventListener('abort', onExternalAbort);
+    }
+  }
+}
+
+export class SystemClock implements IClock {
+  now(): number {
+    return Date.now();
+  }
+  nowIso(): string {
+    return new Date().toISOString();
+  }
+  setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
+    return setTimeout(callback, ms);
+  }
+  clearTimeout(timeoutId: NodeJS.Timeout): void {
+    clearTimeout(timeoutId);
+  }
+  setInterval(callback: () => void, ms: number): NodeJS.Timeout {
+    return setInterval(callback, ms);
+  }
+  clearInterval(intervalId: NodeJS.Timeout): void {
+    clearInterval(intervalId);
+  }
+}
+
+export class SystemWebhookLogger implements IWebhookLogger {
+  info(message: string, meta?: Record<string, unknown>): void {
+    defaultLoggerInstance.info(message, meta);
+  }
+  warn(message: string, meta?: Record<string, unknown>): void {
+    defaultLoggerInstance.warn(message, meta);
+  }
+  error(message: string, meta?: Record<string, unknown>): void {
+    defaultLoggerInstance.error(message, meta);
+  }
+}
+
+/* =====================================================
+   Typed Webhook Service with DI (Issue #1410)
+===================================================== */
+
+export interface WebhookServiceDependencies {
+  store: IWebhookStore;
+  transport: IWebhookTransport;
+  clock?: IClock;
+  logger?: IWebhookLogger;
+  dispatcherOptions?: ShardDispatcherOptions;
+  jitterFn?: () => number;
+}
+
+export class WebhookRetryService {
+  private readonly store: IWebhookStore;
+  private readonly transport: IWebhookTransport;
+  private readonly clock: IClock;
+  private readonly logger: IWebhookLogger;
+  private readonly jitterFn: () => number;
+  private dispatcher?: ShardedDispatcher<WebhookDeliveryLog>;
+  private workerTimer?: NodeJS.Timeout;
+  private workerRunning = false;
+  private readonly customDispatcherOptions?: ShardDispatcherOptions;
+
+  constructor(deps: WebhookServiceDependencies) {
+    this.store = deps.store;
+    this.transport = deps.transport;
+    this.clock = deps.clock ?? new SystemClock();
+    this.logger = deps.logger ?? new SystemWebhookLogger();
+    this.jitterFn = deps.jitterFn ?? (() => Math.floor(Math.random() * 250));
+    this.customDispatcherOptions = deps.dispatcherOptions;
+  }
+
+  computeBackoffDelay(attempt: number): number {
+    const exponential = Math.min(BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1), MAX_DELAY_MS);
+    const jitter = this.jitterFn();
+    return exponential + jitter;
+  }
+
+  upsertConfig(input: {
+    merchantId: string;
+    url: string;
+    secret: string;
+    enabled?: boolean;
+    compressPayloads?: boolean;
+    compressionMinBytes?: number;
+  }): MerchantWebhookConfig {
+    const existing = this.store.findConfigByMerchantId(input.merchantId);
+    const ts = this.clock.nowIso();
+
+    if (existing) {
+      existing.url = input.url;
+      existing.currentSecret = input.secret;
+      existing.enabled = input.enabled ?? true;
+      if (input.compressPayloads !== undefined) existing.compressPayloads = input.compressPayloads;
+      if (input.compressionMinBytes !== undefined) existing.compressionMinBytes = input.compressionMinBytes;
+      existing.updatedAt = ts;
+      this.store.saveConfig(existing);
+      return existing;
+    }
+
+    const config: MerchantWebhookConfig = {
+      id: `whcfg_${randomUUID()}`,
+      merchantId: input.merchantId,
+      url: input.url,
+      enabled: input.enabled ?? true,
+      currentSecret: input.secret,
+      previousSecrets: [],
+      compressPayloads: input.compressPayloads ?? false,
+      compressionMinBytes: input.compressionMinBytes ?? DEFAULT_COMPRESSION_MIN_BYTES,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    this.store.saveConfig(config);
+    return config;
+  }
+
+  rotateSecret(configId: string, nextSecret: string): MerchantWebhookConfig | undefined {
+    const config = this.store.getConfig(configId);
+    if (!config) return undefined;
+    config.previousSecrets.unshift(config.currentSecret);
+    config.previousSecrets = config.previousSecrets.slice(0, 5);
+    config.currentSecret = nextSecret;
+    config.updatedAt = this.clock.nowIso();
+    this.store.saveConfig(config);
+    return config;
+  }
+
+  listConfigs(): MerchantWebhookConfig[] {
+    return this.store.listConfigs();
+  }
+
+  enqueueEvent(input: {
+    merchantId: string;
+    type: string;
+    payload: Record<string, unknown>;
+    idempotencyKey?: string;
+  }): { accepted: boolean; delivery?: WebhookDeliveryLog; reason?: string } {
+    const config = this.store.findConfigByMerchantId(input.merchantId);
+    if (!config || !config.enabled) {
+      return { accepted: false, reason: 'No enabled webhook config for merchant' };
+    }
+
+    const eventId = `whev_${randomUUID()}`;
+    const event: PaymentWebhookEvent = {
+      eventId,
+      merchantId: input.merchantId,
+      type: input.type,
+      payload: input.payload,
+      createdAt: this.clock.nowIso(),
+    };
+    const dedupeKey = input.idempotencyKey ?? `${config.id}:${eventId}:${input.type}`;
+    const existingDeliveryId = this.store.getIdempotencyDeliveryId(dedupeKey);
+    if (existingDeliveryId) {
+      const existingDelivery = this.store.getDelivery(existingDeliveryId);
+      return { accepted: false, reason: 'Duplicate idempotency key', delivery: existingDelivery };
+    }
+
+    const serializedEvent = JSON.stringify(event);
+    const ts = this.clock.nowIso();
+    const delivery: WebhookDeliveryLog = {
+      id: `whdel_${randomUUID()}`,
+      configId: config.id,
+      merchantId: input.merchantId,
+      eventId: event.eventId,
+      idempotencyKey: dedupeKey,
+      status: 'pending',
+      attempt: 0,
+      maxAttempts: MAX_ATTEMPTS,
+      createdAt: ts,
+      updatedAt: ts,
+      nextAttemptAt: ts,
+      payload: serializedEvent,
+      responseBody: serializedEvent,
+    };
+
+    this.store.saveDelivery(delivery);
+    this.store.setIdempotency(dedupeKey, delivery.id);
+    return { accepted: true, delivery };
+  }
+
+  async deliverOne(delivery: WebhookDeliveryLog): Promise<void> {
+    const config = this.store.getConfig(delivery.configId);
+    if (!config || !config.enabled) {
+      delivery.status = 'failed';
+      delivery.lastError = 'Webhook config missing or disabled';
+      delivery.updatedAt = this.clock.nowIso();
+      this.store.saveDelivery(delivery);
+      return;
+    }
+
+    const rawBody = delivery.payload ?? delivery.responseBody ?? '{}';
+    const prepared = await prepareWebhookPayload(rawBody, config.currentSecret, {
+      enabled: config.compressPayloads ?? false,
+      minBytes: config.compressionMinBytes ?? DEFAULT_COMPRESSION_MIN_BYTES,
+    });
+
+    delivery.attempt += 1;
+    delivery.status = 'processing';
+    delivery.isCompressed = prepared.isCompressed;
+    delivery.rawBytes = prepared.rawBytes;
+    delivery.compressedBytes = prepared.compressedBytes;
+    delivery.updatedAt = this.clock.nowIso();
+
+    try {
+      const headers: Record<string, string> = {
+        ...prepared.headers,
+        'X-Webhook-Idempotency-Key': delivery.idempotencyKey,
+        'X-Webhook-Event-Id': delivery.eventId,
+      };
+
+      const response = await this.transport.send(config.url, {
+        method: 'POST',
+        headers,
+        body: prepared.body,
+        timeoutMs: ATTEMPT_TIMEOUT_MS,
+      });
+
+      webhookMetrics.recordDelivery(prepared.isCompressed, prepared.rawBytes, prepared.compressedBytes);
+      this.logger.info('[Webhook] Delivery attempt completed', {
+        deliveryId: delivery.id,
+        attempt: delivery.attempt,
+        isCompressed: prepared.isCompressed,
+        rawBytes: prepared.rawBytes,
+        compressedBytes: prepared.compressedBytes,
+        compressionRatio: `${(prepared.compressionRatio * 100).toFixed(1)}%`,
+      });
+
+      const responseText = await response.text().catch(() => '');
+      delivery.statusCode = response.status;
+      delivery.responseBody = responseText;
+
+      if (response.ok) {
+        delivery.status = 'delivered';
+        delivery.deliveredAt = this.clock.nowIso();
+        delivery.nextAttemptAt = undefined;
+      } else if (delivery.attempt >= delivery.maxAttempts) {
+        delivery.status = 'dead_letter';
+        delivery.lastError = `HTTP ${response.status}`;
+        delivery.nextAttemptAt = undefined;
+        this.store.addToDeadLetter(delivery);
+      } else {
+        delivery.status = 'retrying';
+        delivery.lastError = `HTTP ${response.status}`;
+        delivery.nextAttemptAt = new Date(this.clock.now() + this.computeBackoffDelay(delivery.attempt)).toISOString();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (delivery.attempt >= delivery.maxAttempts) {
+        delivery.status = 'dead_letter';
+        delivery.lastError = message;
+        delivery.nextAttemptAt = undefined;
+        this.store.addToDeadLetter(delivery);
+      } else {
+        delivery.status = 'retrying';
+        delivery.lastError = message;
+        delivery.nextAttemptAt = new Date(this.clock.now() + this.computeBackoffDelay(delivery.attempt)).toISOString();
+      }
+    } finally {
+      delivery.updatedAt = this.clock.nowIso();
+      this.store.saveDelivery(delivery);
+    }
+  }
+
+  private deliveryShardKey(delivery: WebhookDeliveryLog): string {
+    const config = this.store.getConfig(delivery.configId);
+    return config ? shardKeyForUrl(config.url) : UNPARSEABLE_URL_SHARD;
+  }
+
+  getDispatcher(): ShardedDispatcher<WebhookDeliveryLog> {
+    if (!this.dispatcher) {
+      const opts = this.customDispatcherOptions ?? readShardDispatcherOptions();
+      this.dispatcher = new ShardedDispatcher(opts, {
+        shardKey: (d) => this.deliveryShardKey(d),
+        dueAt: (delivery) => (delivery.nextAttemptAt ? Date.parse(delivery.nextAttemptAt) : undefined),
+        deliver: (d) => this.deliverOne(d),
+        logger: defaultLoggerInstance,
+      });
+    }
+    return this.dispatcher;
+  }
+
+  dueDeliveries(now?: number): WebhookDeliveryLog[] {
+    return this.store.findDueDeliveries(now ?? this.clock.now());
+  }
+
+  processDueDeliveries(): DispatchPassResult {
+    return this.getDispatcher().dispatch(this.dueDeliveries());
+  }
+
+  async drainDeliveries(): Promise<void> {
+    await this.processDueDeliveries().settled;
+    await this.getDispatcher().idle();
+  }
+
+  getActiveShards(): string[] {
+    return this.dispatcher?.activeShards() ?? [];
+  }
+
+  getDispatchStats(): DispatchStatsSnapshot & { config: ShardDispatcherOptions } {
+    const opts = this.customDispatcherOptions ?? readShardDispatcherOptions();
+    return { ...this.getDispatcher().stats(), config: opts };
+  }
+
+  startWorker(): void {
+    if (this.workerRunning) return;
+    this.getDispatcher();
+    this.workerRunning = true;
+    this.workerTimer = this.clock.setInterval(() => {
+      this.processDueDeliveries();
+    }, 1_000);
+  }
+
+  stopWorker(): void {
+    if (this.workerTimer) {
+      this.clock.clearInterval(this.workerTimer);
+      this.workerTimer = undefined;
+    }
+    this.workerRunning = false;
+  }
+
+  listDeliveries(): WebhookDeliveryLog[] {
+    return this.store.listDeliveries();
+  }
+
+  getDelivery(id: string): WebhookDeliveryLog | undefined {
+    return this.store.getDelivery(id);
+  }
+
+  retryDeliveryManually(id: string): WebhookDeliveryLog | undefined {
+    const item = this.store.getDelivery(id);
+    if (!item) return undefined;
+    if (item.status === 'delivered') return item;
+    const ts = this.clock.nowIso();
+    item.status = 'pending';
+    item.attempt = 0;
+    item.lastError = undefined;
+    item.nextAttemptAt = ts;
+    item.updatedAt = ts;
+    this.store.saveDelivery(item);
+    return item;
+  }
+
+  listDeadLetter(): WebhookDeliveryLog[] {
+    return this.store.listDeadLetter();
+  }
+}
+
+/* =====================================================
+   Default Singleton Instance & Legacy Compatibility Exports
+===================================================== */
+
+export const defaultWebhookStore = new InMemoryWebhookStore();
+export const defaultWebhookTransport = new FetchWebhookTransport();
+export const defaultClock = new SystemClock();
+export const defaultWebhookLogger = new SystemWebhookLogger();
+
+export const defaultWebhookService = new WebhookRetryService({
+  store: defaultWebhookStore,
+  transport: defaultWebhookTransport,
+  clock: defaultClock,
+  logger: defaultWebhookLogger,
+});
 
 export function upsertWebhookConfig(input: {
   merchantId: string;
@@ -108,49 +617,15 @@ export function upsertWebhookConfig(input: {
   compressPayloads?: boolean;
   compressionMinBytes?: number;
 }): MerchantWebhookConfig {
-  const existing = Array.from(webhookConfigs.values()).find((x) => x.merchantId === input.merchantId);
-  const ts = nowIso();
-
-  if (existing) {
-    existing.url = input.url;
-    existing.currentSecret = input.secret;
-    existing.enabled = input.enabled ?? true;
-    if (input.compressPayloads !== undefined) existing.compressPayloads = input.compressPayloads;
-    if (input.compressionMinBytes !== undefined) existing.compressionMinBytes = input.compressionMinBytes;
-    existing.updatedAt = ts;
-    webhookConfigs.set(existing.id, existing);
-    return existing;
-  }
-
-  const config: MerchantWebhookConfig = {
-    id: `whcfg_${randomUUID()}`,
-    merchantId: input.merchantId,
-    url: input.url,
-    enabled: input.enabled ?? true,
-    currentSecret: input.secret,
-    previousSecrets: [],
-    compressPayloads: input.compressPayloads ?? false,
-    compressionMinBytes: input.compressionMinBytes ?? DEFAULT_COMPRESSION_MIN_BYTES,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  webhookConfigs.set(config.id, config);
-  return config;
+  return defaultWebhookService.upsertConfig(input);
 }
 
 export function rotateWebhookSecret(configId: string, nextSecret: string): MerchantWebhookConfig | undefined {
-  const config = webhookConfigs.get(configId);
-  if (!config) return undefined;
-  config.previousSecrets.unshift(config.currentSecret);
-  config.previousSecrets = config.previousSecrets.slice(0, 5);
-  config.currentSecret = nextSecret;
-  config.updatedAt = nowIso();
-  webhookConfigs.set(config.id, config);
-  return config;
+  return defaultWebhookService.rotateSecret(configId, nextSecret);
 }
 
 export function listWebhookConfigs(): MerchantWebhookConfig[] {
-  return Array.from(webhookConfigs.values());
+  return defaultWebhookService.listConfigs();
 }
 
 export function enqueueWebhookEvent(input: {
@@ -159,234 +634,41 @@ export function enqueueWebhookEvent(input: {
   payload: Record<string, unknown>;
   idempotencyKey?: string;
 }): { accepted: boolean; delivery?: WebhookDeliveryLog; reason?: string } {
-  const config = Array.from(webhookConfigs.values()).find(
-    (x) => x.merchantId === input.merchantId && x.enabled
-  );
-  if (!config) return { accepted: false, reason: 'No enabled webhook config for merchant' };
-
-  const eventId = `whev_${randomUUID()}`;
-  const event: PaymentWebhookEvent = {
-    eventId,
-    merchantId: input.merchantId,
-    type: input.type,
-    payload: input.payload,
-    createdAt: nowIso(),
-  };
-  const dedupeKey = input.idempotencyKey ?? `${config.id}:${eventId}:${input.type}`;
-  if (idempotencyIndex.has(dedupeKey)) {
-    const existingDelivery = deliveries.get(idempotencyIndex.get(dedupeKey)!);
-    return { accepted: false, reason: 'Duplicate idempotency key', delivery: existingDelivery };
-  }
-
-  const serializedEvent = JSON.stringify(event);
-  const delivery: WebhookDeliveryLog = {
-    id: `whdel_${randomUUID()}`,
-    configId: config.id,
-    merchantId: input.merchantId,
-    eventId: event.eventId,
-    idempotencyKey: dedupeKey,
-    status: 'pending',
-    attempt: 0,
-    maxAttempts: MAX_ATTEMPTS,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-    nextAttemptAt: nowIso(),
-    payload: serializedEvent,
-    responseBody: serializedEvent,
-  };
-
-  deliveries.set(delivery.id, delivery);
-  idempotencyIndex.set(dedupeKey, delivery.id);
-  return { accepted: true, delivery };
-}
-
-async function deliverOne(delivery: WebhookDeliveryLog): Promise<void> {
-  const config = webhookConfigs.get(delivery.configId);
-  if (!config || !config.enabled) {
-    delivery.status = 'failed';
-    delivery.lastError = 'Webhook config missing or disabled';
-    delivery.updatedAt = nowIso();
-    deliveries.set(delivery.id, delivery);
-    return;
-  }
-
-  // Raw JSON body remains uncompressed in storage across retries
-  const rawBody = delivery.payload ?? delivery.responseBody ?? '{}';
-
-  // Dynamic per-attempt payload preparation (compression + signature over uncompressed body)
-  const prepared = await prepareWebhookPayload(rawBody, config.currentSecret, {
-    enabled: config.compressPayloads ?? false,
-    minBytes: config.compressionMinBytes ?? DEFAULT_COMPRESSION_MIN_BYTES,
-  });
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ATTEMPT_TIMEOUT_MS);
-
-  delivery.attempt += 1;
-  delivery.status = 'processing';
-  delivery.isCompressed = prepared.isCompressed;
-  delivery.rawBytes = prepared.rawBytes;
-  delivery.compressedBytes = prepared.compressedBytes;
-  delivery.updatedAt = nowIso();
-
-  try {
-    const headers: Record<string, string> = {
-      ...prepared.headers,
-      'X-Webhook-Idempotency-Key': delivery.idempotencyKey,
-      'X-Webhook-Event-Id': delivery.eventId,
-    };
-
-    const response = await fetch(config.url, {
-      method: 'POST',
-      headers,
-      body: prepared.body,
-      signal: controller.signal,
-    });
-
-    webhookMetrics.recordDelivery(prepared.isCompressed, prepared.rawBytes, prepared.compressedBytes);
-    logger.info('[Webhook] Delivery attempt completed', {
-      deliveryId: delivery.id,
-      attempt: delivery.attempt,
-      isCompressed: prepared.isCompressed,
-      rawBytes: prepared.rawBytes,
-      compressedBytes: prepared.compressedBytes,
-      compressionRatio: `${(prepared.compressionRatio * 100).toFixed(1)}%`,
-    });
-
-    const responseText = await response.text().catch(() => '');
-    delivery.statusCode = response.status;
-    delivery.responseBody = responseText;
-
-    if (response.ok) {
-      delivery.status = 'delivered';
-      delivery.deliveredAt = nowIso();
-      delivery.nextAttemptAt = undefined;
-    } else if (delivery.attempt >= delivery.maxAttempts) {
-      delivery.status = 'dead_letter';
-      delivery.lastError = `HTTP ${response.status}`;
-      delivery.nextAttemptAt = undefined;
-      deadLetterQueue.push({ ...delivery });
-    } else {
-      delivery.status = 'retrying';
-      delivery.lastError = `HTTP ${response.status}`;
-      delivery.nextAttemptAt = new Date(Date.now() + computeBackoffDelay(delivery.attempt)).toISOString();
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (delivery.attempt >= delivery.maxAttempts) {
-      delivery.status = 'dead_letter';
-      delivery.lastError = message;
-      delivery.nextAttemptAt = undefined;
-      deadLetterQueue.push({ ...delivery });
-    } else {
-      delivery.status = 'retrying';
-      delivery.lastError = message;
-      delivery.nextAttemptAt = new Date(Date.now() + computeBackoffDelay(delivery.attempt)).toISOString();
-    }
-  } finally {
-    clearTimeout(timeout);
-    delivery.updatedAt = nowIso();
-    deliveries.set(delivery.id, delivery);
-  }
-}
-
-/** The shard (destination host) a delivery is sent to (#1462). */
-function deliveryShardKey(delivery: WebhookDeliveryLog): string {
-  const config = webhookConfigs.get(delivery.configId);
-  return config ? shardKeyForUrl(config.url) : UNPARSEABLE_URL_SHARD;
-}
-
-let dispatcher: ShardedDispatcher<WebhookDeliveryLog> | undefined;
-
-/**
- * Deliveries are sharded by destination host so one slow or hanging endpoint
- * only delays its own deliveries instead of every merchant's (#1462). See
- * `webhooks/shard-dispatcher.ts`. Created lazily so configuration is read
- * when the worker starts, and a bad value fails there.
- */
-function getDispatcher(): ShardedDispatcher<WebhookDeliveryLog> {
-  dispatcher ??= new ShardedDispatcher(readShardDispatcherOptions(), {
-    shardKey: deliveryShardKey,
-    dueAt: (delivery) => (delivery.nextAttemptAt ? Date.parse(delivery.nextAttemptAt) : undefined),
-    deliver: deliverOne,
-    logger,
-  });
-  return dispatcher;
-}
-
-function dueDeliveries(now = Date.now()): WebhookDeliveryLog[] {
-  return Array.from(deliveries.values()).filter((d) => {
-    if (d.status !== 'pending' && d.status !== 'retrying') return false;
-    if (!d.nextAttemptAt) return false;
-    return new Date(d.nextAttemptAt).getTime() <= now;
-  });
-}
-
-/**
- * Starts a run for every idle shard with due deliveries. A shard still
- * draining from an earlier pass is skipped, which is what keeps a delivery
- * from being sent twice: overlapping ticks can no longer pick up the same
- * still-"pending"/"retrying" delivery, yet other hosts keep flowing.
- */
-function processDueDeliveries(): DispatchPassResult {
-  return getDispatcher().dispatch(dueDeliveries());
-}
-
-/**
- * Dispatches every due delivery and waits until all shards are idle. Used by
- * tests and by operational tooling that needs a synchronous drain.
- */
-export async function drainWebhookDeliveries(): Promise<void> {
-  await processDueDeliveries().settled;
-  await getDispatcher().idle();
-}
-
-/** Destination hosts whose deliveries are currently draining. */
-export function getActiveWebhookShards(): string[] {
-  return dispatcher?.activeShards() ?? [];
-}
-
-/** Dispatcher counters and queue-wait percentiles, served by GET /webhooks/dispatch-stats. */
-export function getWebhookDispatchStats(): DispatchStatsSnapshot & { config: ReturnType<typeof readShardDispatcherOptions> } {
-  return { ...getDispatcher().stats(), config: readShardDispatcherOptions() };
+  return defaultWebhookService.enqueueEvent(input);
 }
 
 export function startWebhookWorker(): void {
-  if (worker.running) return;
-  getDispatcher();
-  worker.running = true;
-  worker.timer = setInterval(() => {
-    processDueDeliveries();
-  }, 1_000);
+  defaultWebhookService.startWorker();
 }
 
 export function stopWebhookWorker(): void {
-  if (worker.timer) clearInterval(worker.timer);
-  worker.timer = undefined;
-  worker.running = false;
+  defaultWebhookService.stopWorker();
 }
 
 export function listWebhookDeliveries(): WebhookDeliveryLog[] {
-  return Array.from(deliveries.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return defaultWebhookService.listDeliveries();
 }
 
 export function getWebhookDelivery(id: string): WebhookDeliveryLog | undefined {
-  return deliveries.get(id);
+  return defaultWebhookService.getDelivery(id);
 }
 
 export function retryWebhookDeliveryManually(id: string): WebhookDeliveryLog | undefined {
-  const item = deliveries.get(id);
-  if (!item) return undefined;
-  if (item.status === 'delivered') return item;
-  item.status = 'pending';
-  item.attempt = 0;
-  item.lastError = undefined;
-  item.nextAttemptAt = nowIso();
-  item.updatedAt = nowIso();
-  deliveries.set(item.id, item);
-  return item;
+  return defaultWebhookService.retryDeliveryManually(id);
 }
 
 export function listDeadLetterQueue(): WebhookDeliveryLog[] {
-  return [...deadLetterQueue];
+  return defaultWebhookService.listDeadLetter();
+}
+
+export async function drainWebhookDeliveries(): Promise<void> {
+  return defaultWebhookService.drainDeliveries();
+}
+
+export function getActiveWebhookShards(): string[] {
+  return defaultWebhookService.getActiveShards();
+}
+
+export function getWebhookDispatchStats(): DispatchStatsSnapshot & { config: ReturnType<typeof readShardDispatcherOptions> } {
+  return defaultWebhookService.getDispatchStats();
 }
