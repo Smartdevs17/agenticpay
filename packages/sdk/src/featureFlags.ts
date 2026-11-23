@@ -12,7 +12,26 @@ export class FeatureFlagsApi {
     identifier: string
   ): Promise<FeatureFlagEvaluateResponse> {
     const query = new URLSearchParams({ flag, identifier }).toString();
-    return this.client.get<FeatureFlagEvaluateResponse>(`/flags/evaluate?${query}`);
+    return this.client.get<FeatureFlagEvaluateResponse>(
+      `/flags/evaluate?${query}`
+    );
+  }
+
+  /**
+   * Cohort-aware evaluation (gradual rollout + A/B cohort assignment).
+   */
+  async evaluateWithCohort(
+    flag: string,
+    identifier: string
+  ): Promise<FeatureFlagEvaluateResponse> {
+    const query = new URLSearchParams({
+      flag,
+      identifier,
+      includeCohort: 'true',
+    }).toString();
+    return this.client.get<FeatureFlagEvaluateResponse>(
+      `/flags/evaluate?${query}`
+    );
   }
 
   /**
@@ -20,7 +39,9 @@ export class FeatureFlagsApi {
    */
   async state(identifier: string): Promise<FeatureFlagStateResponse> {
     const query = new URLSearchParams({ identifier }).toString();
-    return this.client.get<FeatureFlagStateResponse>(`/flags/state?${query}`);
+    return this.client.get<FeatureFlagStateResponse>(
+      `/flags/state?${query}`
+    );
   }
 
   /**
@@ -38,3 +59,4 @@ export class FeatureFlagsApi {
     });
   }
 }
+

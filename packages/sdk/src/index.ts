@@ -5,6 +5,7 @@ import { RefundsApi } from './refunds.js';
 import { VerificationApi } from './verification.js';
 import { AgenticPayClientOptions } from './types.js';
 import { WalletApi } from './wallet.js';
+import { FeatureFlagsApi } from './featureFlags.js';
 
 export * from './types.js';
 export * from './errors.js';
@@ -15,6 +16,7 @@ export * from './soroban-transaction-builder.js';
 export { SANDBOX_MOCK_PAYMENTS, createMockPaymentResult } from './sandbox.js';
 export * from './playground.js';
 export * from './wallet.js';
+export { FeatureFlagsApi } from './featureFlags.js';
 
 export class AgenticPaySDK {
   readonly client: AgenticPayClient;
@@ -22,6 +24,7 @@ export class AgenticPaySDK {
   readonly refunds: RefundsApi;
   readonly verification: VerificationApi;
   readonly wallet: WalletApi;
+  readonly featureFlags: FeatureFlagsApi;
 
   constructor(options: AgenticPayClientOptions, authProvider?: AuthProvider) {
     this.client = new AgenticPayClient(options);
@@ -42,6 +45,7 @@ export class AgenticPaySDK {
     this.refunds = new RefundsApi(this.client);
     this.verification = new VerificationApi(this.client);
     this.wallet = new WalletApi(this.client);
+    this.featureFlags = new FeatureFlagsApi(this.client);
   }
 }
 

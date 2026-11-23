@@ -86,3 +86,25 @@ export type RefundEvaluationInput = {
   hasChargeback?: boolean;
   hasDispute?: boolean;
 };
+
+/** Feature flag evaluation payloads — Issue #1354 */
+export type FeatureFlagEvaluateResponse = {
+  flag: string;
+  identifier: string;
+  enabled: boolean;
+  variant?: string | null;
+  cohortId?: string | null;
+};
+
+export type FeatureFlagStateResponse = {
+  identifier: string;
+  flags: Record<
+    string,
+    {
+      enabled: boolean;
+      variant?: string | null;
+      cohortId?: string | null;
+    }
+  >;
+};
+
