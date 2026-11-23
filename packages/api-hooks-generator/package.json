@@ -16,7 +16,7 @@
     "openapi-typescript": "^7.4.4",
     "openapi-fetch": "^0.13.5",
     "zod": "^3.23.8",
-    "prettier": "^3.0.0",
+    "prettier": "^3.10.1",
     "yaml": "^2.6.0"
   },
   "devDependencies": {
