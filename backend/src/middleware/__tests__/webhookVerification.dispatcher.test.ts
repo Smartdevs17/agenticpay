@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Request, Response, NextFunction } from 'express';
 import { verifyWebhookProvider } from '../webhookVerification.js';
 import { AppError } from '../errorHandler.js';
-import { clearReplayCache } from '../../services/webhooks/replay.js';
+import { setWebhookReplayGuard } from '../../services/webhookReplay.js';
 
 const h = vi.hoisted(() => ({
   customResult: {} as Record<string, unknown>,
@@ -32,6 +32,7 @@ vi.mock('../../services/webhooks/providers.js', () => ({
   verifyGithubProviderWebhook: () => h.githubResult,
   verifyPaypalProviderWebhook: () => h.paypalResult,
   verifyCustomProviderWebhook: () => h.customResult,
+  verifyBankPartnerWebhook: () => h.customResult,
 }));
 
 const res = {} as Response;
@@ -67,7 +68,7 @@ function makeNext() {
 
 describe('verifyWebhookProvider dispatcher', () => {
   beforeEach(() => {
-    clearReplayCache();
+    setWebhookReplayGuard();
     h.queueCalls = [];
     h.retryResult = undefined;
     h.customResult = validResult();
@@ -77,7 +78,7 @@ describe('verifyWebhookProvider dispatcher', () => {
   });
 
   afterEach(() => {
-    clearReplayCache();
+    setWebhookReplayGuard();
   });
 
   it('passes valid results through and replaces the body with the parsed payload', async () => {
@@ -114,7 +115,7 @@ describe('verifyWebhookProvider dispatcher', () => {
     await middleware(makeRequest(), res, next);
 
     expect(h.queueCalls).toHaveLength(1);
-    expect(calls[0]).toBeInstanceOf(AppError);
+    expect((calls[0] as Error).name).toBe('AppError');
     expect((calls[0] as AppError).statusCode).toBe(401);
   });
 
@@ -128,7 +129,7 @@ describe('verifyWebhookProvider dispatcher', () => {
 
     calls.length = 0;
     await middleware(makeRequest({ headers: { 'x-webhook-id': 'evt_double' } }), res, next);
-    expect(calls[0]).toBeInstanceOf(AppError);
+    expect((calls[0] as Error).name).toBe('AppError');
     expect((calls[0] as AppError).statusCode).toBe(409);
     expect((calls[0] as AppError).code).toBe('WEBHOOK_REPLAY');
   });
@@ -156,7 +157,7 @@ describe('verifyWebhookProvider dispatcher', () => {
 
     await middleware(makeRequest(), res, next);
 
-    expect(calls[0]).toBeInstanceOf(AppError);
+    expect((calls[0] as Error).name).toBe('AppError');
     expect((calls[0] as AppError).statusCode).toBe(401);
   });
 

@@ -1,3 +1,5 @@
+import { claimWebhookDelivery } from '../middleware/webhookVerification.js';
+import { sha256Hex } from '../services/webhookReplay.js';
 import { Router } from 'express';
 import { asyncHandler, AppError } from '../middleware/errorHandler.js';
 import { validate } from '../middleware/validate.js';
@@ -87,25 +89,33 @@ wooCommerceRouter.post(
       );
     }
 
+    let event: ReturnType<typeof wooCommerceService.processWebhook>;
     try {
-      const event = wooCommerceService.processWebhook({
+      event = wooCommerceService.processWebhook({
         rawBody,
         signature,
         topic,
         deliveryId: typeof deliveryId === 'string' ? deliveryId : undefined,
-      });
-
-      res.status(200).json({
-        success: true,
-        topic: event.topic,
-        deliveryId: event.deliveryId,
-        orderId: event.order.id,
-        paymentDraft: event.paymentDraft,
       });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Invalid WooCommerce webhook';
       throw new AppError(401, message, 'WEBHOOK_VERIFICATION_FAILED');
     }
+
+    await claimWebhookDelivery(req, res, {
+      provider: 'woocommerce',
+      eventId: event.deliveryId ?? `sig_${sha256Hex(signature)}`,
+      rawBody,
+      signature,
+    });
+
+    res.status(200).json({
+      success: true,
+      topic: event.topic,
+      deliveryId: event.deliveryId,
+      orderId: event.order.id,
+      paymentDraft: event.paymentDraft,
+    });
   }),
 );

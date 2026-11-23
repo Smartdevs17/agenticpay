@@ -1,3 +1,5 @@
+import { claimWebhookDelivery } from '../middleware/webhookVerification.js';
+import { sha256Hex } from '../services/webhookReplay.js';
 import { Router, Request, Response } from 'express';
 import { asyncHandler, AppError } from '../middleware/errorHandler.js';
 import { razorpayClient } from '../integrations/razorpay/index.js';
@@ -132,8 +134,8 @@ razorpayRouter.post(
     const signature = req.headers['x-razorpay-signature'] as string | undefined;
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
+    const rawBody = req.rawBody ?? JSON.stringify(req.body);
     if (webhookSecret && signature) {
-      const rawBody = JSON.stringify(req.body);
       const isValid = razorpayClient.verifyWebhookSignature(rawBody, signature, webhookSecret);
       if (!isValid) {
         throw new AppError(401, 'Invalid Razorpay webhook signature', 'UNAUTHORIZED');
@@ -141,6 +143,14 @@ razorpayRouter.post(
     }
 
     const event = req.body as RazorpayWebhookPayload;
+    const eventIdHeader = req.headers['x-razorpay-event-id'];
+    await claimWebhookDelivery(req, res, {
+      provider: 'razorpay',
+      eventId:
+        typeof eventIdHeader === 'string' && eventIdHeader ? eventIdHeader : `body_${sha256Hex(rawBody)}`,
+      rawBody,
+      signature,
+    });
     console.log(`[Razorpay Webhook] Received event: ${event.event || 'unknown'}`);
 
     res.status(200).json({ received: true, event: event.event });

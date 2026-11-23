@@ -1,3 +1,4 @@
+import { claimWebhookDelivery } from '../middleware/webhookVerification.js';
 import { Router, Request, Response } from 'express';
 import express from 'express';
 import { z } from 'zod';
@@ -368,6 +369,14 @@ stripeRouter.post(
     if (!sig) throw new AppError(400, 'Missing stripe-signature header', 'MISSING_SIGNATURE');
 
     const event = constructWebhookEvent(req.body as Buffer, sig);
+    // Separate namespace from /webhooks/stripe: Stripe sends each endpoint its own delivery.
+    await claimWebhookDelivery(req, res, {
+      provider: 'stripe-payments',
+      eventId: event.id,
+      rawBody: Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body),
+      signature: sig,
+      eventTimestamp: new Date(event.created * 1000),
+    });
 
     switch (event.type) {
       case 'payment_intent.succeeded': {
