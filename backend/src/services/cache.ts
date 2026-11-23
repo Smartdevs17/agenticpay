@@ -6,7 +6,6 @@
 
 import { getRedisCache } from '../middleware/cache.js';
 import { eventBus } from '../domains/event-bus.js';
-import type { RedisClientType } from 'redis';
 
 export interface CacheConfig {
   defaultTtl: number; // seconds
@@ -42,6 +41,7 @@ const DEFAULT_CONFIG: CacheConfig = {
 
 class CacheService {
   private config: CacheConfig;
+  private redis: ReturnType<typeof getRedisCache>;
   private metrics: CacheMetrics = {
     hits: 0,
     misses: 0,
@@ -53,10 +53,12 @@ class CacheService {
   };
   private warmers: Map<string, CacheWarmer> = new Map();
   private invalidationRules: Map<string, string[]> = new Map(); // event -> cache keys to invalidate
+  private inFlightLoads = new Map<string, Promise<unknown>>();
   private metricsInterval?: NodeJS.Timeout;
 
-  constructor(config?: Partial<CacheConfig>) {
+  constructor(config?: Partial<CacheConfig>, redis: ReturnType<typeof getRedisCache> = getRedisCache()) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.redis = redis;
   }
 
   /**
@@ -96,7 +98,7 @@ class CacheService {
     // Subscribe to events
     if (eventBus) {
       for (const [event] of this.invalidationRules) {
-        eventBus.on(event, (data) => {
+        eventBus.on(event, () => {
           const keys = this.invalidationRules.get(event) || [];
           this.invalidateKeys(keys).catch(console.error);
         });
@@ -105,38 +107,44 @@ class CacheService {
   }
 
   /**
-   * Get value from cache with fallback to loader
+   * Read through Redis and coalesce concurrent cache misses for the same key.
+   * The cache write is deliberately detached from the result path: a slow or
+   * unavailable cache must not add its latency to the successful source read.
    */
   async get<T>(key: string, loader?: () => Promise<T>, ttl?: number): Promise<T | null> {
     const cacheKey = this.buildKey(key);
 
     try {
-      const redis = await getRedisCache();
-      const cached = await redis.get(cacheKey);
-
-      if (cached) {
+      const cached: unknown = await this.redis.get(cacheKey);
+      if (cached !== null && cached !== undefined) {
         this.metrics.hits++;
-        return JSON.parse(cached) as T;
+        return (typeof cached === 'string' ? JSON.parse(cached) : cached) as T;
       }
-
-      this.metrics.misses++;
-
-      // If loader provided, fetch and cache
-      if (loader) {
-        const value = await loader();
-        if (value !== null && value !== undefined) {
-          await this.set(key, value, ttl);
-        }
-        return value;
-      }
-
-      return null;
     } catch (error) {
+      // Cache failures are non-fatal; use the source loader when available.
       this.metrics.errors++;
       console.error(`[Cache] Error getting key ${cacheKey}:`, error);
-      // Return null on error, caller should handle fallback
-      return null;
     }
+
+    this.metrics.misses++;
+    if (!loader) return null;
+
+    const inFlight = this.inFlightLoads.get(cacheKey);
+    if (inFlight) return inFlight as Promise<T>;
+
+    const loadPromise = (async () => {
+      const value = await loader();
+      if (value !== null && value !== undefined) {
+        // set() owns cache-write error handling. Do not await it on the read path.
+        void this.set(key, value, ttl);
+      }
+      return value;
+    })().finally(() => {
+      this.inFlightLoads.delete(cacheKey);
+    });
+
+    this.inFlightLoads.set(cacheKey, loadPromise);
+    return loadPromise;
   }
 
   /**
@@ -147,7 +155,6 @@ class CacheService {
     const finalTtl = Math.min(ttl || this.config.defaultTtl, this.config.maxTtl);
 
     try {
-      const redis = await getRedisCache();
       const serialized = JSON.stringify(value);
       this.metrics.sets++;
 
@@ -155,9 +162,9 @@ class CacheService {
       this.metrics.avgSizeBytes = (this.metrics.avgSizeBytes + Buffer.byteLength(serialized)) / 2;
 
       if (finalTtl > 0) {
-        await redis.setEx(cacheKey, finalTtl, serialized);
+        await this.redis.setEx(cacheKey, finalTtl, serialized);
       } else {
-        await redis.set(cacheKey, serialized);
+        await this.redis.set(cacheKey, serialized);
       }
     } catch (error) {
       this.metrics.errors++;
@@ -172,8 +179,7 @@ class CacheService {
     const cacheKey = this.buildKey(key);
 
     try {
-      const redis = await getRedisCache();
-      await redis.del(cacheKey);
+      await this.redis.del(cacheKey);
       this.metrics.deletes++;
     } catch (error) {
       this.metrics.errors++;
@@ -186,26 +192,24 @@ class CacheService {
    */
   async invalidateKeys(patterns: string[]): Promise<void> {
     try {
-      const redis = await getRedisCache();
-
       for (const pattern of patterns) {
-        const scanPattern = this.buildKey(pattern.replace(/\*/g, '*'));
+        const scanPattern = this.buildKey(pattern);
 
         // Use SCAN to avoid blocking
         let cursor = 0;
         do {
-          const result = await redis.scan(cursor, { MATCH: scanPattern });
+          const result = await this.redis.scan(cursor, { MATCH: scanPattern });
           cursor = result.cursor;
 
           if (result.keys.length > 0) {
-            await redis.del(result.keys);
+            await this.redis.del(result.keys);
             this.metrics.deletes += result.keys.length;
           }
         } while (cursor !== 0);
       }
     } catch (error) {
       this.metrics.errors++;
-      console.error(`[Cache] Error invalidating patterns:`, error);
+      console.error('[Cache] Error invalidating patterns:', error);
     }
   }
 
@@ -300,17 +304,6 @@ export async function getCacheService(config?: Partial<CacheConfig>): Promise<Ca
 }
 
 export { CacheService };
-
-
-/**
- * #732: Redis Caching with Intelligent Invalidation - Enhanced
- * Intelligent cache invalidation is already implemented above via:
- * - Event-driven invalidation rules (setupInvalidationRules)
- * - Pattern-based invalidation with wildcards
- * - Cache warming for critical data
- * - Metrics tracking (hit rate, size, errors)
- * - TTL management with configurable limits
- */
 
 // Export singleton for easy access
 export const cacheService = getCacheService();
