@@ -10,6 +10,14 @@ id = "YOUR_KV_NAMESPACE_ID"
 binding = "EDGE_CACHE"
 id = "YOUR_KV_CACHE_ID"
 
+# Mutual TLS client certificate presented on every backend call (#1474).
+# Upload with `wrangler mtls-certificate upload --cert cert.pem --key key.pem`.
+# Secrets: SERVICE_TOKEN_PRIVATE_KEY, SERVICE_TOKEN_KEY_ID, SERVICE_MTLS_CERT_SHA256
+# (see docs/security/service-tokens.md).
+[[mtls_certificates]]
+binding = "BACKEND_MTLS"
+certificate_id = "YOUR_MTLS_CERTIFICATE_ID"
+
 # Warm-up cron triggers — keep critical backend endpoints warm to avoid cold starts.
 # Runs every 5 minutes to prevent the backend from going idle.
 [triggers]

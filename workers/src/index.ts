@@ -34,15 +34,20 @@ import {
   isBotUserAgent,
 } from './utilities';
 import { createEdgeErrorResponse } from './errors';
+import { backendFetch, type ServiceAuthEnv } from './serviceAuth';
 
 // ── Env binding types ─────────────────────────────────────────────────────────
 
-export interface Env {
+export interface Env extends ServiceAuthEnv {
   USER_SESSIONS: KVNamespace;
   EDGE_CACHE: KVNamespace;
   JWT_SECRET: string;
   API_BASE_URL: string;
 }
+
+// Scopes the backend must allow for this worker's key (#1474).
+const PROXY_SCOPES = ['edge:proxy', 'edge:forward-client-ip'];
+const WARMUP_SCOPES = ['edge:warmup'];
 
 // ── Execution-context reuse: module-scope constants ───────────────────────────
 // These are evaluated once per isolate lifetime, not per request.
@@ -126,7 +131,8 @@ function getHandler(routeKey: string): RouteHandler {
     const apiUrl = `${env.API_BASE_URL}${url.pathname}${url.search}`;
     const method = request.method;
 
-    return fetch(apiUrl, {
+    return backendFetch(env, apiUrl, {
+      scopes: PROXY_SCOPES,
       method,
       headers: {
         'Content-Type': request.headers.get('content-type') ?? 'application/json',
@@ -172,7 +178,8 @@ async function handleScheduled(env: Env): Promise<void> {
   const warmupUrl = `${env.API_BASE_URL}/api/v1/cold-start/warmup`;
 
   try {
-    const res = await fetch(warmupUrl, {
+    const res = await backendFetch(env, warmupUrl, {
+      scopes: WARMUP_SCOPES,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Warmup-Source': 'cf-cron' },
     });
@@ -233,7 +240,8 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   if (WARMUP_PATHS.has(path) && method === 'POST') {
     try {
       const warmupUrl = `${env.API_BASE_URL}${path}`;
-      const backendRes = await fetch(warmupUrl, {
+      const backendRes = await backendFetch(env, warmupUrl, {
+        scopes: WARMUP_SCOPES,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Warmup-Source': 'cf-worker' },
       });

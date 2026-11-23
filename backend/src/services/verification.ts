@@ -411,7 +411,10 @@ export function resolveVerificationAgent(req: Request): VerificationAgent {
     return { id: `principal:${req.user.tenantId}:${req.user.id}`, tier };
   }
 
-  return { id: `ip:${req.ip ?? req.socket?.remoteAddress ?? 'unknown'}`, tier: 'anonymous' };
+  // Behind the edge worker the socket peer is the worker; a verified worker
+  // token may report the end-user's IP instead (#1474).
+  const ip = req.service?.clientIp ?? req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+  return { id: `ip:${ip}`, tier: 'anonymous' };
 }
 
 export const verificationQuotaService = new VerificationQuotaService();
