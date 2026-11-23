@@ -1,6 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { auditService } from '../services/auditService.js';
+import {
+  AUDIT_CHAIN_GENESIS,
+  AUDIT_HASH_ALGORITHM,
+  auditService,
+} from '../services/auditService.js';
 import { AuditEventValidationError, normalizeAuditEvent } from '../audit/event-schema.js';
 import type { ComplianceFramework } from '../audit/compliance-report.js';
 
@@ -81,7 +85,29 @@ auditRouter.get('/entries/:id', asyncHandler(async (req: Request, res: Response)
 
 auditRouter.get('/verify', asyncHandler(async (req: Request, res: Response) => {
   const result = await auditService.verifyIntegrity();
-  res.status(200).json(result);
+  const count = await auditService.getEntryCount();
+  const tip = await auditService.getChainTip();
+  res.status(200).json({
+    ...result,
+    algorithm: AUDIT_HASH_ALGORITHM,
+    entryCount: count,
+    chainTip: tip,
+  });
+}));
+
+/** Return the current chain tip together with a full integrity check. */
+auditRouter.get('/chain', asyncHandler(async (_req: Request, res: Response) => {
+  const tip = await auditService.getChainTip();
+  const count = await auditService.getEntryCount();
+  const integrity = await auditService.verifyIntegrity();
+  res.status(200).json({
+    algorithm: AUDIT_HASH_ALGORITHM,
+    genesis: AUDIT_CHAIN_GENESIS,
+    chainTip: tip,
+    entryCount: count,
+    valid: integrity.valid,
+    brokenAt: integrity.brokenAt,
+  });
 }));
 
 auditRouter.post('/flag/:id', asyncHandler(async (req: Request, res: Response) => {
