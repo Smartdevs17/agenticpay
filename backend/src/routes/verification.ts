@@ -4,6 +4,7 @@ import {
   getVerification,
   updateVerification,
   deleteVerification,
+  verificationQuota,
 } from '../services/verification.js';
 import { idempotency } from '../middleware/idempotency.js';
 import { validate } from '../middleware/validate.js';
@@ -23,6 +24,7 @@ verificationRouter.post(
   '/verify',
   idempotency(),
   validate(verificationSchema),
+  verificationQuota(),
   asyncHandler(async (req, res) => {
     const { repositoryUrl, milestoneDescription, projectId } = req.body;
 
@@ -40,6 +42,8 @@ verificationRouter.post(
   '/verify/batch',
   idempotency(),
   validate(bulkVerificationSchema),
+  // Each item is one model call, so a batch is charged per item (#1480).
+  verificationQuota((req) => (Array.isArray(req.body?.items) ? req.body.items.length : 1)),
   asyncHandler(async (req, res) => {
     const { items } = req.body as {
       items?: Array<{ repositoryUrl?: string; milestoneDescription?: string; projectId?: string }>;

@@ -47,6 +47,7 @@ Use this page as the entry point for the repository's maintained guides. API-spe
 - [Audit logging](security/audit-logging.md)
 - [Provider credentials encryption](security/provider-credentials-encryption.md)
 - [Webhook replay receipts](security/webhook-replay-receipts.md)
+- [Verification quotas](security/verification-quotas.md)
 - [Request and data hardening](security/request-hardening.md)
 - [AML transaction monitoring](AML_TRANSACTION_MONITORING.md)
 - [Sanctions screening](SANCTIONS_SCREENING.md)
