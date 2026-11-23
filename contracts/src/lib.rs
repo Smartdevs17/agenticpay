@@ -2,13 +2,14 @@
 
 pub mod anchor;
 pub mod factoring;
+pub mod milestone_escrow;
 pub mod policies;
 pub mod spend_policy;
 
 #[cfg(test)]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, xdr::ToXdr, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, String, Vec};
 
 // ---------------------------------------------------------------------------
 // Multi-signature wallet types
@@ -884,6 +885,47 @@ impl AgenticPayContract {
             }
             None => false,
         }
+    }
+
+    /// Create a milestone for escrow unlock with attestation requirements.
+    pub fn create_milestone(
+        env: Env,
+        project_id: u64,
+        client: Address,
+        amount: i128,
+        description: String,
+        deadline: u64,
+        attestation_provider: Address,
+    ) -> u64 {
+        milestone_escrow::create_milestone(
+            &env,
+            project_id,
+            client,
+            amount,
+            description,
+            deadline,
+            attestation_provider,
+        )
+    }
+
+    /// Submit attestation proof for a milestone.
+    pub fn submit_milestone_attestation(
+        env: Env,
+        milestone_id: u64,
+        attestation_provider: Address,
+        proof: Bytes,
+    ) {
+        milestone_escrow::submit_attestation(&env, milestone_id, attestation_provider, proof)
+    }
+
+    /// Unlock milestone funds after attestation is verified.
+    pub fn unlock_milestone(env: Env, milestone_id: u64, client: Address) {
+        milestone_escrow::unlock_milestone(&env, milestone_id, client)
+    }
+
+    /// Retrieve milestone details by id.
+    pub fn get_milestone(env: Env, milestone_id: u64) -> milestone_escrow::Milestone {
+        milestone_escrow::get_milestone(&env, milestone_id)
     }
 
     /// Store metadata key-value pair (admin only).
