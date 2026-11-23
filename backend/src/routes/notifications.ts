@@ -1,7 +1,32 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { validateRequest } from '../middleware/validate.js';
 import { NotificationService } from '../services/notificationService.js';
+import { multiChannelNotifications } from '../services/notifications.js';
 import { whatsappNotificationRouter } from './whatsapp.js';
+
+const categorySchema = z.enum([
+  'payments',
+  'invoices',
+  'marketing',
+  'security',
+  'productUpdates',
+]);
+const categoryCellSchema = z.object({
+  payments: z.boolean(),
+  invoices: z.boolean(),
+  marketing: z.boolean(),
+  security: z.boolean(),
+  productUpdates: z.boolean(),
+});
+const matrixSchema = z.object({
+  email: categoryCellSchema,
+  sms: categoryCellSchema,
+  push: categoryCellSchema,
+  inApp: categoryCellSchema,
+  whatsapp: categoryCellSchema,
+});
 
 export const notificationsRouter = Router();
 
@@ -10,6 +35,62 @@ notificationsRouter.use('/whatsapp', whatsappNotificationRouter);
 
 // Initialize notification service
 const notificationService = new NotificationService();
+
+// Preference matrix (channel × category) — Issue #1352
+notificationsRouter.get(
+  '/preferences/matrix',
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId =
+      (typeof req.query.userId === 'string' && req.query.userId) ||
+      (req as Request & { user?: { id?: string } }).user?.id;
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+    const matrix = await multiChannelNotifications.getMatrix(userId);
+    res.status(200).json(matrix);
+  })
+);
+
+notificationsRouter.put(
+  '/preferences/matrix',
+  validateRequest({
+    body: z.object({ userId: z.string().min(1), matrix: matrixSchema }),
+  }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const saved = await multiChannelNotifications.setMatrix(
+      req.body.userId,
+      req.body.matrix
+    );
+    res.status(200).json(saved);
+  })
+);
+
+notificationsRouter.post(
+  '/dispatch',
+  validateRequest({
+    body: z.object({
+      userId: z.string().min(1),
+      category: categorySchema,
+      title: z.string().min(1),
+      body: z.string().min(1),
+      metadata: z.record(z.unknown()).optional(),
+      bypassQuietHours: z.boolean().optional(),
+    }),
+  }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId, category, title, body, metadata, bypassQuietHours } = req.body;
+    const result = await multiChannelNotifications.dispatch({
+      userId,
+      category,
+      title,
+      body,
+      metadata,
+      bypassQuietHours,
+    });
+    res.status(200).json(result);
+  })
+);
 
 // Send notification endpoint
 notificationsRouter.post('/send', asyncHandler(async (req: Request, res: Response) => {
