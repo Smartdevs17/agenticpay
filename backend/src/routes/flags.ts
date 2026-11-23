@@ -13,6 +13,7 @@
 import { Router } from 'express';
 import { createHash } from 'node:crypto';
 import { featureFlags, FeatureFlagName } from '../config/featureFlags.js';
+import { featureFlagEngine } from '../services/featureFlags.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { paginateArray } from '../utils/pagination.js';
 
@@ -67,11 +68,22 @@ flagsRouter.get(
 
     const isEnabled = evaluateDeterministic(flag as FeatureFlagName, identifier);
 
-    res.json({
-      flag,
-      identifier,
-      enabled: isEnabled
-    });
+    const response: {
+      flag: string;
+      identifier: string;
+      enabled: boolean;
+      variant?: string | null;
+      cohortId?: string | null;
+    } = { flag, identifier, enabled: isEnabled };
+
+    // Cohort A/B metadata is opt-in so existing SDK clients keep their payload.
+    if (req.query.includeCohort === 'true' && featureFlagEngine.getFlag(flag)) {
+      const cohort = featureFlagEngine.evaluateWithCohort(flag, identifier);
+      response.variant = cohort.variant;
+      response.cohortId = cohort.cohortId;
+    }
+
+    res.json(response);
   })
 );
 
