@@ -4,7 +4,8 @@
 // checked by the verification provider) → submit for review → status.
 // Reviewer endpoints cover the manual review queue and decisions.
 
-import { Router, type RequestHandler } from 'express';
+import { Router, type Request, type RequestHandler } from 'express';
+import { authMiddleware } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { KycError, kycService } from '../services/kyc.js';
@@ -30,6 +31,14 @@ export const kycRouter = Router();
 function param(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
 }
+
+/** Tenant whose key encrypts the applicant's documents (#1470). */
+function applicantTenant(req: Request): string {
+  return req.user?.tenantId ?? req.get('x-tenant-id') ?? 'default';
+}
+
+/** Roles allowed to read decrypted KYC documents. */
+export const KYC_DOCUMENT_READER_ROLES = ['admin', 'owner', 'compliance'];
 
 // Maps service errors onto the API error envelope.
 function kycHandler(handler: Parameters<typeof asyncHandler>[0]): RequestHandler {
@@ -86,7 +95,7 @@ kycRouter.put(
   validate(kycPersonalInfoSchema),
   kycHandler(async (req, res) => {
     const userId = param(req.params.userId);
-    kycService.savePersonalInfo(userId, req.body);
+    kycService.savePersonalInfo(userId, req.body, applicantTenant(req));
     res.json(kycService.getOnboardingState(userId));
   })
 );
@@ -99,6 +108,31 @@ kycRouter.post(
     const userId = param(req.params.userId);
     const document = await kycService.uploadDocument(userId, req.body);
     res.status(201).json({ document, state: kycService.getOnboardingState(userId) });
+  })
+);
+
+// Reviewer download of an uploaded file, decrypted from the vault (#1470).
+// Authenticated, role-checked, scoped to the reviewer's own tenant and audited.
+kycRouter.get(
+  '/:userId/documents/:documentId/content',
+  authMiddleware,
+  kycHandler(async (req, res) => {
+    const principal = req.user!;
+    if (!KYC_DOCUMENT_READER_ROLES.includes(principal.role)) {
+      throw new AppError(403, 'Not allowed to read KYC documents', 'FORBIDDEN');
+    }
+    const reason = req.get('x-access-reason') ?? undefined;
+    const { document, content } = await kycService.readDocumentContent(
+      param(req.params.userId),
+      param(req.params.documentId),
+      { tenantId: principal.tenantId, actor: principal.id, reason },
+    );
+    res.setHeader('Content-Type', document.mimeType ?? 'application/octet-stream');
+    res.setHeader('Content-Length', String(content.length));
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(document.fileName ?? document.id)}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.end(content);
   })
 );
 

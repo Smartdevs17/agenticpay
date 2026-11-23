@@ -12,6 +12,7 @@ import {
   type KycDocumentInput,
   type ProviderDecision,
 } from './kyc-verification.js';
+import { DocumentVaultError, kycDocumentVault, type KycDocumentVault } from '../compliance/documentVault.js';
 
 export type KycStatus = 'pending' | 'under_review' | 'approved' | 'rejected' | 'expired';
 
@@ -73,6 +74,9 @@ export interface KycDocument {
   mimeType?: string;
   fileSize?: number;
   sha256?: string;
+  /** Vault reference of the encrypted file contents (#1470). The bytes are never kept on the document. */
+  storageRef?: string;
+  encryptedAtRest?: boolean;
   verification?: KycDocumentVerification;
 }
 
@@ -86,6 +90,8 @@ export interface KycStatusChange {
 
 export interface KycProfile {
   userId: string;
+  /** Tenant whose key encrypts this applicant's documents (#1470). */
+  tenantId?: string;
   status: KycStatus;
   documents: KycDocument[];
   riskScore: number;
@@ -130,6 +136,15 @@ export interface KycServiceOptions {
   verificationProvider?: DocumentVerificationProvider;
   /** Approve low-risk applications whose documents all passed automated checks. Default true. */
   autoApprove?: boolean;
+  /** Where uploaded document files are encrypted at rest. */
+  documentVault?: KycDocumentVault;
+}
+
+/** Who may read a decrypted KYC document. */
+export interface KycDocumentAccess {
+  tenantId: string;
+  actor: string;
+  reason?: string;
 }
 
 export class KycError extends Error {
@@ -187,10 +202,12 @@ export class KycService {
   private documentOwners = new Map<string, string>();
   private readonly verificationProvider: DocumentVerificationProvider;
   private readonly autoApprove: boolean;
+  private readonly vault: KycDocumentVault;
 
   constructor(options: KycServiceOptions = {}) {
     this.verificationProvider = options.verificationProvider ?? new MockDocumentVerificationProvider();
     this.autoApprove = options.autoApprove ?? true;
+    this.vault = options.documentVault ?? kycDocumentVault;
   }
 
   submitDocument(userId: string, type: DocumentType, fileUrl: string): KycDocument {
@@ -371,13 +388,18 @@ export class KycService {
   // ── Onboarding flow (#921) ────────────────────────────────────────────────
 
   /** Step 1: create or update the applicant's personal details. */
-  savePersonalInfo(userId: string, info: KycPersonalInfo): KycProfile {
+  savePersonalInfo(userId: string, info: KycPersonalInfo, tenantId = 'default'): KycProfile {
     const errors = validatePersonalInfo(info);
     if (errors.length > 0) {
       throw new KycError('Personal information is invalid', 'INVALID_PERSONAL_INFO', 422, errors);
     }
 
-    const profile = this.profiles.get(userId) ?? this.createProfile(userId, 'pending', userId, 'Onboarding started');
+    const existing = this.profiles.get(userId);
+    if (existing?.tenantId && existing.tenantId !== tenantId) {
+      throw new KycError('KYC profile not found', 'KYC_NOT_FOUND', 404);
+    }
+    const profile = existing ?? this.createProfile(userId, 'pending', userId, 'Onboarding started');
+    profile.tenantId ??= tenantId;
     this.assertEditable(profile);
     this.reopen(profile, userId, 'Personal information updated');
 
@@ -442,14 +464,70 @@ export class KycService {
       sha256: validation.sha256,
     };
 
+    // The file is encrypted before anything else sees it; if that fails the upload fails.
+    if (validation.file) {
+      try {
+        const stored = await this.vault.put({
+          tenantId: profile.tenantId ?? 'default',
+          userId,
+          documentId: document.id,
+          mimeType: document.mimeType ?? 'application/octet-stream',
+          content: validation.file,
+        });
+        document.storageRef = stored.ref;
+        document.encryptedAtRest = true;
+      } catch {
+        throw new KycError('Document storage is unavailable; try again later', 'DOCUMENT_STORAGE_UNAVAILABLE', 503);
+      }
+    }
+
     const result = await this.runProviderCheck(profile, document, validation);
     this.applyProviderResult(document, result);
 
+    const replaced = profile.documents.filter(d => d.type === document.type && d.storageRef);
     profile.documents = profile.documents.filter(d => d.type !== document.type).concat(document);
+    for (const old of replaced) void this.vault.delete(old.storageRef!);
     if (fingerprint) this.documentOwners.set(fingerprint, userId);
     profile.onboardingStep = this.nextStep(profile);
     profile.updatedAt = now();
     return document;
+  }
+
+  /**
+   * Decrypt an uploaded document's file for a reviewer of the owning tenant.
+   * Every read is audited by the vault.
+   */
+  async readDocumentContent(
+    userId: string,
+    documentId: string,
+    access: KycDocumentAccess,
+  ): Promise<{ document: KycDocument; content: Buffer }> {
+    const profile = this.profiles.get(userId);
+    const document = profile?.documents.find(d => d.id === documentId);
+    if (!profile || !document || (profile.tenantId ?? 'default') !== access.tenantId) {
+      throw new KycError('Document not found', 'KYC_DOCUMENT_NOT_FOUND', 404);
+    }
+    if (!document.storageRef) {
+      throw new KycError('No stored file for this document', 'KYC_DOCUMENT_NOT_STORED', 404);
+    }
+
+    try {
+      const { content } = await this.vault.read(document.storageRef, access);
+      return { document, content };
+    } catch (error) {
+      if (!(error instanceof DocumentVaultError)) throw error;
+      switch (error.code) {
+        case 'NOT_FOUND':
+        case 'TENANT_MISMATCH':
+          throw new KycError('Document not found', 'KYC_DOCUMENT_NOT_FOUND', 404);
+        case 'KEY_DESTROYED':
+          throw new KycError('Document has been erased', 'KYC_DOCUMENT_ERASED', 410);
+        case 'INTEGRITY':
+          throw new KycError('Document failed integrity verification', 'KYC_DOCUMENT_CORRUPT', 500);
+        default:
+          throw new KycError('Document storage is unavailable; try again later', 'DOCUMENT_STORAGE_UNAVAILABLE', 503);
+      }
+    }
   }
 
   /** Current profile plus the outstanding requirements for the onboarding UI. */
