@@ -68,7 +68,7 @@
     "viem": "^2.58.2",
     "wagmi": "^3.7.11",
     "zod": "^3.25.0",
-    "zustand": "^5.0.9"
+    "zustand": "^5.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
