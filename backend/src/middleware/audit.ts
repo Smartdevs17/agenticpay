@@ -1,5 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
-import { auditService } from '../services/auditService.js';
+import {
+  AUDIT_CHAIN_GENESIS,
+  AUDIT_HASH_ALGORITHM,
+  auditService,
+} from '../services/auditService.js';
+
+export { AUDIT_CHAIN_GENESIS, AUDIT_HASH_ALGORITHM };
 
 export interface AuditMiddlewareOptions {
   excludePaths?: string[];
@@ -22,7 +28,8 @@ export function deriveAuditResource(req: Request): string {
 }
 
 /**
- * Express middleware that records user and system operations to the tamper-evident audit log.
+ * Express middleware that records user and system operations to the
+ * tamper-evident, hash-chained audit log (issue #1356).
  */
 export function auditMiddleware(options: AuditMiddlewareOptions = {}) {
   const excludePaths = options.excludePaths || ['/health', '/metrics', '/api-docs'];
@@ -58,34 +65,42 @@ export function auditMiddleware(options: AuditMiddlewareOptions = {}) {
       // Capture request body (sanitization happens inside auditService.logAction)
       const requestBody = req.body;
 
-      void auditService.logAction({
-        userId: String(userId),
-        action,
-        resource,
-        resourceId: req.params?.id || (req.body?.id ? String(req.body.id) : undefined),
-        details: {
-          durationMs,
-          query: req.query,
-          headers: {
-            host: req.headers.host,
-            accept: req.headers.accept,
+      void auditService
+        .logAction({
+          userId: String(userId),
+          action,
+          resource,
+          resourceId: req.params?.id
+            ? String(req.params.id)
+            : req.body?.id
+              ? String(req.body.id)
+              : undefined,
+          details: {
+            durationMs,
+            query: req.query,
+            headers: {
+              host: req.headers.host,
+              accept: req.headers.accept,
+            },
+            hashAlgorithm: AUDIT_HASH_ALGORITHM,
           },
-        },
-        ipAddress: req.ip || req.socket.remoteAddress,
-        userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
-        request: {
-          method: req.method,
-          path: req.path,
-          body: requestBody,
-        },
-        response: {
-          status: res.statusCode,
-        },
-      }).catch((err) => {
-        console.error('[audit] Failed to write audit entry', err);
-      });
+          ipAddress: req.ip || req.socket.remoteAddress,
+          userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
+          request: {
+            method: req.method,
+            path: req.path,
+            body: requestBody,
+          },
+          response: {
+            status: res.statusCode,
+          },
+        })
+        .catch((err) => {
+          console.error('[audit] Failed to write audit entry', err);
+        });
     });
 
     next();
   };
 }
+

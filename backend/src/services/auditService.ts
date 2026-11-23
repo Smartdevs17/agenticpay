@@ -26,6 +26,10 @@ import {
   type RetentionEnforcementResult,
 } from '../audit/retention.js';
 
+/** Hash algorithm and genesis value shared by writers and verification endpoints. */
+export const AUDIT_HASH_ALGORITHM = 'sha256';
+export const AUDIT_CHAIN_GENESIS = '0'.repeat(64);
+
 /** Whether a sensitive operation succeeded or failed. */
 export type AuditOutcome = 'success' | 'failure';
 
@@ -80,13 +84,13 @@ export interface AuditServiceOptions {
 
 export class AuditService {
   private entries: AuditEntry[] = [];
-  private currentHash = '0000000000000000000000000000000000000000000000000000000000000000';
+  private currentHash = AUDIT_CHAIN_GENESIS;
   /**
    * Hash immediately preceding the oldest retained entry. Archival/eviction
    * moves this forward so `verifyIntegrity()` keeps validating the retained
    * chain instead of reporting a break at the first evicted entry (issue #396).
    */
-  private chainAnchor = '0000000000000000000000000000000000000000000000000000000000000000';
+  private chainAnchor = AUDIT_CHAIN_GENESIS;
   private retentionPolicy: RetentionPolicy = {
     retentionDays: 2555,
     archiveAfterDays: 2190,
@@ -406,6 +410,11 @@ export class AuditService {
         newest: timestamps[timestamps.length - 1] || 0,
       },
     };
+  }
+
+  /** Current tip of the SHA-256 hash chain (genesis when empty). */
+  async getChainTip(): Promise<string> {
+    return this.currentHash;
   }
 
   async getEntryCount(): Promise<number> {
