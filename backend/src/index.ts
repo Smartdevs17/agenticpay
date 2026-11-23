@@ -31,6 +31,7 @@ import webhooksDlqRouter from './routes/webhooks-dlq.js';
 import { apiVersionsRouter } from './routes/api-versions.js';
 import { webhookHandlersRouter } from './routes/webhookHandlers.js';
 import { webhookJsonParser } from './middleware/webhookVerification.js';
+import { serviceAuthentication } from './middleware/serviceAuth.js';
 import { startJobs, getJobScheduler } from './jobs/index.js';
 import { batchProcessor } from './services/batch.js';
 import { featureFlags } from './config/featureFlags.js';
@@ -247,6 +248,8 @@ app.use(requestIdMiddleware);
 app.use(traceMiddleware);
 app.use(correlationMiddleware);
 app.use(httpLogger);
+// Verifies worker service tokens + mTLS binding and sets req.service (#1474).
+app.use(serviceAuthentication());
 
 // Incoming webhooks: raw body capture before global JSON parser (#393)
 app.use('/webhooks', webhookHandlersRouter);

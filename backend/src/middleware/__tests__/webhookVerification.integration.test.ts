@@ -7,7 +7,7 @@ import {
   initWebhookKeyRegistry,
   resetWebhookKeyRegistry,
 } from '../../services/webhookKeys.js';
-import { clearReplayCache } from '../../services/webhooks/replay.js';
+import { setWebhookReplayGuard } from '../../services/webhookReplay.js';
 import { generateWebhookSignature } from '../../services/webhooks/verification.js';
 
 vi.mock('../../services/stripe.js', () => ({
@@ -59,12 +59,12 @@ describe('webhook verification integration (key rotation)', () => {
   beforeEach(() => {
     clock = 1_700_000_000_000;
     resetWebhookKeyRegistry();
-    clearReplayCache();
+    setWebhookReplayGuard();
   });
 
   afterEach(() => {
     resetWebhookKeyRegistry();
-    clearReplayCache();
+    setWebhookReplayGuard();
   });
 
   it('accepts a valid custom webhook signed with the active key', async () => {

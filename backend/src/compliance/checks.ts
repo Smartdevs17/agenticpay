@@ -1,4 +1,5 @@
 import { config as getEnvConfig } from '../config/env.js';
+import { kycDocumentVault } from './documentVault.js';
 
 export type ComplianceCheckResult = {
   id: string;
@@ -50,6 +51,34 @@ export function runComplianceChecks(): ComplianceCheckResult[] {
     },
     checkedAtMs,
   });
+
+  // KYC documents are encrypted at rest with per-tenant keys (#1470); that only
+  // protects anything if the master key is persistent configuration.
+  let kycEncryption: ComplianceCheckResult;
+  try {
+    const durable = kycDocumentVault.durable;
+    kycEncryption = {
+      id: 'kyc_documents_encrypted_at_rest',
+      description: 'KYC document files are encrypted at rest with per-tenant keys',
+      status: durable ? 'pass' : env.NODE_ENV === 'production' ? 'fail' : 'warn',
+      details: {
+        note: durable
+          ? 'AES-256-GCM per document, data keys wrapped by a per-tenant key under KMS_MASTER_KEY.'
+          : 'KMS_MASTER_KEY is not set: documents are encrypted under an ephemeral key and are lost on restart.',
+        vault: kycDocumentVault.stats(),
+      },
+      checkedAtMs,
+    };
+  } catch (error) {
+    kycEncryption = {
+      id: 'kyc_documents_encrypted_at_rest',
+      description: 'KYC document files are encrypted at rest with per-tenant keys',
+      status: 'fail',
+      details: { error: error instanceof Error ? error.message : String(error) },
+      checkedAtMs,
+    };
+  }
+  results.push(kycEncryption);
 
   return results;
 }

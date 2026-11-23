@@ -10,6 +10,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { requireServiceToken } from '../middleware/serviceAuth.js';
 import { getColdStartMetrics, resetColdStartMetrics } from '../middleware/cold-start.js';
 import { getLazyModuleRegistry } from '../lib/lazy-loader.js';
 
@@ -99,7 +100,8 @@ coldStartMonitorRouter.post('/reset', (_req: Request, res: Response) => {
  *       200:
  *         description: Instance is warm
  */
-coldStartMonitorRouter.post('/warmup', (_req: Request, res: Response) => {
+// Called by the edge worker's cron; in SERVICE_AUTH_MODE=enforce it needs an edge:warmup token (#1474).
+coldStartMonitorRouter.post('/warmup', requireServiceToken('edge:warmup'), (_req: Request, res: Response) => {
   // This endpoint is intentionally lightweight — its purpose is to be called
   // by a scheduler (cron, Cloudflare Worker cron trigger, etc.) to prevent
   // the process from going idle and triggering a cold start on the next real request.

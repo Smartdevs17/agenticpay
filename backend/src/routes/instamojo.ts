@@ -1,3 +1,4 @@
+import { claimWebhookDelivery } from '../middleware/webhookVerification.js';
 import { Router, Request, Response } from 'express';
 import { asyncHandler, AppError } from '../middleware/errorHandler.js';
 import { instamojoClient } from '../integrations/instamojo/index.js';
@@ -99,6 +100,14 @@ instamojoRouter.post(
         throw new AppError(401, 'Invalid Instamojo webhook MAC signature', 'UNAUTHORIZED');
       }
     }
+
+    // A payment's status change is the event: Instamojo resends it on retry.
+    await claimWebhookDelivery(req, res, {
+      provider: 'instamojo',
+      eventId: `${payload.payment_id}:${payload.status}`,
+      rawBody: req.rawBody ?? JSON.stringify(payload),
+      signature: payload.mac,
+    });
 
     // Process payment status
     console.log(`[Instamojo Webhook] Received status ${payload.status} for payment ${payload.payment_id}`);
