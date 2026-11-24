@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "breakpoints": [320, 640],
+  "images": {
+    "mobile-preview": {
+      "description": "Mobile dashboard preview used in onboarding and docs",
+      "candidates": [
+        { "url": "mobile-preview-320.avif", "width": 320, "format": "avif", "bytes": 13901 },
+        { "url": "mobile-preview-320.png", "width": 320, "format": "png", "bytes": 478221 },
+        { "url": "mobile-preview-640.avif", "width": 640, "format": "avif", "bytes": 35046 },
+        { "url": "mobile-preview-640.png", "width": 640, "format": "png", "bytes": 1591188 }
+      ]
+    },
+    "icon": {
+      "description": "App icon at launcher sizes",
+      "candidates": [
+        { "url": "icon-192.avif", "width": 192, "format": "avif", "bytes": 3319 },
+        { "url": "icon-192.png", "width": 192, "format": "png", "bytes": 59600 },
+        { "url": "icon-512.avif", "width": 512, "format": "avif", "bytes": 16617 },
+        { "url": "icon-512.png", "width": 512, "format": "png", "bytes": 373272 }
+      ]
+    }
+  }
+}
