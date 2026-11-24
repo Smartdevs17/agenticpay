@@ -54,6 +54,12 @@ Use the `Database Backup` workflow's `drill` dispatch option for CI evidence.
 The target database is disposable; never use a production connection string as
 `DRILL_DATABASE_URL`.
 
+## Warm-standby promotion drill
+
+Promotion of a streaming replica is a separate drill, covering replay lag and
+time to writable. See [infra/dr/README.md](../infra/dr/README.md) and
+`scripts/dr-drill.sh`. It promotes only a disposable drill replica.
+
 ## Recovery verification checklist
 
 - [ ] Backup gzip and SHA-256 validation passed.
