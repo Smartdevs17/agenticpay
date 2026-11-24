@@ -541,6 +541,7 @@ For issues, questions, or suggestions:
 - **Issues**: GitHub Issues
 - **Discussions**: GitHub Discussions
 - **Documentation**: Start with the [documentation index](docs/README.md)
+- **Mobile image assets**: See [mobile/README.md](mobile/README.md) for AVIF variants and the responsive loader
 
 ---
 
