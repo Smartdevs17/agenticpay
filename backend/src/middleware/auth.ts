@@ -20,6 +20,7 @@
  * 401.
  */
 
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AppError } from './errorHandler.js';
 import { hmacAuthMiddleware, HEADER_SIGNATURE } from './hmac-auth.js';
@@ -31,7 +32,28 @@ import { mergeLogContext } from '../logging/context.js';
 import { getWorkspaceScopes, type WorkspaceRole } from '../services/workspaces.js';
 import { logger } from '../utils/logger.js';
 
-export type AuthMethod = 'session' | 'hmac' | 'token' | 'apiKey';
+export type AuthMethod = 'session' | 'hmac' | 'token' | 'apiKey' | 'agent';
+
+export const AGENT_TOKEN_HEADER = 'x-agent-token';
+export const AGENT_TOKEN_TYPE = 'agent+jwt';
+export const AGENT_TOKEN_AUDIENCE = 'agenticpay-agent';
+export const AGENT_TOKEN_ISSUER = 'agenticpay-agent-sdk';
+export const MAX_AGENT_TOKEN_TTL_SECONDS = 300;
+export const AGENT_TOKEN_CLOCK_SKEW_SECONDS = 30;
+
+const AGENT_TOKEN_SCOPE_PATTERN = /^[a-z0-9][a-z0-9:._-]{1,127}$/i;
+
+export interface AgentTokenClaims {
+  iss: string;
+  aud: string;
+  sub: string;
+  agentId: string;
+  jti: string;
+  iat: number;
+  exp: number;
+  scope: string[];
+  tenantId?: string;
+}
 
 export interface AuthPrincipal {
   id: string;
@@ -124,6 +146,8 @@ declare global {
       accessToken?: string;
       /** Verified JWT claims, set by `tokenAuthMiddleware`. */
       accessTokenClaims?: AccessTokenClaims;
+      agentToken?: string;
+      agentTokenClaims?: AgentTokenClaims;
       /** Workspace memberships prefetched by the auth middleware (#1464). */
       workspaceScopes?: WorkspaceScopes;
     }
@@ -150,6 +174,116 @@ function runMiddleware(mw: RequestHandler, req: Request, res: Response): Promise
       resolve(err ? { ok: false, error: err } : { ok: true });
     }) as NextFunction);
   });
+}
+
+export interface AgentTokenVerificationOptions {
+  secret?: string;
+  previousSecret?: string;
+  issuer?: string;
+  audience?: string;
+  now?: number;
+  clockSkewSeconds?: number;
+}
+
+function envValue(name: string): string | undefined {
+  const value = process.env[name];
+  return value && value.length > 0 ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function decodeBase64Url(value: string): Buffer {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('Invalid base64url segment');
+  return Buffer.from(value, 'base64url');
+}
+
+function constantTimeEqual(left: Buffer, right: Buffer): boolean {
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function parseAgentTokenClaims(value: unknown): AgentTokenClaims | undefined {
+  if (!isRecord(value)) return undefined;
+  if (!isNonEmptyString(value.iss) || !isNonEmptyString(value.aud)) return undefined;
+  if (!isNonEmptyString(value.sub) || !isNonEmptyString(value.agentId) || !isNonEmptyString(value.jti)) return undefined;
+  if (value.jti.length > 256) return undefined;
+  if (typeof value.iat !== 'number' || !Number.isFinite(value.iat)) return undefined;
+  if (typeof value.exp !== 'number' || !Number.isFinite(value.exp)) return undefined;
+  if (value.tenantId !== undefined && !isNonEmptyString(value.tenantId)) return undefined;
+  if (!Array.isArray(value.scope) || value.scope.length === 0 || value.scope.length > 50) return undefined;
+  if (!value.scope.every((scope) => isNonEmptyString(scope) && AGENT_TOKEN_SCOPE_PATTERN.test(scope))) return undefined;
+
+  return {
+    iss: value.iss,
+    aud: value.aud,
+    sub: value.sub,
+    agentId: value.agentId,
+    jti: value.jti,
+    iat: value.iat,
+    exp: value.exp,
+    scope: value.scope,
+    tenantId: value.tenantId,
+  };
+}
+
+export function verifyAgentToken(token: string, options: AgentTokenVerificationOptions = {}): AgentTokenClaims {
+  const secret = options.secret ?? envValue('AGENT_TOKEN_SECRET') ?? envValue('JWT_SECRET');
+  if (!secret || secret.length < 32) {
+    throw new AppError(503, 'Agent token secret is not configured', 'AGENT_TOKEN_SECRET_MISSING');
+  }
+
+  const previousSecret = options.previousSecret ?? envValue('AGENT_TOKEN_SECRET_PREVIOUS');
+  const segments = token.split('.');
+  if (segments.length !== 3) throw new AppError(401, 'Malformed agent token', 'AGENT_TOKEN_MALFORMED');
+
+  let header: Record<string, unknown>;
+  let payload: unknown;
+  try {
+    header = JSON.parse(decodeBase64Url(segments[0]).toString('utf8')) as Record<string, unknown>;
+    payload = JSON.parse(decodeBase64Url(segments[1]).toString('utf8')) as unknown;
+  } catch {
+    throw new AppError(401, 'Malformed agent token', 'AGENT_TOKEN_MALFORMED');
+  }
+
+  if (!isRecord(header) || header.alg !== 'HS256' || header.typ !== AGENT_TOKEN_TYPE) {
+    throw new AppError(401, 'Unsupported agent token type', 'AGENT_TOKEN_TYPE_INVALID');
+  }
+
+  let signature: Buffer;
+  try {
+    signature = decodeBase64Url(segments[2]);
+  } catch {
+    throw new AppError(401, 'Malformed agent token', 'AGENT_TOKEN_MALFORMED');
+  }
+
+  const signingInput = `${segments[0]}.${segments[1]}`;
+  const secrets = [secret, previousSecret].filter((candidate): candidate is string => Boolean(candidate && candidate.length >= 32));
+  const verified = secrets.some((candidate) => constantTimeEqual(signature, createHmac('sha256', candidate).update(signingInput).digest()));
+  if (!verified) throw new AppError(401, 'Invalid agent token signature', 'AGENT_TOKEN_SIGNATURE_INVALID');
+
+  const claims = parseAgentTokenClaims(payload);
+  if (!claims) throw new AppError(401, 'Invalid agent token claims', 'AGENT_TOKEN_CLAIMS_INVALID');
+
+  const issuer = options.issuer ?? envValue('AGENT_TOKEN_ISSUER') ?? AGENT_TOKEN_ISSUER;
+  const audience = options.audience ?? envValue('AGENT_TOKEN_AUDIENCE') ?? AGENT_TOKEN_AUDIENCE;
+  if (claims.iss !== issuer || claims.aud !== audience) {
+    throw new AppError(401, 'Invalid agent token issuer or audience', 'AGENT_TOKEN_AUDIENCE_INVALID');
+  }
+
+  const now = options.now ?? Math.floor(Date.now() / 1000);
+  const skew = options.clockSkewSeconds ?? AGENT_TOKEN_CLOCK_SKEW_SECONDS;
+  if (claims.iat > now + skew) throw new AppError(401, 'Agent token is not yet valid', 'AGENT_TOKEN_NOT_YET_VALID');
+  if (claims.exp <= now - skew) throw new AppError(401, 'Agent token has expired', 'AGENT_TOKEN_EXPIRED');
+  if (claims.exp <= claims.iat || claims.exp - claims.iat > MAX_AGENT_TOKEN_TTL_SECONDS) {
+    throw new AppError(401, 'Agent token lifetime exceeds the allowed maximum', 'AGENT_TOKEN_TTL_INVALID');
+  }
+
+  return claims;
 }
 
 // ── Strategies ──────────────────────────────────────────────────────────────
@@ -209,6 +343,39 @@ export const tokenStrategy: AuthStrategy = {
   },
 };
 
+export const agentTokenStrategy: AuthStrategy = {
+  name: 'agent',
+  applies: (req) => Boolean(getHeader(req, AGENT_TOKEN_HEADER)),
+  async authenticate(req) {
+    const token = getHeader(req, AGENT_TOKEN_HEADER)!;
+    const claims = verifyAgentToken(token);
+    req.agentToken = token;
+    req.agentTokenClaims = claims;
+    return {
+      id: claims.agentId,
+      tenantId: claims.tenantId ?? 'default',
+      role: 'agent',
+      method: 'agent',
+    };
+  },
+};
+
+export function requireAgentScope(...requiredScopes: string[]): RequestHandler {
+  return (req, _res, next) => {
+    const claims = req.agentTokenClaims;
+    if (!claims || req.user?.method !== 'agent') {
+      next(new AppError(401, 'Agent token required', 'AGENT_TOKEN_REQUIRED'));
+      return;
+    }
+    const missing = requiredScopes.filter((scope) => !claims.scope.includes(scope));
+    if (missing.length > 0) {
+      next(new AppError(403, `Agent token is missing required scopes: ${missing.join(', ')}`, 'AGENT_SCOPE_FORBIDDEN'));
+      return;
+    }
+    next();
+  };
+}
+
 /** `x-api-key` header, resolved against the API key registry. */
 export const apiKeyStrategy: AuthStrategy = {
   name: 'apiKey',
@@ -227,7 +394,13 @@ export const apiKeyStrategy: AuthStrategy = {
   },
 };
 
-export const DEFAULT_AUTH_STRATEGIES: AuthStrategy[] = [sessionStrategy, hmacStrategy, tokenStrategy, apiKeyStrategy];
+export const DEFAULT_AUTH_STRATEGIES: AuthStrategy[] = [
+  sessionStrategy,
+  hmacStrategy,
+  tokenStrategy,
+  agentTokenStrategy,
+  apiKeyStrategy,
+];
 
 /**
  * Build an auth middleware from a list of strategies. Every strategy whose
@@ -249,7 +422,10 @@ export function createAuthMiddleware(
   return async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
     // Never let scopes from an earlier middleware run (or a spoofed object) leak in.
     req.workspaceScopes = undefined;
-    const applicable = strategies.filter((s) => s.applies(req));
+    const hasAgentToken = Boolean(getHeader(req, AGENT_TOKEN_HEADER));
+    const applicable = hasAgentToken
+      ? strategies.filter((s) => s.name === 'agent' && s.applies(req))
+      : strategies.filter((s) => s.name !== 'agent' && s.applies(req));
     if (applicable.length === 0) {
       next(new AppError(401, 'Authentication required', 'AUTH_REQUIRED'));
       return;
