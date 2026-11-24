@@ -16,6 +16,7 @@ import { getWebhookReplayGuard, type WebhookDelivery } from '../services/webhook
 import { storeWebhookPayload } from '../services/webhooks/audit.js';
 import { createModuleLogger } from './logger.js';
 import { AppError } from './errorHandler.js';
+import { webhookJwtAuth } from './webhookAuth.js';
 
 const webhookLog = createModuleLogger('webhooks');
 
@@ -83,8 +84,15 @@ export function createWebhookVerifier(
   // replayed delivery must not change how it is identified.
   const namespace = receipt.namespace ?? provider;
   const signatureHeaderName = receipt.signatureHeader ?? PROVIDER_SIGNATURE_HEADER[provider];
+  const webhookJwtMiddleware = webhookJwtAuth();
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
+      await new Promise<void>((resolve, reject) => {
+        webhookJwtMiddleware(req, res, (error?: unknown) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
       const rawBody = req.rawBody ?? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {}));
       const result = verify(req, rawBody);
 

@@ -12,6 +12,7 @@
 
 import type { NextFunction, Request, Response } from 'express';
 import { auditService, type AuditOutcome } from '../services/auditService.js';
+import { adminAuditService } from '../services/audit.js';
 
 export type SensitiveCategory = 'auth' | 'payments' | 'admin' | 'identity' | 'compliance';
 
@@ -103,35 +104,40 @@ export function sensitiveAuditMiddleware(options: SensitiveAuditOptions = {}) {
       const status = res.statusCode;
       const outcome: AuditOutcome = forcedOutcome ?? (status >= 400 ? 'failure' : 'success');
 
-      void auditService
-        .logAction({
-          userId: (options.userIdResolver ?? defaultUserResolver)(req),
-          action: (options.actionMapper ?? defaultActionMapper)(req, category),
-          resource: category,
-          resourceId: typeof req.params?.id === 'string' ? req.params.id : undefined,
+      const auditParams = {
+        userId: (options.userIdResolver ?? defaultUserResolver)(req),
+        action: (options.actionMapper ?? defaultActionMapper)(req, category),
+        resource: category,
+        resourceId: typeof req.params?.id === 'string' ? req.params.id : undefined,
+        outcome,
+        ipAddress: req.ip || req.socket?.remoteAddress,
+        userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
+        details: {
+          category,
           outcome,
-          ipAddress: req.ip || req.socket?.remoteAddress,
-          userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
-          details: {
-            category,
-            outcome,
-            method: req.method,
-            path: req.path,
-            statusCode: status,
-            durationMs: Date.now() - startedAt,
-          },
-          request: {
-            method: req.method,
-            path: req.path,
-            body: req.body,
-          },
-          response: {
-            status,
-          },
-        })
-        .catch((error: unknown) => {
-          console.error('[sensitive-audit] Failed to write audit entry', error);
-        });
+          method: req.method,
+          path: req.path,
+          statusCode: status,
+          durationMs: Date.now() - startedAt,
+        },
+        request: {
+          method: req.method,
+          path: req.path,
+          body: req.body,
+        },
+        response: {
+          status,
+        },
+      };
+
+      const auditPromise =
+        category === 'admin'
+          ? adminAuditService.logAdminAction(auditParams).then((result) => result.auditEntry)
+          : auditService.logAction(auditParams);
+
+      void auditPromise.catch((error: unknown) => {
+        console.error('[sensitive-audit] Failed to write audit entry', error);
+      });
     };
 
     res.on('finish', () => record());

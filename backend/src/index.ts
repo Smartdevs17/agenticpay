@@ -155,7 +155,7 @@ import { providerCredentialsRouter } from './routes/provider-credentials.js';
 import zkIdentityRouter from './routes/zk-identity.js';
 import { coldStartMonitorRouter } from './routes/cold-start-monitor.js';
 import { rateLimitAnalyticsRouter } from './routes/rate-limit-analytics.js';
-import { startScheduledRotation, stopScheduledRotation } from './config/credential-rotation.js';
+import { startProviderSecretRotation, stopProviderSecretRotation } from './services/rotation.js';
 import { subscriptionsRouter } from './routes/subscriptions.js';
 import { workspacesRouter } from './routes/workspaces.js';
 import { marketplaceEscrowRouter } from './routes/marketplace-escrow.js';
@@ -414,7 +414,7 @@ if (config.jobs.enabled) {
 }
 
 // Start automated credential rotation scheduler (Issue #395)
-startScheduledRotation();
+startProviderSecretRotation();
 console.log('[CredentialRotation] Scheduled rotation started');
 
 registerDefaultProcessors();
@@ -552,7 +552,7 @@ const shutdown = (signal: string) => {
     }
 
     try {
-      stopScheduledRotation();
+      stopProviderSecretRotation();
       console.log('Credential rotation scheduler stopped.');
     } catch (err) {
       console.error('Error stopping credential rotation:', err);
