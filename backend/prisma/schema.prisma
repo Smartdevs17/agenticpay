@@ -121,6 +121,7 @@ model Payment {
   milestone Milestone? @relation(fields: [milestoneId], references: [id])
 
   @@index([tenantId, createdAt])
+  @@index([tenantId, status, createdAt, id], map: "payments_settlement_keyset_idx")
   @@index([status], map: "payments_active_status_idx")
   @@index([txHash])
   @@index([projectId])
