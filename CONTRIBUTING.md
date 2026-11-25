@@ -101,6 +101,22 @@ docs: add contributing guide
 Make each commit one logical change. To bypass the hook for a work-in-progress
 commit use `git commit --no-verify`; the PR title check still applies.
 
+### No `console.log` in app code (pre-push)
+
+`npm install` also installs a husky `pre-push` hook that runs
+[`scripts/no-console.sh`](./scripts/no-console.sh) on the commits you are
+pushing. It fails the push if they **add** a `console.log(` call to app code:
+`.js/.jsx/.ts/.tsx/.mjs/.cjs` files under `frontend/`, `backend/` and
+`workers/`. Tests, `scripts/`, `migrations/`, seeds, benchmarks, `e2e/`,
+`docs/` and `*.config.*` files are not checked, and neither are calls that
+were already there. The output lists each offending `file:line`.
+
+- Use the app logger, or `console.warn` / `console.error`, instead.
+- For a line that really should log, add `// eslint-disable-line no-console`.
+- Run the check by hand with `scripts/no-console.sh [<base> [<head>]]`
+  (default: the commits on `HEAD` that aren't on any remote yet).
+- Skip it for one push with `git push --no-verify`.
+
 ### Changelog and releases
 
 Every push to `main` runs [semantic-release](https://semantic-release.gitbook.io/)
