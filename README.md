@@ -542,6 +542,7 @@ For issues, questions, or suggestions:
 - **Discussions**: GitHub Discussions
 - **Documentation**: Start with the [documentation index](docs/README.md)
 - **Mobile image assets**: See [mobile/README.md](mobile/README.md) for AVIF variants and the responsive loader
+- **Developer portal charts**: See [developer-portal/README.md](developer-portal/README.md) for Suspense boundaries and lazy chart loading
 
 ---
 
