@@ -66,6 +66,12 @@
 | CSP_REPORT_ONLY         | `true` sends the dashboard CSP as `Content-Security-Policy-Report-Only` (observe violations without blocking). See [frontend/README.md](./frontend/README.md#content-security-policy) | false (enforced) |
 | CSP_REPORT_URI          | Where browsers send CSP violation reports. Defaults to Sentry's security endpoint derived from `NEXT_PUBLIC_SENTRY_DSN` | - |
 
+## Cloudflare Worker
+
+| Variable       | Description                                                                                              | Default | Required |
+| -------------- | -------------------------------------------------------------------------------------------------------- | ------- | -------- |
+| SOROBAN_RPC_URL | Soroban RPC endpoint. The 5-minute Worker cron sends `getHealth` to pre-warm the runtime-managed connection. | -       | No       |
+
 ## Environment Files
 
 - `.env.example`
