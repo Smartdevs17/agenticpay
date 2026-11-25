@@ -26,6 +26,7 @@ import {
   withQueryTimer,
 } from '../config/database.js';
 import metrics from '../observability/datadog.js';
+import { queryBudget } from '../lib/queryBudget.js';
 
 // ── Configuration ───────────────────────────────────────────────────────────-
 
@@ -173,6 +174,8 @@ export interface QueryEvent {
   params: string;
   duration: number;
   target: string;
+  /** Optional tenant context supplied by the request boundary. */
+  tenantId?: string;
 }
 
 export function createPrismaQueryListener() {
@@ -183,6 +186,15 @@ export function createPrismaQueryListener() {
     const tags = { target: event.target };
     metrics.distribution('db.query.duration', event.duration, tags);
     metrics.increment('db.queries', 1, tags);
+
+    if (event.tenantId) {
+      const budget = queryBudget.observe(event.tenantId, event.duration);
+      metrics.increment('db.queries.budgeted', 1, {
+        target: event.target,
+        classification: budget.classification,
+        within_budget: String(budget.withinBudget),
+      });
+    }
 
     if (event.duration >= config.criticalThresholdMs) {
       metrics.criticalQueries++;
