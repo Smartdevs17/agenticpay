@@ -154,13 +154,18 @@ export class StreamingExportService extends BaseService {
           const rowsToProcess = Math.min(page.data.length, limit - totalRows);
           const chunk = page.data.slice(0, rowsToProcess);
 
-          let output = '';
           for (const item of chunk) {
+            let output: string;
             if (format === 'jsonl') {
-              output += JSON.stringify(item) + '\n';
+              output = JSON.stringify(item);
             } else {
-              output += rowSerializer(item) + '\n';
+              output = rowSerializer(item);
             }
+            // Push each serialized row independently instead of building one
+            // potentially large string for the whole page. This keeps memory
+            // bounded by the configured page size and lets consumers apply
+            // backpressure while a large export is in progress.
+            this.push(`${output}\n`);
           }
 
           totalRows += chunk.length;
@@ -169,7 +174,6 @@ export class StreamingExportService extends BaseService {
             self.activeJobs.set(exportId, job);
           }
 
-          this.push(output);
           cursor = page.nextCursor;
 
           if (!page.nextCursor || totalRows >= limit) {

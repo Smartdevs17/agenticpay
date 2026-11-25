@@ -36,6 +36,7 @@ import {
 import { createEdgeErrorResponse } from './errors';
 import { backendFetch, type ServiceAuthEnv } from './serviceAuth';
 import { prewarmSorobanRpcConnection } from './soroban/pool';
+import { WORKER_JOB_MANIFEST } from './manifest';
 
 // ── Env binding types ─────────────────────────────────────────────────────────
 
@@ -209,7 +210,15 @@ async function handleSorobanRpcWarmup(env: Env): Promise<void> {
 }
 
 async function handleScheduled(env: Env): Promise<void> {
-  await Promise.all([handleBackendWarmup(env), handleSorobanRpcWarmup(env)]);
+  const handlers = {
+    'backend-warmup': handleBackendWarmup,
+    'soroban-rpc-warmup': handleSorobanRpcWarmup,
+  } as const;
+  await Promise.all(
+    WORKER_JOB_MANIFEST
+      .filter((job) => job.enabled)
+      .map((job) => handlers[job.id](env)),
+  );
 }
 
 // ── Main request handler ──────────────────────────────────────────────────────
