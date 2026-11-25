@@ -22,10 +22,13 @@ NODE_MIN_MAJOR := 20
 
 BACKEND   := backend
 FRONTEND  := frontend
+PACKAGES  := packages
 CONTRACTS := contracts
 EVM       := contracts/evm
 RELAYER   := contracts/bridges/relayer
 SANDBOX_COMPOSE := -f docker-compose.yml -f docker-compose.sandbox.yml
+
+pkg_filter = $(if $(findstring @,$(1)),$(1),$(if $(findstring packages/,$(1)),./$(subst ./,,$(1)),./packages/$(1)))
 
 ifneq ($(VERBOSE),1)
 .SILENT:
@@ -96,6 +99,11 @@ dev-frontend: ## Run the Next.js app in watch mode (http://localhost:3000)
 dev-contracts: ## Watch, recompile and redeploy contracts (SCOPE=evm|soroban to narrow)
 	$(NPM) run dev:contracts$(if $(SCOPE),:$(SCOPE))
 
+.PHONY: dev-packages
+dev-packages: ## Run packages in watch mode (PKG=name to narrow, e.g. PKG=sdk)
+	$(call step,Starting package dev$(if $(PKG),: $(PKG), across packages))
+	$(NPM) run dev:packages$(if $(PKG), -- --filter="$(call pkg_filter,$(PKG))")
+
 .PHONY: log-viewer
 log-viewer: ## Tail and filter structured backend logs
 	$(NPM) run log-viewer
@@ -120,6 +128,11 @@ build-contracts: ## Build Soroban contracts to wasm and compile EVM contracts
 	$(call require,$(CARGO),install Rust via https://rustup.rs)
 	$(call step,Building contracts)
 	$(call timed,build-contracts,(cd $(CONTRACTS) && $(CARGO) build --target wasm32-unknown-unknown --release) && $(NPM) --prefix $(EVM) run compile)
+
+.PHONY: build-packages
+build-packages: ## Build packages (PKG=name to narrow, e.g. PKG=sdk)
+	$(call step,Building packages$(if $(PKG),: $(PKG), across packages))
+	$(call timed,build-packages,$(NPM) run build:packages$(if $(PKG), -- --filter="$(call pkg_filter,$(PKG))"))
 
 .PHONY: generate-api-hooks
 generate-api-hooks: ## Regenerate typed API hooks from the OpenAPI spec (WATCH=1 to watch)
@@ -146,6 +159,10 @@ lint-frontend: ## Lint the frontend
 .PHONY: lint-contracts
 lint-contracts: ## Type-check EVM contract scripts and tests
 	$(NPM) --prefix $(EVM) run lint
+
+.PHONY: lint-packages
+lint-packages: ## Lint packages (PKG=name to narrow, e.g. PKG=types)
+	$(call timed,lint-packages,$(NPM) run lint:packages$(if $(PKG), -- --filter="$(call pkg_filter,$(PKG))"))
 
 .PHONY: analyze-bundle
 analyze-bundle: ## Report frontend bundle composition
@@ -176,6 +193,11 @@ test-e2e: ## Run frontend Playwright end-to-end tests
 
 .PHONY: test-contracts
 test-contracts: test-contracts-soroban test-contracts-evm test-contracts-relayer ## Run every contract test suite
+
+.PHONY: test-packages
+test-packages: ## Run package unit tests (PKG=name to narrow, e.g. PKG=sdk)
+	$(call step,Running package tests$(if $(PKG),: $(PKG), across packages))
+	$(call timed,test-packages,$(NPM) run test:packages$(if $(PKG), -- --filter="$(call pkg_filter,$(PKG))"))
 
 .PHONY: test-contracts-soroban
 test-contracts-soroban: ## Run Soroban contract tests (cargo)
