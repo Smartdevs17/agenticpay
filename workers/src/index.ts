@@ -35,6 +35,7 @@ import {
 } from './utilities';
 import { createEdgeErrorResponse } from './errors';
 import { backendFetch, type ServiceAuthEnv } from './serviceAuth';
+import { prewarmSorobanRpcConnection } from './soroban/pool';
 
 // ── Env binding types ─────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ export interface Env extends ServiceAuthEnv {
   EDGE_CACHE: KVNamespace;
   JWT_SECRET: string;
   API_BASE_URL: string;
+  SOROBAN_RPC_URL?: string;
 }
 
 // Scopes the backend must allow for this worker's key (#1474).
@@ -174,7 +176,7 @@ function classifyRoute(path: string): string {
  * Called by the Cloudflare cron trigger (wrangler.toml: crons = ["*/5 * * * *"]).
  * Pings the backend warm-up endpoint to prevent cold starts on critical paths.
  */
-async function handleScheduled(env: Env): Promise<void> {
+async function handleBackendWarmup(env: Env): Promise<void> {
   const warmupUrl = `${env.API_BASE_URL}/api/v1/cold-start/warmup`;
 
   try {
@@ -192,6 +194,22 @@ async function handleScheduled(env: Env): Promise<void> {
   } catch (err) {
     console.error('[warmup] Backend warm-up ping failed:', err);
   }
+}
+
+async function handleSorobanRpcWarmup(env: Env): Promise<void> {
+  const rpcUrl = env.SOROBAN_RPC_URL?.trim();
+  if (!rpcUrl) return;
+
+  try {
+    await prewarmSorobanRpcConnection(rpcUrl);
+    console.info('[soroban-warmup] RPC connection pre-warmed');
+  } catch (err) {
+    console.warn('[soroban-warmup] RPC pre-warm failed:', err);
+  }
+}
+
+async function handleScheduled(env: Env): Promise<void> {
+  await Promise.all([handleBackendWarmup(env), handleSorobanRpcWarmup(env)]);
 }
 
 // ── Main request handler ──────────────────────────────────────────────────────
