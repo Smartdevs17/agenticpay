@@ -1,0 +1,21 @@
+# dependencies
+/node_modules
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# runtime state (step-up credential + challenge store)
+/.data/
+
+# misc
+.DS_Store
+*.tsbuildinfo
+.env*
