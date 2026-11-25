@@ -25,7 +25,7 @@ const documented = new Map(
   [...makefile.matchAll(/^([a-zA-Z0-9_-]+):[^\n]*## (.+)$/gm)].map((m) => [m[1], m[2]]),
 );
 // Optional flags change which npm script a target resolves to; dry-run each variant.
-const VARIANTS = [[], ['SCOPE=evm'], ['SCOPE=soroban'], ['WATCH=1'], ['SMOKE=1'], ['CONFIRM=1']];
+const VARIANTS = [[], ['SCOPE=evm'], ['SCOPE=soroban'], ['WATCH=1'], ['SMOKE=1'], ['CONFIRM=1'], ['PKG=sdk']];
 // `npm [--prefix dir] run <script>`, plus the `npm test` / `npm ci` shorthands.
 const NPM_SCRIPT = /\bnpm(?: --prefix (\S+))? (?:run ([^\s;)]+)|(test|ci)\b)/g;
 
@@ -96,6 +96,30 @@ test('doctor passes on a working toolchain', () => {
   const result = make('doctor');
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /✓ node v\d+/);
+});
+
+test('package targets support running across all packages or a single PKG', () => {
+  for (const action of ['dev', 'build', 'lint', 'test']) {
+    const target = `${action}-packages`;
+    assert.ok(phonyTargets.includes(target), `${target} is declared .PHONY`);
+    assert.ok(documented.has(target), `${target} is documented in help`);
+
+    const all = make('-n', target);
+    assert.equal(all.status, 0, all.stderr);
+    assert.match(all.stdout, new RegExp(`npm run ${action}:packages`));
+
+    const scoped = make('-n', target, 'PKG=sdk');
+    assert.equal(scoped.status, 0, scoped.stderr);
+    assert.match(scoped.stdout, new RegExp(`npm run ${action}:packages -- --filter="\\./packages/sdk"`));
+
+    const scopedFull = make('-n', target, 'PKG=@agenticpay/sdk');
+    assert.equal(scopedFull.status, 0, scopedFull.stderr);
+    assert.match(scopedFull.stdout, new RegExp(`npm run ${action}:packages -- --filter="@agenticpay/sdk"`));
+
+    const scopedPath = make('-n', target, 'PKG=packages/sdk');
+    assert.equal(scopedPath.status, 0, scopedPath.stderr);
+    assert.match(scopedPath.stdout, new RegExp(`npm run ${action}:packages -- --filter="\\./packages/sdk"`));
+  }
 });
 
 test('db-reset refuses to run without CONFIRM=1', () => {

@@ -552,10 +552,11 @@ The root [`Makefile`](Makefile) maps every common dev task to a `make` target. R
 ```bash
 make doctor              # check Node 20+, npm, cargo, forge, docker
 make setup               # npm workspaces + contract toolchains
-make dev                 # backend + frontend in watch mode (or dev-backend / dev-frontend)
-make test                # every workspace suite; test-backend / test-frontend / test-contracts / test-e2e
+make dev                 # backend + frontend in watch mode (or dev-backend / dev-frontend / dev-packages)
+make test                # every workspace suite; test-backend / test-frontend / test-contracts / test-packages / test-e2e
 make test-backend FILE=src/services/__tests__/settlementProof.test.ts   # a single file
-make lint build          # turbo-cached lint and build
+make test-packages PKG=sdk                                            # test a single package (PKG=name)
+make lint build          # turbo-cached lint and build (or lint-packages / build-packages)
 make db-migrate db-seed  # database lifecycle (db-reset needs CONFIRM=1)
 make sandbox-up          # local sandbox stack (sandbox-down / sandbox-reset / sandbox-logs)
 make clean               # remove build outputs and turbo caches
