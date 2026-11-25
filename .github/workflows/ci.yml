@@ -41,6 +41,7 @@ jobs:
     outputs:
       backend:   ${{ steps.filter.outputs.backend }}
       frontend:  ${{ steps.filter.outputs.frontend }}
+      developer-portal: ${{ steps.filter.outputs['developer-portal'] }}
       contracts: ${{ steps.filter.outputs.contracts }}
       tooling:   ${{ steps.filter.outputs.tooling }}
     steps:
@@ -53,6 +54,8 @@ jobs:
               - 'backend/**'
             frontend:
               - 'frontend/**'
+            developer-portal:
+              - 'developer-portal/**'
             contracts:
               - 'contracts/**'
             tooling:
@@ -359,3 +362,21 @@ jobs:
             exit 1
           fi
           echo "CODEOWNERS: no errors reported by GitHub."
+
+  # ── Developer portal chart boundaries (#1641) ──────────────────────────────
+  developer-portal:
+    needs: changes
+    if: ${{ needs.changes.outputs['developer-portal'] == 'true' }}
+    name: Developer portal charts (Node.js 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Test lazy chart boundaries
+        run: node --experimental-strip-types --test developer-portal/app/charts/lazy-chart-registry.test.ts
