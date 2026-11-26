@@ -1,14 +1,9 @@
-import {
-  STEP_UP_COOKIE,
-  STEP_UP_COOKIE_PATH,
-  jsonResponse,
-  requestCorrelation,
-  requireOperator,
-  serializeCookie,
-} from '@/app/admin/guard';
+import { jsonResponse } from '@/app/admin/guard';
 import { getPortalRuntime } from '@/app/admin/runtime';
-import { ceremonyErrorResponse, readJsonObject } from '@/app/admin/api/helpers';
-import type { AuthenticationResponseJSON } from '@simplewebauthn/server';
+import { contextFromRequest } from '@/app/actions/context';
+import { completeStepUp } from '@/app/actions/core';
+import { actionResponse, createStepUpCookieSink } from '@/app/actions/http';
+import { readJsonObject } from '@/app/admin/api/helpers';
 
 export const runtime = 'nodejs';
 
@@ -17,26 +12,13 @@ export const runtime = 'nodejs';
  * short-lived step-up session cookie that unlocks the admin area.
  */
 export async function POST(request: Request): Promise<Response> {
-  const deps = getPortalRuntime();
-  const access = await requireOperator(request, deps);
-  if (!access.ok) return access.response;
-
   const body = await readJsonObject(request);
   if (!body) return jsonResponse(400, { error: 'INVALID_BODY', message: 'Expected a JSON ceremony response' });
 
-  try {
-    const session = await deps.service.finishAuthentication(
-      access.operatorId,
-      body as unknown as AuthenticationResponseJSON,
-      requestCorrelation(request.headers),
-    );
-    const cookie = serializeCookie(STEP_UP_COOKIE, session.sessionId, {
-      maxAgeSeconds: Math.max(0, Math.ceil((session.expiresAt - Date.now()) / 1000)),
-      path: STEP_UP_COOKIE_PATH,
-      sameSite: 'Strict',
-    });
-    return jsonResponse(200, { ok: true, expiresAt: session.expiresAt }, [cookie]);
-  } catch (error) {
-    return ceremonyErrorResponse(error);
-  }
+  // The cookie sink is only called after the shared core verifies the assertion.
+  const { setCookie, cookies } = createStepUpCookieSink();
+  const result = await completeStepUp(body, contextFromRequest(request), getPortalRuntime(), setCookie);
+  const response = actionResponse(result);
+  for (const cookie of cookies()) response.headers.append('set-cookie', cookie);
+  return response;
 }
