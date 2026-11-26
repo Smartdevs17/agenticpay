@@ -85,7 +85,7 @@ describe('readCookie', () => {
 
 describe('serializeCookie', () => {
   afterEach(() => {
-    delete process.env.NODE_ENV;
+    Reflect.deleteProperty(process.env, 'NODE_ENV');
   });
 
   it('sets the path, max-age, same-site and http-only attributes', () => {
@@ -101,7 +101,7 @@ describe('serializeCookie', () => {
 
   it('adds Secure only in production', () => {
     expect(serializeCookie('c', 'v', { maxAgeSeconds: 1, path: '/', sameSite: 'Lax' })).not.toContain('Secure');
-    process.env.NODE_ENV = 'production';
+    Reflect.set(process.env, 'NODE_ENV', 'production');
     expect(serializeCookie('c', 'v', { maxAgeSeconds: 1, path: '/', sameSite: 'Lax' })).toContain('Secure');
   });
 });
@@ -167,7 +167,7 @@ describe('evaluateAdminAccess', () => {
     const operator = await deps.operatorSessions.issue('op-1');
     const stepUp = await deps.stepUpSessions.issue({ operatorId: 'op-1', credentialId: 'cred-1' });
     // Outlive the 5-minute step-up, stay inside the 12-hour operator session.
-    (deps.clock as { advance(ms: number): void }).advance(6 * 60 * 1000);
+    (deps.clock as unknown as { advance(ms: number): void }).advance(6 * 60 * 1000);
 
     expect(await evaluateAdminAccess({ operatorToken: operator.sessionId, stepUpToken: stepUp.sessionId }, deps)).toEqual({
       kind: 'step-up-required',

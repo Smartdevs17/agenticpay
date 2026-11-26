@@ -2,6 +2,12 @@
 
 import { useCallback, useState } from 'react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
+import {
+  finishEnrollAction,
+  finishStepUpAction,
+  startEnrollAction,
+  startStepUpAction,
+} from '@/app/actions';
 
 /**
  * Browser side of the two WebAuthn ceremonies the admin gate relies on.
@@ -12,7 +18,8 @@ import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
  *   has been presented).
  *
  * All trust decisions live on the server; this component only relays the
- * options to the authenticator and posts the response back.
+ * options to the authenticator and calls the typed server action with the
+ * response.
  */
 export interface PasskeyCeremonyProps {
   mode: 'step-up' | 'enroll';
@@ -24,39 +31,6 @@ type CeremonyState =
   | { status: 'error'; message: string }
   | { status: 'success'; message: string };
 
-interface ApiSuccess {
-  ok: true;
-  data: unknown;
-}
-interface ApiFailure {
-  ok: false;
-  message: string;
-}
-
-async function callApi(url: string, body?: unknown): Promise<ApiSuccess | ApiFailure> {
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      ...(body === undefined
-        ? {}
-        : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-    });
-  } catch {
-    return { ok: false, message: 'The portal could not be reached. Check your connection and retry.' };
-  }
-
-  const payload: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    const message =
-      typeof payload === 'object' && payload !== null && typeof (payload as { message?: unknown }).message === 'string'
-        ? (payload as { message: string }).message
-        : `The request failed (HTTP ${response.status}).`;
-    return { ok: false, message };
-  }
-  return { ok: true, data: payload };
-}
-
 function describeError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return 'The authenticator did not complete the ceremony.';
@@ -67,7 +41,7 @@ export function PasskeyCeremony({ mode }: PasskeyCeremonyProps) {
 
   const runStepUp = useCallback(async () => {
     setState({ status: 'working', message: 'Waiting for your passkey…' });
-    const options = await callApi('/admin/api/step-up/options');
+    const options = await startStepUpAction();
     if (!options.ok) {
       setState({ status: 'error', message: options.message });
       return;
@@ -76,7 +50,7 @@ export function PasskeyCeremony({ mode }: PasskeyCeremonyProps) {
       const assertion = await startAuthentication({
         optionsJSON: options.data as Parameters<typeof startAuthentication>[0]['optionsJSON'],
       });
-      const verified = await callApi('/admin/api/step-up/verify', assertion);
+      const verified = await finishStepUpAction(assertion);
       if (!verified.ok) {
         setState({ status: 'error', message: verified.message });
         return;
@@ -91,7 +65,7 @@ export function PasskeyCeremony({ mode }: PasskeyCeremonyProps) {
 
   const runEnroll = useCallback(async () => {
     setState({ status: 'working', message: 'Creating your passkey…' });
-    const options = await callApi('/admin/api/enroll/options');
+    const options = await startEnrollAction();
     if (!options.ok) {
       setState({ status: 'error', message: options.message });
       return;
@@ -101,15 +75,12 @@ export function PasskeyCeremony({ mode }: PasskeyCeremonyProps) {
       const attestation = await startRegistration({
         optionsJSON: options.data as Parameters<typeof startRegistration>[0]['optionsJSON'],
       });
-      const saved = await callApi('/admin/api/enroll/verify', attestation);
+      const saved = await finishEnrollAction(attestation);
       if (!saved.ok) {
         setState({ status: 'error', message: saved.message });
         return;
       }
-      credentialId =
-        typeof saved.data === 'object' && saved.data !== null
-          ? (saved.data as { credentialId?: string }).credentialId
-          : undefined;
+      credentialId = saved.data.credentialId;
     } catch (error) {
       setState({ status: 'error', message: describeError(error) });
       return;

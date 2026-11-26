@@ -1,6 +1,7 @@
-import { jsonResponse, requestCorrelation, requireOperator } from '@/app/admin/guard';
 import { getPortalRuntime } from '@/app/admin/runtime';
-import { ceremonyErrorResponse } from '@/app/admin/api/helpers';
+import { contextFromRequest } from '@/app/actions/context';
+import { beginStepUp } from '@/app/actions/core';
+import { actionResponse } from '@/app/actions/http';
 
 export const runtime = 'nodejs';
 
@@ -10,14 +11,6 @@ export const runtime = 'nodejs';
  * least one enrolled passkey.
  */
 export async function POST(request: Request): Promise<Response> {
-  const deps = getPortalRuntime();
-  const access = await requireOperator(request, deps);
-  if (!access.ok) return access.response;
-
-  try {
-    const options = await deps.service.beginAuthentication(access.operatorId, requestCorrelation(request.headers));
-    return jsonResponse(200, options);
-  } catch (error) {
-    return ceremonyErrorResponse(error);
-  }
+  const result = await beginStepUp(contextFromRequest(request), getPortalRuntime());
+  return actionResponse(result);
 }
