@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "initialBudgetBytes": 128000,
+  "charts": [
+    {
+      "id": "api-volume",
+      "label": "API volume",
+      "priority": "critical",
+      "estimatedBytes": 62000
+    },
+    {
+      "id": "error-rate",
+      "label": "Error rate",
+      "priority": "critical",
+      "estimatedBytes": 58000
+    },
+    {
+      "id": "latency-breakdown",
+      "label": "Latency breakdown",
+      "priority": "deferrable",
+      "estimatedBytes": 94000
+    },
+    {
+      "id": "network-mix",
+      "label": "Network mix",
+      "priority": "deferrable",
+      "estimatedBytes": 76000
+    }
+  ]
+}
